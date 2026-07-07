@@ -51,7 +51,7 @@ const TOOLS: ToolDef[] = [
   {
     name: "run_task",
     description:
-      "Ejecuta una tarea real en la computadora de Rulo mediante el agente Claude local (editar archivos, actualizar notas del vault, correr comandos, programar). Úsala para CUALQUIER acción que toque la máquina o el vault. Devuelve un task_id inmediatamente; la tarea corre en segundo plano. Confirma al usuario que la tarea arrancó y usa check_task para reportar el resultado después.",
+      "Ejecuta una tarea GENERAL en la computadora de Rulo mediante el agente Claude local: notas del vault de Obsidian, memoria, recados, programar algo, o cualquier acción que NO sea programar dentro de un repo de código concreto (para eso usa work_on_project). Devuelve un task_id inmediato; corre en segundo plano. Confirma en una frase que arrancó y usa check_task para reportar el resultado después.",
     parameters: {
       type: "object",
       properties: {
@@ -66,13 +66,68 @@ const TOOLS: ToolDef[] = [
     response_timeout_secs: 10,
   },
   {
-    name: "check_task",
+    name: "focus_project",
     description:
-      "Consulta el estado/resultado de una tarea lanzada con run_task. Úsala cuando el usuario pregunte si ya terminó, o tras unos segundos para reportar el resultado.",
+      "Enfoca un proyecto en el dashboard de Hermes: la interfaz cambia sola para centrarse en él (contexto, versión del repo, consola centrada en ese proyecto). Úsala apenas Rulo mencione que quiere ver o trabajar en un proyecto, ANTES de work_on_project. Con project vacío, quita el foco y vuelve a la vista general.",
     parameters: {
       type: "object",
       properties: {
-        task_id: { type: "string", description: "El task_id devuelto por run_task" },
+        project: {
+          type: "string",
+          description: "Slug del proyecto: ternium, careways, teker, ikigai, zylen. Vacío = quitar foco.",
+        },
+      },
+      required: [],
+    },
+    expects_response: true,
+    response_timeout_secs: 8,
+  },
+  {
+    name: "show_panel",
+    description:
+      "Cambia el panel central del dashboard que ve Rulo. 'consola' = chat de texto; 'actividad' = feed en vivo de lo que hace el agente; 'claude' = terminal de Claude Code trabajando. Úsala cuando pida ver el feed, la consola o cómo va el código.",
+    parameters: {
+      type: "object",
+      properties: {
+        panel: {
+          type: "string",
+          description: "consola | actividad | claude",
+        },
+      },
+      required: ["panel"],
+    },
+    expects_response: true,
+    response_timeout_secs: 8,
+  },
+  {
+    name: "work_on_project",
+    description:
+      "Lanza a Claude Code a TRABAJAR EN EL REPO de código de un proyecto (arreglar un bug, agregar una feature, refactorizar, correr algo en ese repo). Abre el stream en vivo en el dashboard para que Rulo VEA a Claude trabajando en tiempo real. Úsala en vez de run_task cuando la tarea es programar dentro de un repo concreto. Devuelve un run_id; usa check_task con ese id para reportar cuando termine.",
+    parameters: {
+      type: "object",
+      properties: {
+        project: {
+          type: "string",
+          description: "Slug del proyecto cuyo repo se va a tocar: ternium, careways, teker, ikigai, zylen.",
+        },
+        prompt: {
+          type: "string",
+          description: "Instrucción completa y autocontenida para Claude Code, en español (qué cambiar en el repo).",
+        },
+      },
+      required: ["project", "prompt"],
+    },
+    expects_response: true,
+    response_timeout_secs: 12,
+  },
+  {
+    name: "check_task",
+    description:
+      "Consulta el estado/resultado de una tarea (run_task) o de un run de código (work_on_project). Úsala cuando el usuario pregunte si ya terminó, o tras unos segundos para reportar el resultado. Acepta tanto el task_id de run_task como el run_id de work_on_project.",
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "El task_id de run_task o el run_id de work_on_project" },
       },
       required: ["task_id"],
     },
@@ -136,16 +191,23 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
-const SYSTEM_PROMPT = `Eres Hermes, el sistema operativo de IA personal de Rulo (RuloCode), ingeniero de software senior especializado en frontend (Next.js/React/TypeScript) e IA.
+const SYSTEM_PROMPT = `Eres Hermes, el sistema operativo de IA personal de Rulo (RuloCode), ingeniero de software senior especializado en frontend (Next.js/React/TypeScript) e IA. Controlas su dashboard por voz en tiempo real, estilo Jarvis: mientras conversas, la interfaz reacciona a tus acciones.
 
 Personalidad: directo, cálido, eficiente. Hablas SIEMPRE en español, con frases cortas aptas para voz. Nada de listas largas ni markdown: esto es una conversación hablada.
 
 Reglas de oro:
 1. NUNCA inventes el estado de proyectos ni memorias: usa get_project_status, search_memory o get_daily_brief.
-2. TODO lo que implique tocar su máquina, su vault o ejecutar algo → run_task. Confirma en una frase que la tarea arrancó ("Listo, lo estoy trabajando") y sigue conversando. Cuando pregunte si terminó, usa check_task.
-3. Si Rulo menciona una preferencia o algo que recordar, usa save_memory sin pedir permiso.
-4. Al primer saludo del día, ofrece el Pulse Check (get_daily_brief).
-5. Respuestas de máximo 2-3 frases salvo que pida detalle.`;
+2. Manejas la interfaz mientras hablas:
+   - Cuando Rulo mencione un proyecto o pida verlo → focus_project (la pantalla se centra en él). Hazlo aunque también vayas a hacer otra cosa.
+   - Si pide ver el feed, la consola o cómo va el código → show_panel.
+3. Elige bien QUÉ ejecutor usar:
+   - Programar DENTRO del repo de un proyecto (bug, feature, refactor, correr algo en ese repo) → work_on_project (project + prompt). Abre el stream en vivo; Rulo ve a Claude trabajar. Confirma en una frase ("Va, Claude ya está en ello en careways") y sigue.
+   - Cualquier otra acción de máquina/vault/memoria/recados → run_task.
+   - Ambas devuelven un id y corren en segundo plano; cuando pregunte si terminó, usa check_task con ese id. NO esperes en silencio: confirma que arrancó y sigue conversando.
+4. Si Rulo menciona una preferencia o algo que recordar, usa save_memory sin pedir permiso.
+5. Al primer saludo del día, ofrece el Pulse Check (get_daily_brief).
+6. A veces recibirás avisos de que una tarea o run terminó (contexto del sistema, no dicho por Rulo). Si viene al caso, coméntalo en una frase natural ("Ya terminó lo de careways, quedó listo"); si Rulo está en medio de otra cosa, no interrumpas.
+7. Respuestas de máximo 2-3 frases salvo que pida detalle.`;
 
 const FIRST_MESSAGE = "Hermes en línea. ¿En qué nos enfocamos hoy?";
 
@@ -185,6 +247,16 @@ async function upsertAgent(toolIds: string[]): Promise<string> {
     tts: {
       voice_id: VOICE_ID,
       model_id: "eleven_flash_v2_5",
+    },
+    // Llamada tipo asistente always-on: 1 hora de tope duro (el default es 600s),
+    // y aviso de "un momento…" cuando una tool tarda (run_task/work_on_project
+    // llaman al agente local en :8642, que puede pensar varios segundos).
+    conversation: {
+      max_duration_seconds: 3600,
+    },
+    turn: {
+      turn_timeout: 12,
+      mode: "turn",
     },
   };
 

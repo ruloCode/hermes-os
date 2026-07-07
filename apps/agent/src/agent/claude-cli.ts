@@ -20,6 +20,7 @@ import type { ClaudeRunSummary } from "@hermes/shared";
 import { env } from "../env.js";
 import { addRunCost } from "../usage.js";
 import { notifyMac } from "../notify.js";
+import { emit } from "../events.js";
 import { startSession, finishSession } from "./claude-sessions.js";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
@@ -358,6 +359,24 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
           ? `✅ terminó${meta ? ` (${meta})` : ""}: ${run.title.slice(0, 80)}`
           : `❌ falló (código ${code ?? "?"}): ${run.title.slice(0, 80)}`,
     );
+    // Cierre en el bus de actividad → Toasts del dashboard y anuncio por voz
+    // (VoiceEventsBridge). Antes solo las tareas del SDK emitían task_done, así
+    // que un run de Claude Code terminaba en silencio para la UI y la voz.
+    const preview =
+      [...run.lines]
+        .reverse()
+        .find((l) => l.kind === "text" && !l.text.startsWith("❯ "))
+        ?.text.slice(0, 200) ?? run.title.slice(0, 120);
+    emit({
+      kind: run.status === "done" ? "task_done" : "error",
+      taskId: run.id,
+      toolName: `claude(${run.projectSlug})`,
+      detail: run.cancelled
+        ? `cancelado: ${run.title.slice(0, 100)}`
+        : run.status === "done"
+          ? `${meta ? `${meta} · ` : ""}${preview}`
+          : `falló (código ${code ?? "?"}): ${run.title.slice(0, 100)}`,
+    });
     // Persiste el transcript en la sesión (para reabrirla/listarla luego).
     void finishSession({
       id: run.sessionId,

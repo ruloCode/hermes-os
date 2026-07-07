@@ -10,7 +10,7 @@
     "usage:token": "node scripts/hermes-usage-token.mjs"
   },
   "dependencies": {
-    "@elevenlabs/react": "latest",
+    "@elevenlabs/react": "1.9.0",
     "@hermes/shared": "workspace:*",
     "next": "^15.3.0",
     "react": "^19.0.0",

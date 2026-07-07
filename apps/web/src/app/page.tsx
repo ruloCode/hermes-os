@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConversationProvider } from "@elevenlabs/react";
-import { hermesGet, hermesPost, claudeStartRun } from "@/lib/hermes";
+import { claudeStartRun } from "@/lib/hermes";
 import { useHermesData } from "@/hooks/useHermesData";
 import { useAgentEvents } from "@/hooks/useAgentEvents";
 import { Panel } from "@/components/Panel";
@@ -22,6 +22,11 @@ import { ProjectContextPanel } from "@/components/ProjectContextPanel";
 import { ProjectVersion } from "@/components/ProjectVersion";
 import { Toasts } from "@/components/Toasts";
 import { MachineSelector } from "@/components/MachineSelector";
+import { VoiceBusyProvider } from "@/components/VoiceBusyContext";
+import { VoiceClientTools } from "@/components/VoiceClientTools";
+import { VoiceEventsBridge } from "@/components/VoiceEventsBridge";
+import { VoiceOrb } from "@/components/VoiceOrb";
+import { VoicePanel } from "@/components/VoicePanel";
 
 export default function Home() {
   const { stats, projects, memories, online } = useHermesData();
@@ -101,65 +106,42 @@ export default function Home() {
     setTab("claude");
   };
 
-  // Capacidad ejecutable del deck: lanza un run de Claude Code en el repo de un
-  // proyecto (p.ej. una edición de vídeo Divisual) y abre su stream.
-  const launchClaudeRun = async ({ project, prompt }: { project: string; prompt: string }) => {
+  // Capacidad ejecutable del deck y de la VOZ: lanza un run de Claude Code en el
+  // repo de un proyecto y abre su stream en el terminal central. Devuelve el
+  // runId para que la voz lo reporte y lo consulte luego con check_task.
+  const launchClaudeRun = async ({
+    project,
+    prompt,
+  }: {
+    project: string;
+    prompt: string;
+  }): Promise<{ runId: string } | null> => {
     try {
       const { runId, sessionId } = await claudeStartRun(prompt, claudeConfig, project, null);
       openRun({ slug: project, runId, sessionId });
+      return { runId };
     } catch {
       /* agente offline: el feed/consola lo reflejan */
+      return null;
     }
   };
 
   const working = stats?.presence?.status === "working" || stats?.presence?.status === "thinking";
 
-  /**
-   * CLIENT TOOLS de la voz: ElevenLabs los invoca EN EL BROWSER, así que
-   * pueden llamar a localhost:8642 directo — sin túnel. El trabajo pesado
-   * corre async en el agente (run_task devuelve task_id al instante).
-   */
-  const clientTools = useMemo(
-    () => ({
-      run_task: async ({ prompt }: { prompt: string }) => {
-        const res = await hermesPost<{ task_id: string }>("/tasks", { prompt });
-        return `Tarea ${res.task_id} iniciada. Corre en segundo plano.`;
-      },
-      check_task: async ({ task_id }: { task_id: string }) => {
-        let task: { status: string; result?: string; toolCalls: number };
-        try {
-          task = await hermesGet(`/tasks/${task_id}`);
-        } catch {
-          return `No encontré la tarea ${task_id}.`;
-        }
-        if (task.status === "running")
-          return `Sigue en curso (${task.toolCalls} acciones ejecutadas hasta ahora).`;
-        if (task.status === "error") return `La tarea falló: ${task.result?.slice(0, 300)}`;
-        return `Terminada. Resultado: ${task.result?.slice(0, 500) ?? "sin detalle"}`;
-      },
-      get_project_status: async ({ project }: { project?: string }) => {
-        const data = await hermesPost<unknown[]>("/tools/get_project_status", { project });
-        return JSON.stringify(data).slice(0, 1500);
-      },
-      search_memory: async ({ query }: { query: string }) => {
-        const data = await hermesPost<unknown[]>("/tools/search_memory", { query });
-        return JSON.stringify(data).slice(0, 1500);
-      },
-      save_memory: async ({ content, type }: { content: string; type?: string }) => {
-        await hermesPost("/tools/save_memory", { content, type });
-        return "Memoria guardada.";
-      },
-      get_daily_brief: async () => {
-        const data = await hermesPost<{ brief: string }>("/tools/get_daily_brief", {});
-        return data.brief;
-      },
-    }),
-    [],
-  );
-
   return (
-    <ConversationProvider clientTools={clientTools}>
-      <main className="mx-auto flex h-screen max-w-[1700px] flex-col gap-3 p-3 lg:p-4">
+    // Las CLIENT TOOLS de la voz ahora se registran en <VoiceClientTools> (usan
+    // el ref-pattern del SDK para no capturar handlers de UI obsoletos), y
+    // <VoiceEventsBridge> le pasa a Hermes los avisos de tareas terminadas.
+    <ConversationProvider>
+      <VoiceBusyProvider>
+        <VoiceClientTools
+          projects={projects}
+          onFocusProject={focusProject}
+          onShowPanel={setTab}
+          onWork={launchClaudeRun}
+        />
+        <VoiceEventsBridge events={events} />
+        <main className="mx-auto flex h-screen max-w-[1700px] flex-col gap-3 p-3 lg:p-4">
         {/* ── Header ─────────────────────────────────────────────── */}
         <header className="hud-in flex items-end justify-between px-1">
           <div className="flex items-end gap-3">
@@ -199,7 +181,9 @@ export default function Home() {
               </span>
             ))}
           </nav>
-          <div className="flex items-end gap-5">
+          <div className="flex items-end gap-4">
+            {/* Orbe de voz: control siempre visible de la llamada con Hermes */}
+            <VoiceOrb />
             {/* Multi-Mac: solo aparece si NEXT_PUBLIC_HERMES_AGENTS está definida */}
             <MachineSelector />
             <Clock />
@@ -210,6 +194,7 @@ export default function Home() {
         <div className="grid min-h-0 flex-1 grid-cols-12 gap-3">
           {/* Columna izquierda (sidebar colapsable; hidden conserva el estado) */}
           <div className={`col-span-3 min-h-0 flex-col gap-3 overflow-y-auto ${sidebarOpen ? "flex" : "hidden"}`}>
+            <VoicePanel />
             <ClaudeUsage />
             <ActiveAgents stats={stats} online={online} />
             <OrchestratorPanel
@@ -349,7 +334,8 @@ export default function Home() {
 
         {/* Avisos flotantes de tareas/runs terminados (mismo SSE de events) */}
         <Toasts events={events} />
-      </main>
+        </main>
+      </VoiceBusyProvider>
     </ConversationProvider>
   );
 }

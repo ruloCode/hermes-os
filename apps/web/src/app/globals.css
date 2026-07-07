@@ -171,6 +171,46 @@ body::after {
   opacity: 0.4;
 }
 
+/* ── Orbe de voz (header) ───────────────────────────────────────── */
+.voice-orb-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 2px;
+}
+.voice-orb-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.voice-orb {
+  /* --v = volumen real 0..1 (lo actualiza el rAF de VoiceOrb) */
+  --v: 0;
+  --orb: var(--violet);
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--violet-hot), transparent 60%), var(--orb);
+  box-shadow: 0 0 calc(5px + var(--v) * 24px) var(--orb);
+  transform: scale(calc(1 + var(--v) * 0.4));
+  transition:
+    box-shadow 0.09s linear,
+    transform 0.09s linear,
+    background 0.3s ease;
+}
+.voice-orb-live {
+  animation: orb-breathe 2.6s ease-in-out infinite;
+}
+@keyframes orb-breathe {
+  0%,
+  100% {
+    filter: brightness(0.9);
+  }
+  50% {
+    filter: brightness(1.15);
+  }
+}
+
 /* ── Scrollbars finas ───────────────────────────────────────────── */
 *::-webkit-scrollbar {
   width: 4px;

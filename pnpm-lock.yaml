@@ -55,7 +55,7 @@ importers:
   apps/web:
     dependencies:
       '@elevenlabs/react':
-        specifier: latest
+        specifier: 1.9.0
         version: 1.9.0(@types/dom-mediacapture-record@1.0.22)(react@19.2.7)
       '@hermes/shared':
         specifier: workspace:*
