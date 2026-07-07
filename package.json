@@ -1,0 +1,19 @@
+{
+  "name": "hermes-os",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hermes OS — AI Operating System personal de RuloCode: voz en tiempo real, agente ejecutor local y memoria compartida",
+  "scripts": {
+    "dev": "concurrently -n web,agent -c cyan,magenta \"pnpm --filter @hermes/web dev\" \"pnpm --filter @hermes/agent dev\"",
+    "dev:web": "pnpm --filter @hermes/web dev",
+    "dev:agent": "pnpm --filter @hermes/agent dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "migrate:clawd": "pnpm --filter @hermes/agent exec tsx scripts/migrate-clawd-memories.ts",
+    "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "packageManager": "pnpm@10.20.0"
+}

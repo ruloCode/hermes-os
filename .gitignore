@@ -1,0 +1,24 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# env — nunca commitear credenciales
+.env
+.env.local
+.env.*.local
+
+# next
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+
+# build
+dist/
+*.tsbuildinfo
+
+# os
+.DS_Store
+
+# logs
+*.log
+.data/

@@ -1,0 +1,216 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #04050c;
+  --bg-panel: rgba(10, 12, 26, 0.72);
+  --line: rgba(122, 132, 255, 0.14);
+  --line-bright: rgba(139, 148, 255, 0.35);
+  --violet: #a78bfa;
+  --violet-hot: #c4b5fd;
+  --cyan: #67e8f9;
+  --blue: #60a5fa;
+  --green: #6ee7a0;
+  --amber: #fbbf24;
+  --red: #fb7185;
+  --text: #dbe1ff;
+  --text-dim: #6b74a8;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+body {
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  /* Atmósfera: nébulas violeta/cian + grid + scanlines */
+  background-image:
+    radial-gradient(ellipse 60% 45% at 50% 38%, rgba(109, 78, 233, 0.16), transparent 70%),
+    radial-gradient(ellipse 35% 30% at 18% 80%, rgba(56, 189, 248, 0.07), transparent 70%),
+    radial-gradient(ellipse 35% 30% at 85% 15%, rgba(167, 139, 250, 0.08), transparent 70%),
+    linear-gradient(rgba(122, 132, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(122, 132, 255, 0.035) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    44px 44px,
+    44px 44px;
+}
+
+/* Scanlines sutiles por encima de todo */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 3px,
+    rgba(0, 0, 0, 0.14) 3px,
+    rgba(0, 0, 0, 0.14) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+.font-display {
+  font-family: var(--font-display), sans-serif;
+}
+
+/* ── Panel HUD con esquinas bracket ─────────────────────────────── */
+.hud-panel {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(6px);
+}
+.hud-panel::before,
+.hud-panel::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+.hud-panel::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid var(--line-bright);
+  border-left: 1px solid var(--line-bright);
+}
+.hud-panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1px solid var(--line-bright);
+  border-right: 1px solid var(--line-bright);
+}
+
+.hud-title {
+  font-family: var(--font-display), sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hud-title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--violet);
+  box-shadow: 0 0 8px var(--violet);
+}
+
+.glow-violet {
+  text-shadow: 0 0 18px rgba(167, 139, 250, 0.55);
+}
+.glow-cyan {
+  text-shadow: 0 0 18px rgba(103, 232, 249, 0.45);
+}
+
+/* ── Reveal en cascada al cargar ────────────────────────────────── */
+@keyframes hud-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+.hud-in {
+  animation: hud-in 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.cursor-blink::after {
+  content: "▮";
+  animation: blink 1s steps(1) infinite;
+  color: var(--violet);
+}
+
+/* ── Waveform de voz (CSS puro) ─────────────────────────────────── */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.18); }
+  50% { transform: scaleY(1); }
+}
+.wave-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--cyan), var(--violet));
+  transform-origin: center;
+  animation: wave 0.9s ease-in-out infinite;
+  box-shadow: 0 0 6px rgba(167, 139, 250, 0.6);
+}
+.wave-idle .wave-bar {
+  animation-play-state: paused;
+  transform: scaleY(0.12);
+  opacity: 0.4;
+}
+
+/* ── Scrollbars finas ───────────────────────────────────────────── */
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(122, 132, 255, 0.25);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Botón de comando ───────────────────────────────────────────── */
+.cmd-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  background: rgba(122, 132, 255, 0.04);
+  color: var(--text);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-align: left;
+}
+.cmd-btn:hover {
+  border-color: var(--violet);
+  background: rgba(167, 139, 250, 0.1);
+  box-shadow: 0 0 18px rgba(167, 139, 250, 0.18), inset 0 0 12px rgba(167, 139, 250, 0.06);
+  color: var(--violet-hot);
+}
+.cmd-btn:active {
+  transform: translateY(1px);
+}
+.cmd-btn::before {
+  content: ">";
+  color: var(--violet);
+}

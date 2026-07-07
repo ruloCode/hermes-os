@@ -1,0 +1,28 @@
+{
+  "name": "@hermes/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.198",
+    "@hermes/shared": "workspace:*",
+    "@hono/node-server": "^1.14.0",
+    "@supabase/supabase-js": "^2.49.0",
+    "chokidar": "^4.0.3",
+    "dotenv": "^16.4.7",
+    "gray-matter": "^4.0.3",
+    "hono": "^4.7.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
