@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 31415",
+    "dev": "next dev -p ${NEXT_PUBLIC_WEB_PORT:-31415}",
     "build": "next build",
-    "start": "next start -p 31415",
+    "start": "next start -p ${NEXT_PUBLIC_WEB_PORT:-31415}",
     "typecheck": "tsc --noEmit",
     "usage:token": "node scripts/hermes-usage-token.mjs"
   },

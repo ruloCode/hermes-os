@@ -44,6 +44,9 @@ env_get() {
 
 WEB_PORT="$(env_get NEXT_PUBLIC_WEB_PORT)"; WEB_PORT="${WEB_PORT:-31415}"
 AGENT_PORT="$(env_get HERMES_PORT)"; AGENT_PORT="${AGENT_PORT:-8642}"
+# Los scripts de web usan ${NEXT_PUBLIC_WEB_PORT:-31415} → exportarlo hace
+# que cambiar el puerto en .env tenga efecto real.
+export NEXT_PUBLIC_WEB_PORT="$WEB_PORT"
 
 port_pid() { { lsof -i ":$1" -sTCP:LISTEN -t 2>/dev/null || true; } | head -n1; }
 
@@ -102,10 +105,44 @@ cmd_doctor() {
   [[ -n "$wp" ]] && warn "web :$WEB_PORT ocupado (pid $wp)"     || ok "web :$WEB_PORT libre"
   [[ -n "$ap" ]] && warn "agente :$AGENT_PORT ocupado (pid $ap)" || ok "agente :$AGENT_PORT libre"
   echo
+  say "  ${B}Autostart (launchd)${R}"
+  local l
+  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN"; do
+    if svc_loaded "$l"; then ok "$l cargado"; else warn "$l no cargado ${DIM}(./hermes install)${R}"; fi
+  done
+  echo
+  say "  ${B}Salud${R}"
+  if curl -sf -o /dev/null --max-time 2 "http://localhost:$AGENT_PORT/health"; then
+    ok "agente responde /health"
+  else
+    warn "agente :$AGENT_PORT no responde"
+  fi
+  if curl -sf -o /dev/null --max-time 2 "http://localhost:$WEB_PORT"; then
+    ok "dashboard responde"
+  else
+    warn "dashboard :$WEB_PORT no responde"
+  fi
+  echo
+  say "  ${B}Disco${R}"
+  local free_gb; free_gb="$(df -g /System/Volumes/Data 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [[ -n "$free_gb" ]]; then
+    if [[ "$free_gb" -lt 20 ]]; then warn "solo ${free_gb} GB libres — corre ~/bin/disk-cleanup.sh"; else ok "${free_gb} GB libres en el interno"; fi
+  fi
+  if [[ -d /Volumes/Rulo ]]; then ok "disco externo Rulo montado"; else warn "disco externo Rulo NO montado (archive/restore no disponibles)"; fi
+  echo
 }
 
 cmd_stop() {
   banner "stop"
+  # Si el autostart está cargado, matar el pid no sirve (KeepAlive lo revive):
+  # hay que descargar el servicio de launchd.
+  local l
+  for l in "$PLIST_AGENT" "$PLIST_WEB"; do
+    if svc_loaded "$l" 2>/dev/null; then
+      launchctl bootout "gui/$(id -u)/$l" 2>/dev/null || true
+      ok "servicio $l descargado (vuelve al próximo login o con ./hermes install)"
+    fi
+  done
   local killed=0
   for p in "$WEB_PORT" "$AGENT_PORT"; do
     local pid; pid="$(port_pid "$p")"
@@ -128,6 +165,108 @@ cmd_setup() {
 }
 
 cmd_typecheck() { banner "typecheck"; pnpm typecheck; }
+
+# --- producción: launchd (autostart al login) ---------------------------
+LA_DIR="$HOME/Library/LaunchAgents"
+LOG_DIR="$HOME/.hermes-os/logs"
+PLIST_AGENT="com.hermes-os.agent"
+PLIST_WEB="com.hermes-os.web"
+PLIST_OPEN="com.hermes-os.open"
+
+# PATH para launchd (mínimo por defecto): node/pnpm reales + homebrew + claude.
+launchd_path() {
+  local paths=""
+  for bin in node pnpm claude; do
+    local p; p="$(command -v "$bin" 2>/dev/null || true)"
+    [[ -n "$p" ]] && paths="$paths:$(dirname "$p")"
+  done
+  printf "%s" "${paths#:}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}
+
+write_plist() {
+  local label="$1"; shift
+  local keepalive="$1"; shift
+  local logname="$1"; shift
+  local file="$LA_DIR/$label.plist"
+  {
+    cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$label</string>
+    <key>WorkingDirectory</key><string>$ROOT</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>$(launchd_path)</string>
+        <key>HOME</key><string>$HOME</string>
+    </dict>
+    <key>RunAtLoad</key><true/>
+PLIST
+    if [[ "$keepalive" == "yes" ]]; then
+      printf '    <key>KeepAlive</key><true/>\n    <key>ThrottleInterval</key><integer>10</integer>\n'
+    fi
+    cat <<PLIST
+    <key>StandardOutPath</key><string>$LOG_DIR/$logname.log</string>
+    <key>StandardErrorPath</key><string>$LOG_DIR/$logname.err.log</string>
+    <key>ProgramArguments</key>
+    <array>
+PLIST
+    local arg
+    for arg in "$@"; do printf '        <string>%s</string>\n' "$arg"; done
+    cat <<'PLIST'
+    </array>
+</dict>
+</plist>
+PLIST
+  } > "$file"
+  ok "plist: $file"
+}
+
+svc_loaded() { launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; }
+
+svc_bootout() {
+  if svc_loaded "$1"; then
+    launchctl bootout "gui/$(id -u)/$1" 2>/dev/null || true
+    ok "descargado $1"
+  fi
+}
+
+cmd_install() {
+  banner "install — Hermes de producción al login"
+  preflight
+  mkdir -p "$LOG_DIR"
+  local pnpm_bin; pnpm_bin="$(command -v pnpm)"
+
+  say "  ${DIM}Compilando build de producción (pnpm build)…${R}"
+  pnpm build
+
+  # Baja lo que esté corriendo (dev o instalación anterior) antes de instalar.
+  svc_bootout "$PLIST_AGENT"; svc_bootout "$PLIST_WEB"; svc_bootout "$PLIST_OPEN"
+  cmd_stop >/dev/null
+
+  write_plist "$PLIST_AGENT" yes agent "$pnpm_bin" --filter @hermes/agent start
+  write_plist "$PLIST_WEB"   yes web   "$pnpm_bin" --filter @hermes/web start
+  write_plist "$PLIST_OPEN"  no  open  /bin/bash "$ROOT/scripts/hermes-open.sh"
+
+  local u; u="$(id -u)"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_AGENT.plist" && ok "agente arriba (:$AGENT_PORT)"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_WEB.plist"   && ok "web arriba (:$WEB_PORT)"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_OPEN.plist"  && ok "dashboard se abrirá al estar sano"
+  echo
+  say "  ${GREEN}Listo:${R} Hermes arranca solo en cada login."
+  say "  ${DIM}Logs: $LOG_DIR · Para desarrollo: ./hermes uninstall && ./hermes dev${R}"
+}
+
+cmd_uninstall() {
+  banner "uninstall — quitar autostart"
+  svc_bootout "$PLIST_AGENT"; svc_bootout "$PLIST_WEB"; svc_bootout "$PLIST_OPEN"
+  local l
+  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN"; do
+    [[ -f "$LA_DIR/$l.plist" ]] && rm "$LA_DIR/$l.plist" && ok "borrado $l.plist"
+  done
+  ok "autostart retirado (el código no se toca)"
+}
 
 start_urls() {
   printf "\n"
@@ -174,12 +313,14 @@ cmd_help() {
   cat <<EOF
   ${B}Uso:${R} ./hermes ${DIM}[comando]${R}
 
-    ${B}(sin args)${R}   arranca web + agente        ${DIM}pnpm dev${R}
+    ${B}(sin args)${R}   arranca web + agente (dev)  ${DIM}pnpm dev${R}
     ${B}web${R}          solo el dashboard           ${DIM}:$WEB_PORT${R}
     ${B}agent${R}        solo el agent server        ${DIM}:$AGENT_PORT${R}
+    ${B}install${R}      build de producción + autostart al login (launchd)
+    ${B}uninstall${R}    quita el autostart (no toca el código)
     ${B}setup${R}        instala deps + ElevenLabs
-    ${B}doctor${R}       revisa requisitos y puertos
-    ${B}stop${R}         libera los puertos de Hermes
+    ${B}doctor${R}       requisitos, puertos, autostart, salud y disco
+    ${B}stop${R}         para los servicios / libera los puertos
     ${B}typecheck${R}    typecheck de todo el monorepo
     ${B}help${R}         esta ayuda
 
@@ -191,6 +332,8 @@ case "${1:-}" in
   ""|start|dev|all) cmd_all ;;
   web)              cmd_web ;;
   agent)            cmd_agent ;;
+  install)          cmd_install ;;
+  uninstall)        cmd_uninstall ;;
   setup)            cmd_setup ;;
   doctor)           cmd_doctor ;;
   stop)             cmd_stop ;;
