@@ -7,8 +7,10 @@
  */
 import { readdir, readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { ChatSummary } from "@hermes/shared";
-import { REPO_ROOT } from "./env.js";
+import { REPO_ROOT, env } from "./env.js";
+import { supabase } from "./supabase.js";
 
 export interface StoredMessage {
   role: "user" | "assistant";
@@ -17,10 +19,49 @@ export interface StoredMessage {
   sessionId?: string;
 }
 
+/**
+ * Clave determinística de un mensaje para idempotencia del espejo/backfill en
+ * Supabase. Basada en contenido (no en archivo/índice) para que sea estable
+ * aunque el mensaje pase de la conversación activa al archive.
+ */
+export function conversationLocalKey(project: string, msg: StoredMessage): string {
+  const basis = `${safeName(project)}|${msg.role}|${msg.ts}|${msg.content}`;
+  return createHash("sha1").update(basis).digest("hex");
+}
+
+/**
+ * Espejo best-effort de mensajes a Supabase (conversation_messages). Fire and
+ * forget: nunca rompe el chat si falla la red. Idempotente vía local_key.
+ * chatId = null → conversación activa; slug del archivo si viene del archive.
+ */
+export function mirrorMessages(
+  project: string,
+  msgs: StoredMessage[],
+  chatId: string | null = null,
+): void {
+  if (!supabase || msgs.length === 0) return;
+  const rows = msgs.map((m) => ({
+    local_key: conversationLocalKey(project, m),
+    project_slug: safeName(project),
+    role: m.role,
+    content: m.content,
+    ts: m.ts,
+    session_id: m.sessionId ?? null,
+    machine: env.MACHINE_NAME,
+    chat_id: chatId,
+  }));
+  void supabase
+    .from("conversation_messages")
+    .upsert(rows, { onConflict: "local_key", ignoreDuplicates: true })
+    .then(({ error }) => {
+      if (error) console.error("[conversations] espejo Supabase:", error.message);
+    });
+}
+
 const DIR = join(REPO_ROOT, ".data", "conversations");
 const MAX_STORED = 500;
 
-function safeName(project: string): string {
+export function safeName(project: string): string {
   return (project || "general").toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 60) || "general";
 }
 
@@ -51,12 +92,15 @@ async function doAppend(project: string, user: string, assistant: string, sessio
   const file = fileFor(project);
   const existing = await getConversation(project);
   const now = new Date().toISOString();
-  existing.push({ role: "user", content: user, ts: now, sessionId });
-  existing.push({ role: "assistant", content: assistant, ts: now, sessionId });
+  const userMsg: StoredMessage = { role: "user", content: user, ts: now, sessionId };
+  const assistantMsg: StoredMessage = { role: "assistant", content: assistant, ts: now, sessionId };
+  existing.push(userMsg, assistantMsg);
   const trimmed = existing.slice(-MAX_STORED);
   const tmp = `${file}.tmp`;
   await writeFile(tmp, JSON.stringify(trimmed), "utf8");
   await rename(tmp, file); // atómico
+  // Espejo a la nube (best-effort): sobrevive a la máquina y lo ven otras Macs.
+  mirrorMessages(project, [userMsg, assistantMsg]);
 }
 
 export function appendTurn(

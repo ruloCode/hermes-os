@@ -4,6 +4,7 @@ import { Children, useEffect, useRef, useState } from "react";
 import type { ProjectContext } from "@hermes/shared";
 import { getProjectContext, openProjectInCursor } from "@/lib/hermes";
 import { Panel } from "./Panel";
+import { Markdown } from "./Markdown";
 
 /**
  * Panel de contexto del proyecto en foco: qué skills, servers MCP, herramientas
@@ -13,10 +14,14 @@ import { Panel } from "./Panel";
 export function ProjectContextPanel({
   slug,
   name,
+  estadoActual,
+  tareas,
   onClear,
 }: {
   slug: string;
   name?: string;
+  estadoActual?: string;
+  tareas?: string[];
   onClear?: () => void;
 }) {
   const [ctx, setCtx] = useState<ProjectContext | null>(null);
@@ -92,6 +97,28 @@ export function ProjectContextPanel({
       }
     >
       <div className="max-h-[46vh] space-y-3 overflow-y-auto pr-1">
+        {/* Estado del proyecto (del vault): las referencias .md son clickables. */}
+        {(estadoActual?.trim() || (tareas && tareas.length > 0)) && (
+          <div className="space-y-2 border-b pb-3" style={{ borderColor: "var(--line)" }}>
+            {estadoActual?.trim() && (
+              <div>
+                <p className="mb-1 text-[9px] tracking-[0.25em] uppercase" style={{ color: "var(--green)" }}>
+                  ▸ Estado actual
+                </p>
+                <Markdown source={estadoActual} project={slug} />
+              </div>
+            )}
+            {tareas && tareas.length > 0 && (
+              <div>
+                <p className="mb-1 text-[9px] tracking-[0.25em] uppercase" style={{ color: "var(--amber)" }}>
+                  ▸ Tareas pendientes
+                </p>
+                <Markdown source={tareas.map((t) => `- ${t}`).join("\n")} project={slug} />
+              </div>
+            )}
+          </div>
+        )}
+
         {loading && (
           <p className="pt-4 text-center text-[10px] tracking-[0.25em] pulse-dot" style={{ color: "var(--text-dim)" }}>
             LEYENDO CONTEXTO…

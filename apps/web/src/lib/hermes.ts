@@ -4,6 +4,13 @@ import type {
   ChatSessionDetail,
   ClaudeSessionSummary,
   ClaudeSessionDetail,
+  Meeting,
+  MeetingSummary,
+  Task,
+  TaskState,
+  TaskExecution,
+  TaskExecutionSummary,
+  VaultDoc,
 } from "@hermes/shared";
 
 /**
@@ -308,6 +315,255 @@ export async function openProjectInCursor(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "agente offline" };
   }
+}
+
+// ── Reuniones/Juntas por proyecto ──────────────────────────────────────
+
+export interface MeetingJobRef {
+  meeting_job_id: string;
+  status: string;
+}
+
+/** Estado de un job de ingest de reunión (transcripción + resumen). */
+export interface MeetingJobStatus {
+  id: string;
+  status: "running" | "done" | "error";
+  /** id de la reunión creada (cuando status === done). */
+  meetingId?: string;
+  title?: string;
+  error?: string;
+}
+
+function blobExt(blob: Blob): string {
+  const t = (blob.type || "").toLowerCase();
+  if (t.includes("webm")) return "webm";
+  if (t.includes("mp4") || t.includes("m4a")) return "m4a";
+  if (t.includes("mpeg") || t.includes("mp3")) return "mp3";
+  if (t.includes("wav")) return "wav";
+  if (t.includes("ogg")) return "ogg";
+  return "webm";
+}
+
+/**
+ * Sube una reunión (audio grabado/subido o transcripción pegada) y devuelve el
+ * id del job para seguir el progreso. Usa multipart: NO fijamos Content-Type,
+ * el browser pone el boundary correcto (hermesFetch solo inyecta el Bearer).
+ */
+export async function uploadMeeting(input: {
+  project: string;
+  audioBlob?: Blob;
+  transcript?: string;
+  title?: string;
+  source?: "audio" | "upload" | "paste";
+  durationSec?: number;
+  filename?: string;
+}): Promise<MeetingJobRef> {
+  const form = new FormData();
+  form.append("project", input.project);
+  if (input.title) form.append("title", input.title);
+  if (input.source) form.append("source", input.source);
+  if (input.durationSec != null) form.append("durationSec", String(Math.round(input.durationSec)));
+  if (input.audioBlob) {
+    form.append("audio", input.audioBlob, input.filename ?? `reunion.${blobExt(input.audioBlob)}`);
+  } else if (input.transcript) {
+    form.append("transcript", input.transcript);
+  }
+  const res = await hermesFetch(`/meetings`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`/meetings → ${res.status}`);
+  return (await res.json()) as MeetingJobRef;
+}
+
+export async function getMeetingJob(id: string): Promise<MeetingJobStatus | null> {
+  try {
+    return await hermesGet<MeetingJobStatus>(`/meetings/jobs/${encodeURIComponent(id)}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Historial de reuniones de un proyecto (más recientes primero). */
+export async function listMeetings(project: string): Promise<MeetingSummary[]> {
+  try {
+    return await hermesGet<MeetingSummary[]>(`/meetings/${encodeURIComponent(project)}`);
+  } catch {
+    return [];
+  }
+}
+
+/** Detalle de una reunión (resumen + accionables + transcripción). */
+export async function getMeeting(project: string, id: string): Promise<Meeting | null> {
+  try {
+    return await hermesGet<Meeting>(
+      `/meetings/${encodeURIComponent(project)}/${encodeURIComponent(id)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Búsqueda semántica en reuniones (opcionalmente acotada a un proyecto). */
+export async function searchMeetings(q: string, project?: string): Promise<MeetingSummary[]> {
+  const p = project ? `&project=${encodeURIComponent(project)}` : "";
+  try {
+    return await hermesGet<MeetingSummary[]>(`/meetings/search?q=${encodeURIComponent(q)}${p}`);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Arranca la ejecución de un accionable: lanza `claude -p` con su exec_prompt en
+ * el repo del proyecto. Devuelve el run para abrir su stream en el terminal.
+ */
+export async function executeActionable(
+  project: string,
+  meetingId: string,
+  idx: number,
+): Promise<{ runId: string; sessionId: string; slug: string } | null> {
+  try {
+    const res = await hermesPost<{ run_id: string; session_id: string; slug: string }>(
+      `/meetings/${encodeURIComponent(project)}/${encodeURIComponent(meetingId)}/actionables/${idx}/execute`,
+    );
+    return { runId: res.run_id, sessionId: res.session_id, slug: res.slug };
+  } catch {
+    return null;
+  }
+}
+
+// ── Tracker de tareas por proyecto ─────────────────────────────────────
+
+export interface RunRef {
+  runId: string;
+  sessionId: string;
+  slug: string;
+}
+
+/** Lista tareas (tablero). Filtrable por proyecto y estado. */
+export async function listTasks(opts: { project?: string; status?: TaskState } = {}): Promise<Task[]> {
+  const q = new URLSearchParams();
+  if (opts.project) q.set("project", opts.project);
+  if (opts.status) q.set("status", opts.status);
+  const qs = q.toString();
+  try {
+    return await hermesGet<Task[]>(`/tracker/tasks${qs ? `?${qs}` : ""}`);
+  } catch {
+    return [];
+  }
+}
+
+export async function getTask(id: number): Promise<Task | null> {
+  try {
+    return await hermesGet<Task>(`/tracker/tasks/${id}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Crea una tarea manual en un proyecto. */
+export async function createTask(project: string, title: string, detail?: string): Promise<Task | null> {
+  try {
+    return await hermesPost<Task>("/tracker/tasks", { project, title, detail });
+  } catch {
+    return null;
+  }
+}
+
+/** Cambia el estado (completar/ignorar/reabrir). */
+export async function setTaskStatus(id: number, status: TaskState): Promise<Task | null> {
+  try {
+    return await hermesPost<Task>(`/tracker/tasks/${id}/status`, { status });
+  } catch {
+    return null;
+  }
+}
+
+/** Lanza `claude -p` con la tarea; devuelve el run para abrir su stream. */
+export async function executeTask(id: number): Promise<RunRef | null> {
+  try {
+    const r = await hermesPost<{ run_id: string; session_id: string; slug: string }>(
+      `/tracker/tasks/${id}/execute`,
+    );
+    return { runId: r.run_id, sessionId: r.session_id, slug: r.slug };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Continúa/envía otro prompt a la tarea: resume su sesión de Claude Code con un
+ * run nuevo (misma conversación). Sin prompt, envía un "continúa" por defecto.
+ */
+export async function continueTask(id: number, prompt?: string): Promise<RunRef | null> {
+  try {
+    const r = await hermesPost<{ run_id: string; session_id: string; slug: string }>(
+      `/tracker/tasks/${id}/continue`,
+      { prompt },
+    );
+    return { runId: r.run_id, sessionId: r.session_id, slug: r.slug };
+  } catch {
+    return null;
+  }
+}
+
+/** Historial de ejecuciones de una tarea (memoria: prompt · análisis · resultado). */
+export async function listTaskExecutions(taskId: number): Promise<TaskExecutionSummary[]> {
+  try {
+    return await hermesGet<TaskExecutionSummary[]>(`/tracker/tasks/${taskId}/executions`);
+  } catch {
+    return [];
+  }
+}
+
+/** Documento completo de una ejecución (con markdown para renderizar). */
+export async function getTaskExecution(
+  project: string,
+  id: string,
+): Promise<TaskExecution | null> {
+  try {
+    return await hermesGet<TaskExecution>(
+      `/tracker/executions/${encodeURIComponent(project)}/${encodeURIComponent(id)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Importa las "Tareas Pendientes" ya escritas en la nota del proyecto. */
+export async function importVaultTasks(project: string): Promise<{ imported: number }> {
+  try {
+    return await hermesPost<{ imported: number }>(`/tracker/import/${encodeURIComponent(project)}`);
+  } catch {
+    return { imported: 0 };
+  }
+}
+
+/** Triage de un accionable de junta → ejecutar | pendiente | ignorar. */
+export async function triageActionable(
+  project: string,
+  meetingId: string,
+  idx: number,
+  decision: "ejecutar" | "pendiente" | "ignorar",
+): Promise<{ task: Task | null; run?: RunRef }> {
+  const res = await hermesPost<{
+    task: Task | null;
+    run_id?: string;
+    session_id?: string;
+    slug?: string;
+  }>(`/meetings/${encodeURIComponent(project)}/${encodeURIComponent(meetingId)}/actionables/${idx}/triage`, {
+    decision,
+  });
+  const run =
+    res.run_id && res.session_id && res.slug
+      ? { runId: res.run_id, sessionId: res.session_id, slug: res.slug }
+      : undefined;
+  return { task: res.task, run };
+}
+
+// Resuelve una referencia .md del vault (wikilink o ruta) para el visor Notion.
+export function getVaultDoc(ref: string, project?: string): Promise<VaultDoc> {
+  const q = new URLSearchParams({ ref });
+  if (project) q.set("project", project);
+  return hermesGet<VaultDoc>(`/vault/doc?${q.toString()}`);
 }
 
 // ── Helpers REST simples ───────────────────────────────────────────────

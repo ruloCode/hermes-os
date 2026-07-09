@@ -1,12 +1,14 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { env } from "../env.js";
 import { saveMemory, searchMemory, savePreference } from "../memory.js";
 import { readProjects } from "../vault/projects.js";
+import { searchMeetings } from "../meetings/store.js";
 import { supabase } from "../supabase.js";
 
 const execFileAsync = promisify(execFile);
@@ -169,6 +171,97 @@ const getRecentActivityTool = tool(
   },
 );
 
+const searchMeetingsTool = tool(
+  "search_meetings",
+  "Búsqueda semántica en el historial de reuniones/juntas por su resumen. Úsala para responder '¿qué salió en la última junta de X?' o '¿qué decidimos sobre Y?'.",
+  {
+    query: z.string(),
+    project: z.string().optional().describe("Slug del proyecto para acotar (ej: divisual). Omitir para buscar en todos."),
+    limit: z.number().max(10).optional(),
+  },
+  async ({ query, project, limit }) => {
+    const hits = await searchMeetings(query, project, limit ?? 5);
+    if (!hits.length) return text("Sin reuniones que coincidan.");
+    return text(
+      hits
+        .map((h) => `[${h.project_slug}·${h.fecha.slice(0, 10)}] ${h.title}\n${(h.summary ?? "").slice(0, 400)}`)
+        .join("\n---\n"),
+    );
+  },
+);
+
+/** Convierte un subtítulo .vtt de YouTube en texto plano, quitando timestamps,
+ *  tags de karaoke (<00:00:04><c>…</c>) y las líneas duplicadas de auto-captions. */
+function vttToText(vtt: string): string {
+  const out: string[] = [];
+  let last = "";
+  for (const raw of vtt.split("\n")) {
+    const line = raw.trim();
+    if (!line || line === "WEBVTT" || line.includes("-->")) continue;
+    if (/^(Kind|Language):/.test(line)) continue;
+    const clean = line.replace(/<[^>]+>/g, "").trim(); // quita <...c> y timestamps inline
+    if (!clean || clean === last) continue;
+    out.push(clean);
+    last = clean;
+  }
+  return out.join(" ");
+}
+
+const analyzeYouTubeTool = tool(
+  "analyze_youtube",
+  "Extrae y devuelve la transcripción de un video de YouTube (vía yt-dlp) para que la analices. Puedes pedir resumen, puntos clave, accionables, etc.",
+  {
+    url: z.string().url().describe("URL del video de YouTube"),
+    language: z.string().optional().describe("Código de idioma preferido (ej: es, en). Por defecto intenta es y luego en."),
+  },
+  async ({ url, language }) => {
+    const videoIdMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]+)/);
+    if (!videoIdMatch) return text("URL de YouTube inválida. Usa: youtube.com/watch?v=ID, youtu.be/ID o /shorts/ID");
+    const videoId = videoIdMatch[1];
+    const langs = language ? `${language},es,en` : "es,en";
+
+    const workDir = join(tmpdir(), `hermes-yt-${videoId}-${Date.now()}`);
+    await mkdir(workDir, { recursive: true });
+    try {
+      await execFileAsync(
+        "yt-dlp",
+        [
+          "--skip-download",
+          "--write-subs",
+          "--write-auto-subs",
+          "--sub-langs", langs,
+          "--sub-format", "vtt",
+          "--no-warnings",
+          "-o", join(workDir, "sub"),
+          `https://www.youtube.com/watch?v=${videoId}`,
+        ],
+        { maxBuffer: 1024 * 1024 * 8, timeout: 60_000 },
+      );
+
+      const files = (await readdir(workDir)).filter((f) => f.endsWith(".vtt"));
+      if (!files.length) return text("No se encontró transcripción/subtítulos para este video.");
+
+      // Prioriza según el orden de preferencia (idioma pedido → es → en → lo que haya).
+      const prefs = langs.split(",");
+      const pick = prefs.map((l) => files.find((f) => f.includes(`.${l}.`))).find(Boolean) ?? files[0];
+      const vtt = await readFile(join(workDir, pick), "utf8");
+      const fullText = vttToText(vtt);
+      if (!fullText) return text("La transcripción está vacía tras el parseo.");
+
+      const truncated = fullText.length > 12000;
+      return text(
+        `# Transcripción (${pick.replace(/^sub\.|\.vtt$/g, "")}): ${url}\n\n${fullText.slice(0, 12000)}${truncated ? "\n\n[... transcripción truncada ...]" : ""}`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/429|Too Many Requests/i.test(msg)) return text("YouTube devolvió 429 (rate limit). Intenta de nuevo en un momento.");
+      return text(`Error al extraer transcripción: ${msg.slice(0, 300)}`);
+    } finally {
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+  },
+);
+
 export const hermesMcpServer = createSdkMcpServer({
   name: "hermes",
   version: "0.1.0",
@@ -181,6 +274,8 @@ export const hermesMcpServer = createSdkMcpServer({
     searchVaultTool,
     captureIdeaTool,
     getRecentActivityTool,
+    searchMeetingsTool,
+    analyzeYouTubeTool,
   ],
 });
 
@@ -194,4 +289,6 @@ export const HERMES_TOOL_NAMES = [
   "mcp__hermes__search_vault",
   "mcp__hermes__capture_idea",
   "mcp__hermes__get_recent_activity",
+  "mcp__hermes__search_meetings",
+  "mcp__hermes__analyze_youtube",
 ];

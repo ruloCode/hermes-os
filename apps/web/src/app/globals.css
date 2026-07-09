@@ -211,6 +211,330 @@ body::after {
   }
 }
 
+/* ── Markdown (preview de la vista Voz) ─────────────────────────── */
+.md {
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.md > *:first-child {
+  margin-top: 0;
+}
+.md-h {
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--violet-hot);
+}
+.md-h1 {
+  font-size: 18px;
+  margin: 0.2em 0 0.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--line);
+}
+.md-h2 {
+  font-size: 15px;
+  margin: 1.1em 0 0.45em;
+  color: var(--violet);
+}
+.md-h3 {
+  font-size: 13px;
+  margin: 1em 0 0.35em;
+  color: var(--cyan);
+}
+.md-h4 {
+  font-size: 12px;
+  margin: 0.9em 0 0.3em;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.md-p {
+  margin: 0.55em 0;
+}
+.md-ul,
+.md-ol {
+  margin: 0.5em 0;
+  padding-left: 1.35em;
+}
+.md-ul {
+  list-style: none;
+}
+.md-ul .md-li {
+  position: relative;
+}
+.md-ul .md-li::before {
+  content: "▸";
+  position: absolute;
+  left: -1.1em;
+  color: var(--violet);
+}
+.md-ol {
+  list-style: decimal;
+}
+.md-li {
+  margin: 0.22em 0;
+}
+.md-li::marker {
+  color: var(--violet);
+}
+.md-pre {
+  margin: 0.7em 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(122, 132, 255, 0.05);
+  overflow-x: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.md-code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(103, 232, 249, 0.1);
+  color: var(--cyan);
+  font-size: 0.92em;
+}
+.md-pre code {
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+}
+.md-quote {
+  margin: 0.6em 0;
+  padding: 4px 12px;
+  border-left: 2px solid var(--violet);
+  color: var(--text-dim);
+  background: rgba(167, 139, 250, 0.05);
+}
+.md-hr {
+  margin: 1.1em 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+.md-link {
+  color: var(--cyan);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Referencia clickable a un doc del vault (wikilink / *.md) dentro de la HUD. */
+.md-ref {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--cyan);
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(103, 232, 249, 0.5);
+  transition: border-color 0.15s;
+}
+.md-ref::before {
+  content: "◈";
+  margin-right: 0.28em;
+  opacity: 0.65;
+  font-size: 0.85em;
+}
+.md-ref:hover {
+  border-bottom-color: var(--cyan);
+}
+
+/* ── Visor de documentos del vault: modal tipo Notion ───────────────── */
+.doc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5vh 16px;
+  background: rgba(3, 6, 14, 0.72);
+  backdrop-filter: blur(4px);
+  animation: docFade 0.16s ease-out;
+}
+@keyframes docFade {
+  from {
+    opacity: 0;
+  }
+}
+.doc-paper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 760px;
+  max-height: 90vh;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: docRise 0.18s ease-out;
+}
+@keyframes docRise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+.doc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #ededec;
+  background: #fbfbfa;
+}
+.doc-breadcrumb {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #9b9a97;
+}
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.doc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid #e3e3e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #37352f;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.doc-btn:hover {
+  background: #f1f1ef;
+  border-color: #d3d3d1;
+}
+.doc-btn-icon {
+  padding: 5px 9px;
+  color: #787774;
+}
+.doc-body {
+  overflow-y: auto;
+  padding: 40px 56px 56px;
+  background: #fff;
+}
+.doc-state {
+  padding: 24px 0;
+  text-align: center;
+  color: #787774;
+  font-size: 14px;
+}
+.doc-updated {
+  margin: 0 0 18px;
+  font-size: 12px;
+  color: #9b9a97;
+}
+
+/* El markdown, revestido para lectura humana (paleta y tipografía Notion). */
+.doc-paper .md {
+  color: #37352f;
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+}
+.doc-paper .md-h {
+  color: #1f1e1b;
+  font-weight: 700;
+}
+.doc-paper .md-h1 {
+  font-size: 32px;
+  line-height: 1.2;
+  margin: 0 0 0.35em;
+  padding: 0;
+  border: none;
+}
+.doc-paper .md-h2 {
+  font-size: 23px;
+  color: #1f1e1b;
+  margin: 1.4em 0 0.4em;
+}
+.doc-paper .md-h3 {
+  font-size: 18px;
+  color: #1f1e1b;
+  margin: 1.2em 0 0.3em;
+}
+.doc-paper .md-h4 {
+  font-size: 15px;
+  color: #37352f;
+}
+.doc-paper .md-p {
+  margin: 0.7em 0;
+}
+.doc-paper .md-ul .md-li::before {
+  color: #9b9a97;
+}
+.doc-paper .md-li::marker {
+  color: #9b9a97;
+}
+.doc-paper .md-code {
+  background: rgba(135, 131, 120, 0.15);
+  color: #eb5757;
+}
+.doc-paper .md-pre {
+  background: #f7f6f3;
+  border-color: #ededec;
+}
+.doc-paper .md-pre code {
+  color: #37352f;
+}
+.doc-paper .md-quote {
+  border-left: 3px solid #37352f;
+  background: transparent;
+  color: #37352f;
+}
+.doc-paper .md-hr {
+  border-top-color: #ededec;
+}
+.doc-paper .md-link {
+  color: #2563eb;
+}
+.doc-paper .md-ref {
+  color: #2563eb;
+  border-bottom-color: rgba(37, 99, 235, 0.35);
+}
+.doc-paper .md-ref::before {
+  content: "◈";
+  opacity: 0.55;
+}
+.doc-paper .md-ref:hover {
+  border-bottom-color: #2563eb;
+}
+
+/* Exportar PDF = imprimir solo el documento, sin la HUD ni el chrome del modal. */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #doc-print-root,
+  #doc-print-root * {
+    visibility: visible !important;
+  }
+  #doc-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 8mm;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
 /* ── Scrollbars finas ───────────────────────────────────────────── */
 *::-webkit-scrollbar {
   width: 4px;

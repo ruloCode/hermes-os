@@ -21,7 +21,7 @@ import { env } from "../env.js";
 import { addRunCost } from "../usage.js";
 import { notifyMac } from "../notify.js";
 import { emit } from "../events.js";
-import { startSession, finishSession } from "./claude-sessions.js";
+import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
 const MODELS = new Set([
@@ -49,7 +49,7 @@ export interface ClaudeExecOpts {
 }
 
 function sanitize(opts: ClaudeExecOpts) {
-  const model = MODELS.has(opts.model ?? "") ? opts.model! : "opus";
+  const model = MODELS.has(opts.model ?? "") ? opts.model! : "sonnet";
   const effort = EFFORTS.has(opts.effort ?? "") ? opts.effort! : "high";
   const permissionMode = PERMISSIONS.has(opts.permissionMode ?? "")
     ? opts.permissionMode!
@@ -154,6 +154,8 @@ interface ClaudeRun {
   projectSlug: string;
   /** Id de sesión del CLI para el próximo `--resume` (se actualiza en init). */
   sdkSessionId?: string;
+  /** Cuántas de run.lines ya se checkpointearon al disco (cursor). */
+  persistedCount: number;
 }
 
 const runs = new Map<string, ClaudeRun>();
@@ -170,6 +172,21 @@ function pushLine(run: ClaudeRun, line: ClaudeLine) {
       /* subscriber caído */
     }
   }
+}
+
+// Vuelca al disco la cola de líneas aún no persistida (checkpoint). Mantiene la
+// sesión "running": si el run se corta a mitad (crash/reinicio del agente), su
+// transcript parcial ya quedó en disco y se puede ver/continuar.
+function checkpointRun(run: ClaudeRun) {
+  const tail = run.lines.slice(run.persistedCount);
+  if (!tail.length) return;
+  run.persistedCount = run.lines.length;
+  void checkpointSession({
+    id: run.sessionId,
+    projectSlug: run.projectSlug,
+    appendLines: tail,
+    sdkSessionId: run.sdkSessionId,
+  });
 }
 
 // Traduce un evento stream-json del CLI a una línea de terminal legible.
@@ -240,6 +257,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     sessionId,
     projectSlug,
     sdkSessionId: sdk,
+    persistedCount: 0,
   };
   runs.set(run.id, run);
 
@@ -286,7 +304,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     void finishSession({
       id: run.sessionId,
       projectSlug: run.projectSlug,
-      newLines: run.lines,
+      newLines: run.lines.slice(run.persistedCount),
       status: "error",
       sdkSessionId: run.sdkSessionId,
     });
@@ -326,6 +344,8 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
         pushLine(run, { t: Date.now(), kind: "raw", text: raw.slice(0, 200) });
       }
     }
+    // Checkpoint periódico: un run cortado a mitad conserva su transcript.
+    if (run.lines.length - run.persistedCount >= 12) checkpointRun(run);
   });
   proc.stderr?.on("data", (chunk: string) => {
     const text = chunk.trim();
@@ -335,7 +355,11 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     run.status = "error";
     pushLine(run, { t: Date.now(), kind: "error", text: String(err.message) });
   });
+  // Checkpoint por tiempo: aunque el run sea corto, su transcript queda en disco
+  // a los pocos segundos (un corte/reinicio pierde a lo sumo ~3s de líneas).
+  const ckptTimer = setInterval(() => checkpointRun(run), 3000);
   proc.on("close", (code) => {
+    clearInterval(ckptTimer);
     run.exitCode = code ?? undefined;
     if (run.status !== "error") run.status = code === 0 ? "done" : "error";
     pushLine(run, {
@@ -381,7 +405,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     void finishSession({
       id: run.sessionId,
       projectSlug: run.projectSlug,
-      newLines: run.lines,
+      newLines: run.lines.slice(run.persistedCount),
       status: run.status === "done" ? "done" : "error",
       sdkSessionId: run.sdkSessionId,
     });

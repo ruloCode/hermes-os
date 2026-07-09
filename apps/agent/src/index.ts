@@ -1,12 +1,15 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
+import type { MeetingSource, TaskState } from "@hermes/shared";
 import { env } from "./env.js";
 import { emit, recentEvents, subscribe } from "./events.js";
 import { getPresence, startHeartbeat } from "./presence.js";
 import { readProjects } from "./vault/projects.js";
 import { readProjectContext } from "./vault/project-context.js";
+import { resolveVaultDoc } from "./vault/doc.js";
 import { memoriesCount, recentMemories, saveMemory, searchMemory, hasSupabase } from "./memory.js";
 import {
   getSdkSession,
@@ -35,6 +38,20 @@ import {
   restoreChat,
 } from "./conversations.js";
 import { listChatSessions, readChatSession, resolveChatCwd } from "./agent/chat-history.js";
+import { listMeetings, getMeeting, searchMeetings } from "./meetings/store.js";
+import { startMeetingJob, getMeetingJob } from "./meetings/ingest.js";
+import { listExecutions, getExecution } from "./tasks/executions.js";
+import {
+  listTasks as listTrackerTasks,
+  createTask,
+  getTask as getTrackerTask,
+  updateTask,
+  setTaskStatus,
+  importVaultTasks,
+  executeTask,
+  continueTask,
+  reconcileRunningTasks,
+} from "./tasks/store.js";
 import { openInCursor } from "./agent/editor.js";
 import {
   listClaudeSessions,
@@ -224,6 +241,179 @@ app.get("/tasks/:id", (c) => {
   if (!task) return c.json({ error: "task no encontrada" }, 404);
   return c.json(task);
 });
+
+// ── Reuniones/Juntas por proyecto ──────────────────────────────────────
+// Subir audio (o pegar transcripción) → transcribir → resumen + 2 accionables.
+// El procesamiento es async (task_id inmediato); el progreso viaja por /events.
+
+// Sube una reunión: multipart con `audio` (File) o `transcript` (texto) +
+// `project` + `title?` + `source?` + `durationSec?`.
+app.post(
+  "/meetings",
+  bodyLimit({ maxSize: 150 * 1024 * 1024 }), // 150 MB: cubre juntas largas en opus
+  async (c) => {
+    const body = await c.req.parseBody();
+    const project = String(body.project ?? "").trim();
+    if (!project) return c.json({ error: "project requerido" }, 400);
+    const title = body.title ? String(body.title) : undefined;
+    const durationSec = body.durationSec ? Number(body.durationSec) : null;
+    const audio = body.audio;
+    const transcript = body.transcript ? String(body.transcript) : undefined;
+    const rawSource = String(body.source ?? "");
+
+    if (audio && typeof audio !== "string") {
+      const source = (["audio", "upload"].includes(rawSource) ? rawSource : "upload") as MeetingSource;
+      const job = startMeetingJob({ project, audio, title, source, durationSec });
+      return c.json({ meeting_job_id: job.id, status: job.status });
+    }
+    if (transcript?.trim()) {
+      const job = startMeetingJob({ project, transcript, title, source: "paste" });
+      return c.json({ meeting_job_id: job.id, status: job.status });
+    }
+    return c.json({ error: "falta `audio` o `transcript`" }, 400);
+  },
+);
+
+// Estado de un job de ingest (para el spinner del panel; el /events también avisa).
+app.get("/meetings/jobs/:id", (c) => {
+  const job = getMeetingJob(c.req.param("id"));
+  if (!job) return c.json({ error: "job no encontrado" }, 404);
+  return c.json(job);
+});
+
+// Búsqueda semántica en el historial de reuniones (?q= &project=).
+app.get("/meetings/search", async (c) => {
+  const q = c.req.query("q") ?? "";
+  if (!q.trim()) return c.json([]);
+  return c.json(await searchMeetings(q, c.req.query("project") || undefined, 8));
+});
+
+// Historial de reuniones de un proyecto.
+app.get("/meetings/:project", async (c) => c.json(await listMeetings(c.req.param("project"))));
+
+// Detalle de una reunión (resumen + accionables + transcripción).
+app.get("/meetings/:project/:id", async (c) => {
+  const meeting = await getMeeting(c.req.param("project"), c.req.param("id"));
+  if (!meeting) return c.json({ error: "reunión no encontrada" }, 404);
+  return c.json(meeting);
+});
+
+// Triage de un accionable de la junta: crea la tarea según la decisión.
+// ejecutar → tarea running + lanza run · pendiente → tarea pending (+ checkbox
+// en la nota) · ignorar → tarea dismissed (auditable, no reaparece).
+app.post("/meetings/:project/:id/actionables/:idx/triage", async (c) => {
+  const project = c.req.param("project");
+  const meetingId = c.req.param("id");
+  const idx = Number(c.req.param("idx"));
+  const { decision } = await c.req.json<{ decision?: string }>().catch(() => ({ decision: undefined }));
+
+  const meeting = await getMeeting(project, meetingId);
+  if (!meeting) return c.json({ error: "reunión no encontrada" }, 404);
+  const a = meeting.actionables.find((x) => x.idx === idx);
+  if (!a) return c.json({ error: "accionable no encontrado" }, 404);
+
+  const base = {
+    project,
+    title: a.title,
+    detail: a.one_liner,
+    exec_prompt: a.exec_prompt,
+    source: "meeting" as const,
+    meetingId,
+    meetingIdx: idx,
+  };
+
+  if (decision === "ignorar") {
+    return c.json({ task: await createTask({ ...base, status: "dismissed" }) });
+  }
+  if (decision === "pendiente") {
+    return c.json({ task: await createTask({ ...base, status: "pending" }) });
+  }
+  if (decision === "ejecutar") {
+    const task = await createTask({ ...base, status: "pending" });
+    if (!task) return c.json({ error: "no se pudo crear la tarea (¿Supabase?)" }, 500);
+    const res = await executeTask(task.id);
+    if (!res) return c.json({ error: "no se pudo ejecutar la tarea" }, 500);
+    return c.json({
+      task: { ...task, status: "running", run_id: res.runId },
+      run_id: res.runId,
+      session_id: res.sessionId,
+      slug: res.slug,
+    });
+  }
+  return c.json({ error: "decisión inválida (ejecutar|pendiente|ignorar)" }, 400);
+});
+
+// ── Tracker de tareas por proyecto ─────────────────────────────────────
+// Prefijo /tracker para no chocar con /tasks (tareas async del SDK/voz).
+
+app.get("/tracker/tasks", async (c) =>
+  c.json(
+    await listTrackerTasks({
+      project: c.req.query("project") || undefined,
+      status: (c.req.query("status") as TaskState) || undefined,
+    }),
+  ),
+);
+
+app.post("/tracker/tasks", async (c) => {
+  const { project, title, detail } = await c.req
+    .json<{ project?: string; title?: string; detail?: string }>()
+    .catch(() => ({ project: undefined, title: undefined, detail: undefined }));
+  if (!project || !title?.trim()) return c.json({ error: "project y title requeridos" }, 400);
+  return c.json(await createTask({ project, title: title.trim(), detail, source: "manual" }));
+});
+
+app.get("/tracker/tasks/:id", async (c) => {
+  const task = await getTrackerTask(Number(c.req.param("id")));
+  if (!task) return c.json({ error: "tarea no encontrada" }, 404);
+  return c.json(task);
+});
+
+app.post("/tracker/tasks/:id", async (c) => {
+  const patch = await c.req.json<{ title?: string; detail?: string }>().catch(() => ({}));
+  return c.json(await updateTask(Number(c.req.param("id")), patch));
+});
+
+app.post("/tracker/tasks/:id/status", async (c) => {
+  const { status } = await c.req.json<{ status?: TaskState }>().catch(() => ({ status: undefined }));
+  if (!status) return c.json({ error: "status requerido" }, 400);
+  return c.json(await setTaskStatus(Number(c.req.param("id")), status));
+});
+
+app.post("/tracker/tasks/:id/execute", async (c) => {
+  const res = await executeTask(Number(c.req.param("id")));
+  if (!res) return c.json({ error: "no se pudo ejecutar (sin tarea o sin Supabase)" }, 400);
+  return c.json({ run_id: res.runId, session_id: res.sessionId, slug: res.slug });
+});
+
+// Continuar/enviar otro prompt: resume la sesión de la tarea con un run nuevo.
+app.post("/tracker/tasks/:id/continue", async (c) => {
+  const { prompt } = await c.req.json<{ prompt?: string }>().catch(() => ({ prompt: undefined }));
+  const res = await continueTask(Number(c.req.param("id")), prompt);
+  if (!res) return c.json({ error: "no se pudo continuar (sin tarea o sin Supabase)" }, 400);
+  return c.json({ run_id: res.runId, session_id: res.sessionId, slug: res.slug });
+});
+
+// Historial de ejecuciones de una tarea (memoria: prompt · análisis · resultado).
+app.get("/tracker/tasks/:id/executions", async (c) => {
+  const task = await getTrackerTask(Number(c.req.param("id")));
+  if (!task) return c.json({ error: "tarea no encontrada" }, 404);
+  return c.json(await listExecutions(task.project_slug, task.id));
+});
+
+// Documento completo de una ejecución (con markdown para renderizar en la web).
+app.get("/tracker/executions/:project/:id", async (c) => {
+  const exec = await getExecution(c.req.param("project"), c.req.param("id"));
+  if (!exec) return c.json({ error: "ejecución no encontrada" }, 404);
+  return c.json(exec);
+});
+
+app.post("/tracker/import/:project", async (c) =>
+  c.json(await importVaultTasks(c.req.param("project"))),
+);
+
+// Arregla tareas 'running' huérfanas (run muerto por reinicio del agente).
+app.post("/tracker/reconcile", async (c) => c.json({ fixed: await reconcileRunningTasks() }));
 
 // ── Claude Code (CLI real): Terminal.app + panel embebido ──────────────
 interface ClaudeExecBody {
@@ -462,6 +652,51 @@ app.post("/tools/get_daily_brief", async (c) => {
   return c.json({ brief: brief || "No hay proyectos activos en el vault." });
 });
 
+// ── Token efímero de ElevenLabs (app móvil) ────────────────────────────
+// La app React Native no puede tener la xi-api-key embebida; pide aquí un
+// token efímero (WebRTC preferido, WebSocket de fallback) — igual que la ruta
+// /api/elevenlabs/token del dashboard, pero servida por el agente para que el
+// celular hable con el MISMO agente de voz "Hermes" sin exponer secretos.
+app.get("/elevenlabs/token", async (c) => {
+  const apiKey = env.ELEVENLABS_API_KEY;
+  const agentId = env.ELEVENLABS_AGENT_ID;
+  if (!apiKey || !agentId) {
+    return c.json(
+      {
+        notConfigured: true,
+        error: "Configura ELEVENLABS_API_KEY y NEXT_PUBLIC_ELEVENLABS_AGENT_ID en .env",
+      },
+      503,
+    );
+  }
+  const headers = { "xi-api-key": apiKey };
+
+  // WebRTC token (latencia más baja).
+  const tokenRes = await fetch(
+    `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${agentId}`,
+    { headers },
+  );
+  if (tokenRes.ok) {
+    const { token } = (await tokenRes.json()) as { token: string };
+    return c.json({ conversationToken: token });
+  }
+
+  // Fallback WebSocket (signed url).
+  const signedRes = await fetch(
+    `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+    { headers },
+  );
+  if (signedRes.ok) {
+    const { signed_url } = (await signedRes.json()) as { signed_url: string };
+    return c.json({ signedUrl: signed_url });
+  }
+
+  return c.json(
+    { error: `ElevenLabs rechazó ambos métodos (${tokenRes.status}/${signedRes.status})` },
+    502,
+  );
+});
+
 // ── Stream de actividad en vivo (dashboard) ────────────────────────────
 app.get("/events", (c) =>
   streamSSE(c, async (stream) => {
@@ -508,6 +743,12 @@ app.get("/stats", async (c) => {
 
 app.get("/projects", async (c) => c.json(await readProjects()));
 
+// Resuelve un .md del vault desde una referencia (wikilink `[[x]]` o ruta `x.md`)
+// para el visor tipo Notion del dashboard. `project` desambigua nombres repetidos.
+app.get("/vault/doc", async (c) =>
+  c.json(await resolveVaultDoc(c.req.query("ref") ?? "", c.req.query("project") || undefined)),
+);
+
 // Contexto operativo de un proyecto (skills · MCP · tools · comandos).
 app.get("/projects/:slug/context", async (c) =>
   c.json(await readProjectContext(c.req.param("slug"))),
@@ -532,6 +773,7 @@ app.get("/memories/recent", async (c) => c.json(await recentMemories(12)));
 // ── Boot ───────────────────────────────────────────────────────────────
 startHeartbeat();
 void readProjects(); // primer parse + sync a projects_cache
+void reconcileRunningTasks(); // arregla tareas 'running' huérfanas de un reinicio
 
 // Bind explícito: sin API key SOLO loopback (antes escuchaba en todas las
 // interfaces con la LAN sin auth); con key se abre a 0.0.0.0 para que otra

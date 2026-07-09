@@ -3,7 +3,7 @@
 import { useConversationClientTool } from "@elevenlabs/react";
 import type { ProjectStatus } from "@hermes/shared";
 import { hermesGet, hermesPost } from "@/lib/hermes";
-import { useVoiceBusy } from "./VoiceBusyContext";
+import { useVoice } from "./VoiceBusyContext";
 
 /**
  * Registra TODAS las client tools de la voz con el ConversationProvider.
@@ -18,7 +18,7 @@ import { useVoiceBusy } from "./VoiceBusyContext";
  * No renderiza nada: es solo el punto de registro.
  */
 
-type Panel = "consola" | "actividad" | "claude";
+type Panel = "consola" | "actividad" | "claude" | "reuniones" | "voz";
 
 interface Props {
   /** Proyectos conocidos: para resolver el slug que dice la voz. */
@@ -35,7 +35,7 @@ const str = (v: unknown): string | undefined =>
   typeof v === "string" && v.trim() ? v.trim() : undefined;
 
 export function VoiceClientTools({ projects, onFocusProject, onShowPanel, onWork }: Props) {
-  const { setAction } = useVoiceBusy();
+  const { setAction, startArtifact } = useVoice();
 
   // Resuelve lo que dice la voz ("careways", "el de salud") a un slug real.
   const resolveSlug = (raw?: string): string | null => {
@@ -65,13 +65,17 @@ export function VoiceClientTools({ projects, onFocusProject, onShowPanel, onWork
 
   useConversationClientTool("show_panel", async (p) => {
     const raw = (str(p.panel) ?? "").toLowerCase();
-    const panel: Panel | null = raw.includes("activ") || raw.includes("feed") || raw.includes("vivo")
-      ? "actividad"
-      : raw.includes("claude") || raw.includes("cod") || raw.includes("term")
-        ? "claude"
-        : raw.includes("consol") || raw.includes("chat")
-          ? "consola"
-          : null;
+    const panel: Panel | null = raw.includes("voz") || raw.includes("preview") || raw.includes("report")
+      ? "voz"
+      : raw.includes("reuni") || raw.includes("junta") || raw.includes("meeting")
+        ? "reuniones"
+        : raw.includes("activ") || raw.includes("feed")
+          ? "actividad"
+          : raw.includes("claude") || raw.includes("cod") || raw.includes("term")
+            ? "claude"
+            : raw.includes("consol") || raw.includes("chat")
+              ? "consola"
+              : null;
     if (!panel) return `No conozco el panel "${raw}".`;
     onShowPanel(panel);
     return `Mostrando ${panel}.`;
@@ -102,8 +106,11 @@ export function VoiceClientTools({ projects, onFocusProject, onShowPanel, onWork
     if (!prompt) return "¿Qué tarea quieres que haga?";
     try {
       const res = await hermesPost<{ task_id: string }>("/tasks", { prompt });
-      onShowPanel("actividad");
-      return `Tarea ${res.task_id} en marcha, corre en segundo plano. Te aviso al terminar.`;
+      // Abre el modo Voz y arranca el preview: cuando la tarea termine, su
+      // resultado (reporte, resumen, lo que sea) se renderiza en el centro.
+      startArtifact({ title: prompt, taskId: res.task_id });
+      onShowPanel("voz");
+      return `Va, lo estoy preparando. Aquí en pantalla vas a ver el resultado en cuanto esté; te aviso al terminar.`;
     } catch {
       return "No alcanzo al agente local ahora mismo.";
     }

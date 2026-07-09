@@ -54,12 +54,15 @@ export function ClaudeTerminal({
   sessionId,
   onSelectSession,
   onNewSession,
+  onStatus,
 }: {
   project?: string | null;
   runId: string | null;
   sessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  /** Notifica el estado de la corrida (para gatear acciones como "continuar"). */
+  onStatus?: (s: Status) => void;
 }) {
   const [lines, setLines] = useState<Line[]>([]);
   const [status, setStatus] = useState<Status>("idle");
@@ -71,6 +74,13 @@ export function ClaudeTerminal({
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Notifica el estado hacia arriba sin re-suscribir al cambiar la identidad del callback.
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
+  useEffect(() => {
+    onStatusRef.current?.(status);
+  }, [status]);
 
   const refreshSessions = useCallback(() => {
     void listClaudeSessions(project).then(setSessions);
@@ -140,8 +150,21 @@ export function ClaudeTerminal({
       // forma permanente o si varios reintentos seguidos fallan.
       es.onerror = () => {
         if (es.readyState === EventSource.CLOSED || ++errCount >= 4) {
-          setStatus((s) => (s === "running" ? "error" : s));
           es.close();
+          // El run ya no vive (evictado / agente reiniciado): cae al transcript
+          // persistido de la sesión, así SIEMPRE se ve la conversación abierta.
+          if (sessionId) {
+            void getClaudeSession(project, sessionId).then((d) => {
+              if (!d) {
+                setStatus((s) => (s === "running" ? "error" : s));
+                return;
+              }
+              setLines(d.lines);
+              setStatus(d.status === "running" ? "idle" : d.status);
+            });
+          } else {
+            setStatus((s) => (s === "running" ? "error" : s));
+          }
           refreshSessions();
         }
       };

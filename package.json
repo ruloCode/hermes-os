@@ -10,6 +10,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "migrate:clawd": "pnpm --filter @hermes/agent exec tsx scripts/migrate-clawd-memories.ts",
+    "backfill:conversations": "pnpm --filter @hermes/agent exec tsx scripts/backfill-conversations.ts",
+    "backfill:embeddings": "pnpm --filter @hermes/agent exec tsx scripts/backfill-embeddings.ts",
     "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts"
   },
   "devDependencies": {

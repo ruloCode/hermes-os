@@ -157,7 +157,9 @@ const TOOLS: ToolDef[] = [
       "Busca en la memoria persistente de Hermes (aprendizajes, decisiones, contexto de días anteriores). Úsala cuando Rulo pregunte por algo del pasado.",
     parameters: {
       type: "object",
-      properties: { query: { type: "string" } },
+      properties: {
+        query: { type: "string", description: "Qué buscar en la memoria, en lenguaje natural" },
+      },
       required: ["query"],
     },
     expects_response: true,
@@ -170,7 +172,7 @@ const TOOLS: ToolDef[] = [
     parameters: {
       type: "object",
       properties: {
-        content: { type: "string" },
+        content: { type: "string", description: "La memoria o preferencia a guardar, tal cual" },
         type: {
           type: "string",
           description: "user | feedback | project | reference | daily | agent",
@@ -195,10 +197,13 @@ const SYSTEM_PROMPT = `Eres Hermes, el sistema operativo de IA personal de Rulo 
 
 Personalidad: directo, cálido, eficiente. Hablas SIEMPRE en español, con frases cortas aptas para voz. Nada de listas largas ni markdown: esto es una conversación hablada.
 
+CONTEXTO DE ESTA SESIÓN: {{session_scope}}
+
 Reglas de oro:
+0. SCOPE DE PROYECTO: Si el contexto de arriba dice que hay un proyecto enfocado, ESTÁS TRABAJANDO DENTRO DE ESE PROYECTO. Asume que TODO lo que pida Rulo es sobre ese proyecto salvo que nombre otro explícitamente. No preguntes "¿de qué proyecto?": ya lo sabes. Para su estado usa get_project_status con ese proyecto; para tocar su repo usa work_on_project con ese proyecto; para un reporte/resumen, hazlo de ese proyecto. Si Rulo dice "salte del proyecto" o "vista general", usa focus_project sin proyecto.
 1. NUNCA inventes el estado de proyectos ni memorias: usa get_project_status, search_memory o get_daily_brief.
 2. Manejas la interfaz mientras hablas:
-   - Cuando Rulo mencione un proyecto o pida verlo → focus_project (la pantalla se centra en él). Hazlo aunque también vayas a hacer otra cosa.
+   - Cuando Rulo mencione OTRO proyecto o pida verlo → focus_project (la pantalla se centra en él). Hazlo aunque también vayas a hacer otra cosa.
    - Si pide ver el feed, la consola o cómo va el código → show_panel.
 3. Elige bien QUÉ ejecutor usar:
    - Programar DENTRO del repo de un proyecto (bug, feature, refactor, correr algo en ese repo) → work_on_project (project + prompt). Abre el stream en vivo; Rulo ve a Claude trabajar. Confirma en una frase ("Va, Claude ya está en ello en careways") y sigue.
@@ -237,6 +242,13 @@ async function upsertAgent(toolIds: string[]): Promise<string> {
     agent: {
       first_message: FIRST_MESSAGE,
       language: "es",
+      // Valor por defecto de la dynamic variable {{session_scope}}: si el
+      // cliente no la pasa (arranque sin proyecto), no rompe la sesión.
+      dynamic_variables: {
+        dynamic_variable_placeholders: {
+          session_scope: "El usuario está en la vista general, sin proyecto enfocado.",
+        },
+      },
       prompt: {
         prompt: SYSTEM_PROMPT,
         llm: AGENT_LLM,

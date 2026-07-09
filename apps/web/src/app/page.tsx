@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { ConversationProvider } from "@elevenlabs/react";
 import { claudeStartRun } from "@/lib/hermes";
 import { useHermesData } from "@/hooks/useHermesData";
@@ -19,19 +20,23 @@ import { ActivityFeed } from "@/components/ActivityFeed";
 import { CommandDeck } from "@/components/CommandDeck";
 import { OrchestratorPanel } from "@/components/OrchestratorPanel";
 import { ProjectContextPanel } from "@/components/ProjectContextPanel";
+import { MeetingsPanel } from "@/components/MeetingsPanel";
 import { ProjectVersion } from "@/components/ProjectVersion";
 import { Toasts } from "@/components/Toasts";
 import { MachineSelector } from "@/components/MachineSelector";
 import { VoiceBusyProvider } from "@/components/VoiceBusyContext";
 import { VoiceClientTools } from "@/components/VoiceClientTools";
 import { VoiceEventsBridge } from "@/components/VoiceEventsBridge";
+import { VoiceSessionBridge } from "@/components/VoiceSessionBridge";
 import { VoiceOrb } from "@/components/VoiceOrb";
 import { VoicePanel } from "@/components/VoicePanel";
+import { VoiceScopeSync } from "@/components/VoiceScopeSync";
+import { VozView } from "@/components/VozView";
 
 export default function Home() {
   const { stats, projects, memories, online } = useHermesData();
   const { events } = useAgentEvents();
-  const [tab, setTab] = useState<"consola" | "actividad" | "claude">("consola");
+  const [tab, setTab] = useState<"consola" | "actividad" | "claude" | "reuniones" | "voz">("consola");
   // Config de ejecución de Claude Code (modelo · esfuerzo · permisos).
   const [claudeConfig, setClaudeConfig] = useState<ClaudeExecConfig>(DEFAULT_CLAUDE_CONFIG);
   const [claudeRunId, setClaudeRunId] = useState<string | null>(null);
@@ -58,7 +63,8 @@ export default function Home() {
       }
       return !v;
     });
-  const selectedProjectName = projects.find((p) => p.slug === selectedProject)?.name;
+  const selectedProjectData = projects.find((p) => p.slug === selectedProject);
+  const selectedProjectName = selectedProjectData?.name;
   // Elegir un proyecto lleva a la consola para conversar sobre él.
   const focusProject = (slug: string | null) => {
     setSelectedProject(slug);
@@ -141,6 +147,12 @@ export default function Home() {
           onWork={launchClaudeRun}
         />
         <VoiceEventsBridge events={events} />
+        {/* Transcripción + memoria de sesión (recap al reconectar) + preview
+            de artefactos. Al conectar la llamada, salta a la vista Voz. */}
+        <VoiceSessionBridge events={events} onConnected={() => setTab("voz")} />
+        {/* Scope: el proyecto en foco viaja a la voz (dynamic var al conectar,
+            contextual update si cambia en vivo). */}
+        <VoiceScopeSync slug={selectedProject} name={selectedProjectName} />
         <main className="mx-auto flex h-screen max-w-[1700px] flex-col gap-3 p-3 lg:p-4">
         {/* ── Header ─────────────────────────────────────────────── */}
         <header className="hud-in flex items-end justify-between px-1">
@@ -182,6 +194,14 @@ export default function Home() {
             ))}
           </nav>
           <div className="flex items-end gap-4">
+            {/* Página aparte: Control de Misión (orquestador + tareas) */}
+            <Link
+              href="/orquestador"
+              className="pb-1 text-[10px] tracking-[0.25em] uppercase transition-opacity hover:opacity-100"
+              style={{ color: "var(--violet)", opacity: 0.85 }}
+            >
+              ◧ Orquestador
+            </Link>
             {/* Orbe de voz: control siempre visible de la llamada con Hermes */}
             <VoiceOrb />
             {/* Multi-Mac: solo aparece si NEXT_PUBLIC_HERMES_AGENTS está definida */}
@@ -206,11 +226,30 @@ export default function Home() {
             <ProjectsStrip projects={projects} selected={selectedProject} onSelect={focusProject} />
           </div>
 
-          {/* Centro: la consola protagonista, a toda altura */}
-          <div className={`${sidebarOpen ? "col-span-6" : "col-span-9"} flex min-h-0 flex-col gap-3`}>
+          {/* Centro: la consola protagonista. En modo VOZ se ensancha (la
+              columna derecha se oculta) para darle todo el espacio al preview. */}
+          <div
+            className={`${
+              tab === "voz"
+                ? sidebarOpen
+                  ? "col-span-9"
+                  : "col-span-12"
+                : sidebarOpen
+                  ? "col-span-6"
+                  : "col-span-9"
+            } flex min-h-0 flex-col gap-3`}
+          >
             <Panel
               title={
-                tab === "consola" ? "Consola" : tab === "actividad" ? "Actividad en vivo" : "Claude Code"
+                tab === "consola"
+                  ? "Consola"
+                  : tab === "actividad"
+                    ? "Actividad en vivo"
+                    : tab === "reuniones"
+                      ? "Reuniones"
+                      : tab === "voz"
+                        ? "Voz en vivo"
+                        : "Claude Code"
               }
               delay={90}
               className="min-h-0 flex-1"
@@ -218,8 +257,10 @@ export default function Home() {
                 <div className="flex gap-3 text-[9px] tracking-[0.2em]">
                   {(
                     [
+                      ["voz", "voz en vivo"],
                       ["consola", "consola"],
                       ["actividad", "actividad"],
+                      ["reuniones", "reuniones"],
                       ["claude", "claude code"],
                     ] as const
                   ).map(([t, label]) => (
@@ -235,8 +276,11 @@ export default function Home() {
                 </div>
               }
             >
-              {/* Los 3 paneles quedan montados y se alternan con CSS: así la
+              {/* Los paneles quedan montados y se alternan con CSS: así la
                   consola no pierde su transcripción/scroll al cambiar de tab. */}
+              <div className={`h-full ${tab === "voz" ? "" : "hidden"}`}>
+                <VozView events={events} />
+              </div>
               <div className={`h-full ${tab === "consola" ? "" : "hidden"}`}>
                 <ChatPanel
                   online={online}
@@ -255,6 +299,13 @@ export default function Home() {
               </div>
               <div className={`h-full ${tab === "actividad" ? "" : "hidden"}`}>
                 <ActivityFeed events={events} />
+              </div>
+              <div className={`h-full ${tab === "reuniones" ? "" : "hidden"}`}>
+                <MeetingsPanel
+                  project={selectedProject}
+                  projectName={selectedProjectName}
+                  onExecute={({ slug, runId, sessionId }) => openRun({ slug, runId, sessionId })}
+                />
               </div>
               <div className={`h-full ${tab === "claude" ? "" : "hidden"}`}>
                 <ClaudeTerminal
@@ -277,13 +328,15 @@ export default function Home() {
             </Panel>
           </div>
 
-          {/* Columna derecha */}
-          <div className="col-span-3 flex min-h-0 flex-col gap-3">
+          {/* Columna derecha (se oculta en modo voz para ensanchar el preview) */}
+          <div className={`col-span-3 min-h-0 flex-col gap-3 ${tab === "voz" ? "hidden" : "flex"}`}>
             {selectedProject ? (
               <ProjectContextPanel
                 key={selectedProject}
                 slug={selectedProject}
                 name={selectedProjectName}
+                estadoActual={selectedProjectData?.estado_actual}
+                tareas={selectedProjectData?.tareas_pendientes}
                 onClear={() => setSelectedProject(null)}
               />
             ) : (

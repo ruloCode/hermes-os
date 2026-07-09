@@ -22,3 +22,8 @@ dist/
 # logs
 *.log
 .data/
+
+# tooling local — no versionar
+supabase/.temp/
+.playwright-mcp/
+hermes-dashboard.png

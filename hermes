@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+#
+# hermes — lanzador de Hermes OS
+#
+# Uso:
+#   ./hermes            arranca web + agente (equivale a `pnpm dev`)
+#   ./hermes web        solo el dashboard (Next.js)
+#   ./hermes agent      solo el agent server (Claude Agent SDK)
+#   ./hermes setup      instala deps, crea .env y prepara ElevenLabs
+#   ./hermes doctor     revisa requisitos y puertos sin arrancar nada
+#   ./hermes stop       mata lo que esté escuchando en los puertos de Hermes
+#   ./hermes typecheck  typecheck de todos los paquetes
+#   ./hermes help       esta ayuda
+#
+set -euo pipefail
+
+# --- ubicación: siempre corre desde la raíz del repo ---
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+# --- colores ---
+if [[ -t 1 ]]; then
+  B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[0m'
+  CYAN=$'\033[36m'; MAG=$'\033[35m'; GREEN=$'\033[32m'; YEL=$'\033[33m'; RED=$'\033[31m'
+else
+  B=""; DIM=""; R=""; CYAN=""; MAG=""; GREEN=""; YEL=""; RED=""
+fi
+
+say()  { printf "%s\n" "$*"; }
+ok()   { printf "  ${GREEN}✓${R} %s\n" "$*"; }
+warn() { printf "  ${YEL}!${R} %s\n" "$*"; }
+err()  { printf "  ${RED}✗${R} %s\n" "$*" >&2; }
+
+banner() {
+  printf "\n${B}${CYAN}⚡ Hermes OS${R} ${DIM}— %s${R}\n\n" "${1:-lanzador}"
+}
+
+# --- lee un valor del .env (sin exportar todo el archivo) ---
+env_get() {
+  local key="$1" file="${2:-.env}"
+  [[ -f "$file" ]] || return 0
+  grep -E "^[[:space:]]*${key}=" "$file" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || true
+}
+
+WEB_PORT="$(env_get NEXT_PUBLIC_WEB_PORT)"; WEB_PORT="${WEB_PORT:-31415}"
+AGENT_PORT="$(env_get HERMES_PORT)"; AGENT_PORT="${AGENT_PORT:-8642}"
+
+port_pid() { { lsof -i ":$1" -sTCP:LISTEN -t 2>/dev/null || true; } | head -n1; }
+
+# --- verificaciones de entorno ---
+need_cmd() {
+  if command -v "$1" >/dev/null 2>&1; then ok "$1 $(${1} --version 2>/dev/null | head -n1 | tr -d '\n' | sed 's/^v//' || true)"; return 0
+  else err "$1 no encontrado — $2"; return 1; fi
+}
+
+check_deps() {
+  local missing=0
+  need_cmd node "instala Node 22+ (https://nodejs.org)"   || missing=1
+  need_cmd pnpm "corre: npm i -g pnpm"                     || missing=1
+  if command -v rg >/dev/null 2>&1; then ok "ripgrep"; else warn "ripgrep (rg) falta — brew install ripgrep (lo usa el agente)"; fi
+  return $missing
+}
+
+ensure_env() {
+  if [[ ! -f .env ]]; then
+    if [[ -f .env.example ]]; then
+      cp .env.example .env
+      warn ".env no existía → lo copié de .env.example. Complétalo antes de usar voz/Supabase."
+    else
+      err "No hay .env ni .env.example."
+      return 1
+    fi
+  else
+    ok ".env presente"
+  fi
+}
+
+ensure_install() {
+  if [[ ! -d node_modules/.bin ]] || [[ ! -x node_modules/.bin/concurrently ]]; then
+    say "  ${DIM}Instalando dependencias (pnpm install)…${R}"
+    pnpm install
+  else
+    ok "dependencias instaladas"
+  fi
+}
+
+preflight() {
+  check_deps || { err "Faltan requisitos. Corré: ${B}./hermes doctor${R}"; exit 1; }
+  ensure_env
+  ensure_install
+}
+
+# --- subcomandos ---
+cmd_doctor() {
+  banner "doctor"
+  check_deps || true
+  ensure_env || true
+  echo
+  say "  ${B}Puertos${R}"
+  local wp ap
+  wp="$(port_pid "$WEB_PORT")"; ap="$(port_pid "$AGENT_PORT")"
+  [[ -n "$wp" ]] && warn "web :$WEB_PORT ocupado (pid $wp)"     || ok "web :$WEB_PORT libre"
+  [[ -n "$ap" ]] && warn "agente :$AGENT_PORT ocupado (pid $ap)" || ok "agente :$AGENT_PORT libre"
+  echo
+}
+
+cmd_stop() {
+  banner "stop"
+  local killed=0
+  for p in "$WEB_PORT" "$AGENT_PORT"; do
+    local pid; pid="$(port_pid "$p")"
+    if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null && ok "maté pid $pid en :$p" && killed=1; fi
+  done
+  [[ "$killed" -eq 0 ]] && ok "no había nada escuchando en :$WEB_PORT ni :$AGENT_PORT"
+  return 0
+}
+
+cmd_setup() {
+  banner "setup"
+  preflight
+  echo
+  say "  ${DIM}Configurando agente de voz ElevenLabs…${R}"
+  if pnpm setup:elevenlabs; then
+    ok "ElevenLabs listo — pega el NEXT_PUBLIC_ELEVENLABS_AGENT_ID que imprimió en .env"
+  else
+    warn "setup:elevenlabs falló (¿faltan claves en .env?). El resto quedó instalado."
+  fi
+}
+
+cmd_typecheck() { banner "typecheck"; pnpm typecheck; }
+
+start_urls() {
+  printf "\n"
+  printf "  ${B}${CYAN}▸ Dashboard${R}  http://localhost:%s\n" "$WEB_PORT"
+  printf "  ${B}${MAG}▸ Agente${R}     http://localhost:%s\n" "$AGENT_PORT"
+  printf "  ${DIM}Ctrl-C para parar todo${R}\n\n"
+}
+
+warn_busy() {
+  local pid
+  pid="$(port_pid "$1")"
+  if [[ -n "$pid" ]]; then
+    warn ":$1 ya está ocupado (pid $pid) — quizá otro Hermes. Usá ${B}./hermes stop${R} o cambiá el puerto."
+  fi
+  return 0
+}
+
+cmd_all() {
+  banner "arrancando web + agente"
+  preflight
+  warn_busy "$WEB_PORT"; warn_busy "$AGENT_PORT"
+  start_urls
+  exec pnpm dev
+}
+
+cmd_web() {
+  banner "solo dashboard"
+  preflight
+  warn_busy "$WEB_PORT"
+  printf "\n  ${B}${CYAN}▸ Dashboard${R}  http://localhost:%s  ${DIM}(Ctrl-C para parar)${R}\n\n" "$WEB_PORT"
+  exec pnpm dev:web
+}
+
+cmd_agent() {
+  banner "solo agente"
+  preflight
+  warn_busy "$AGENT_PORT"
+  printf "\n  ${B}${MAG}▸ Agente${R}  http://localhost:%s  ${DIM}(Ctrl-C para parar)${R}\n\n" "$AGENT_PORT"
+  exec pnpm dev:agent
+}
+
+cmd_help() {
+  banner "lanzador"
+  cat <<EOF
+  ${B}Uso:${R} ./hermes ${DIM}[comando]${R}
+
+    ${B}(sin args)${R}   arranca web + agente        ${DIM}pnpm dev${R}
+    ${B}web${R}          solo el dashboard           ${DIM}:$WEB_PORT${R}
+    ${B}agent${R}        solo el agent server        ${DIM}:$AGENT_PORT${R}
+    ${B}setup${R}        instala deps + ElevenLabs
+    ${B}doctor${R}       revisa requisitos y puertos
+    ${B}stop${R}         libera los puertos de Hermes
+    ${B}typecheck${R}    typecheck de todo el monorepo
+    ${B}help${R}         esta ayuda
+
+  Tip: agregá el repo al PATH y escribí ${B}hermes${R} desde donde sea.
+EOF
+}
+
+case "${1:-}" in
+  ""|start|dev|all) cmd_all ;;
+  web)              cmd_web ;;
+  agent)            cmd_agent ;;
+  setup)            cmd_setup ;;
+  doctor)           cmd_doctor ;;
+  stop)             cmd_stop ;;
+  typecheck|tc)     cmd_typecheck ;;
+  help|-h|--help)   cmd_help ;;
+  *) err "Comando desconocido: $1"; echo; cmd_help; exit 1 ;;
+esac

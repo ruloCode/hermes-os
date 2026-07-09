@@ -12,7 +12,7 @@ import { supabase } from "../supabase.js";
 let cache: { at: number; data: ProjectStatus[] } | null = null;
 const TTL = 60_000;
 
-function extractSection(md: string, heading: RegExp): string {
+export function extractSection(md: string, heading: RegExp): string {
   // Tolerante a emojis en headers: "## 📊 Estado Actual", "## Estado Actual", etc.
   const lines = md.split("\n");
   const start = lines.findIndex((l) => heading.test(l));
@@ -25,7 +25,7 @@ function extractSection(md: string, heading: RegExp): string {
     .trim();
 }
 
-function extractTasks(section: string): string[] {
+export function extractTasks(section: string): string[] {
   return section
     .split("\n")
     .filter((l) => /^\s*[-*]\s*\[[ x]\]/i.test(l) || /^\s*[-*]\s+\S/.test(l))
@@ -76,6 +76,37 @@ export async function readProjects(force = false): Promise<ProjectStatus[]> {
   cache = { at: Date.now(), data: results };
   void syncToSupabase(results);
   return results;
+}
+
+/**
+ * Ruta + contenido crudo de la nota principal de un proyecto (el primer .md de
+ * su carpeta). Reusa readProjects para resolver el slug/name reales (la carpeta
+ * puede tener mayúsculas). Lo usan las reuniones para leer el briefing y anexar
+ * accionables a "Tareas Pendientes".
+ */
+export async function getProjectNote(
+  slug: string,
+): Promise<{ path: string; raw: string; name: string; slug: string } | null> {
+  if (!env.VAULT_PATH) return null;
+  const p = (await readProjects()).find((x) => x.slug.toLowerCase() === slug.toLowerCase());
+  if (!p) return null;
+  const path = join(env.VAULT_PATH, "projects", p.slug, `${p.name}.md`);
+  try {
+    return { path, raw: await readFile(path, "utf8"), name: p.name, slug: p.slug };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lee la sección "## Briefing Reuniones" de la nota del proyecto (vacío si no
+ * existe). Guía cómo Hermes resume la junta y arma los accionables.
+ */
+export async function getProjectBriefing(slug: string): Promise<string> {
+  const note = await getProjectNote(slug);
+  if (!note) return "";
+  const { content } = matter(note.raw);
+  return extractSection(content, /^#{1,3}\s*.*Briefing Reuniones/i);
 }
 
 async function syncToSupabase(projects: ProjectStatus[]) {

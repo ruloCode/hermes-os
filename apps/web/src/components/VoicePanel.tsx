@@ -1,33 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useConversation } from "@elevenlabs/react";
 import { Panel } from "./Panel";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
-import { useVoiceBusy } from "./VoiceBusyContext";
+import { useVoice } from "./VoiceBusyContext";
 
 /**
- * Panel de voz: waveform REAL del audio (frecuencias del SDK) + transcripción
- * en vivo de la llamada. El control de conexión también vive aquí (además del
- * orbe del header) compartiendo `useVoiceConnect`, así que ambos quedan en sync.
- * Vive DENTRO de <ConversationProvider> (ver page.tsx).
+ * Panel de voz (sidebar): waveform REAL del audio (frecuencias del SDK) +
+ * transcripción de la llamada. La transcripción se lee del estado COMPARTIDO
+ * (VoiceSessionBridge la registra), así coincide con la vista Voz y sobrevive
+ * a pausar/reactivar. El control de conexión comparte `useVoiceConnect` con el
+ * orbe del header. Vive DENTRO de <ConversationProvider>.
  */
-interface Line {
-  who: "TÚ" | "HERMES";
-  text: string;
-}
-
 export function VoicePanel() {
-  const [transcript, setTranscript] = useState<Line[]>([]);
-  const { action } = useVoiceBusy();
+  const { action, transcript } = useVoice();
   const { connect, disconnect, error, configured, connected, connecting } = useVoiceConnect();
 
-  const conversation = useConversation({
-    onMessage: (payload) => {
-      const who: Line["who"] = payload.role === "user" ? "TÚ" : "HERMES";
-      setTranscript((prev) => [...prev.slice(-40), { who, text: payload.message }]);
-    },
-  });
+  const conversation = useConversation();
   const { isSpeaking, getInputByteFrequencyData, getOutputByteFrequencyData } = conversation;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);

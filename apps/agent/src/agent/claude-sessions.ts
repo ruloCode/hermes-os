@@ -149,6 +149,31 @@ export function startSession(meta: {
 }
 
 /**
+ * Persiste líneas nuevas SIN cerrar la sesión (checkpoint). Así un run que se
+ * corta a mitad (crash / reinicio del agente) conserva su transcript parcial.
+ * El caller lleva un cursor (persistedCount) para pasar solo la cola no escrita.
+ */
+export function checkpointSession(args: {
+  id: string;
+  projectSlug: string;
+  appendLines: ClaudeSessionLine[];
+  sdkSessionId?: string;
+}): Promise<void> {
+  return enqueue(async () => {
+    if (!args.appendLines.length) return;
+    const prev = await readDetail(args.projectSlug, args.id);
+    if (!prev) return;
+    const lines = [...prev.lines, ...args.appendLines].slice(-MAX_LINES);
+    await writeDetail({
+      ...prev,
+      updatedAt: new Date().toISOString(),
+      sdkSessionId: args.sdkSessionId || prev.sdkSessionId,
+      lines,
+    });
+  });
+}
+
+/**
  * Cierra una corrida: agrega las líneas nuevas al transcript, actualiza el
  * estado final y, si el CLI reportó otro session_id (fork), lo adopta para el
  * próximo resume.
