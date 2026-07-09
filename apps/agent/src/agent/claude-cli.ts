@@ -14,7 +14,8 @@ import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import type { ClaudeRunSummary } from "@hermes/shared";
 import { env } from "../env.js";
@@ -29,7 +30,12 @@ const MODELS = new Set([
   "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5",
 ]);
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
-const PERMISSIONS = new Set(["acceptEdits", "plan", "manual", "auto"]);
+const PERMISSIONS = new Set(["default", "acceptEdits", "plan", "manual", "auto"]);
+// Valores de UI/legacy → modos reales del CLI.
+const PERMISSION_CLI_MAP: Record<string, string> = {
+  manual: "default",
+  auto: "acceptEdits",
+};
 
 export interface ClaudeExecOpts {
   prompt: string;
@@ -51,9 +57,13 @@ export interface ClaudeExecOpts {
 function sanitize(opts: ClaudeExecOpts) {
   const model = MODELS.has(opts.model ?? "") ? opts.model! : "sonnet";
   const effort = EFFORTS.has(opts.effort ?? "") ? opts.effort! : "high";
-  const permissionMode = PERMISSIONS.has(opts.permissionMode ?? "")
+  // Sin modo explícito → "default" (pide permisos / deniega en headless).
+  // Los disparos sin humano en el loop (voz, triage de reuniones, tareas)
+  // no mandan permissionMode, así que NUNCA heredan acceptEdits solos.
+  const requested = PERMISSIONS.has(opts.permissionMode ?? "")
     ? opts.permissionMode!
-    : "acceptEdits";
+    : "default";
+  const permissionMode = PERMISSION_CLI_MAP[requested] ?? requested;
   let prompt = (opts.prompt ?? "").trim();
   if (opts.projectContext) {
     prompt = `Contexto: enfócate en el proyecto "${opts.projectContext}".\n\n${prompt}`;
@@ -61,12 +71,22 @@ function sanitize(opts: ClaudeExecOpts) {
   return { model, effort, permissionMode, prompt };
 }
 
+// Guardrails espejo de guardrails.ts para el CLI real: deny-list de Bash
+// destructivo y lecturas sensibles, aplicada vía --settings en TODA invocación
+// (el canUseTool del SDK no cubre esta ruta).
+const GUARDRAIL_SETTINGS = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../claude-settings.json",
+);
+
 function commonFlags(s: { model: string; effort: string; permissionMode: string }): string[] {
-  return [
+  const flags = [
     "--model", s.model,
     "--effort", s.effort,
     "--permission-mode", s.permissionMode,
   ];
+  if (existsSync(GUARDRAIL_SETTINGS)) flags.push("--settings", GUARDRAIL_SETTINGS);
+  return flags;
 }
 
 // Ubica el binario `claude` (el server puede no tener ~/.local/bin en PATH).

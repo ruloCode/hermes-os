@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(mkfs:*)",
+      "Bash(diskutil erase:*)",
+      "Bash(diskutil eraseDisk:*)",
+      "Bash(diskutil eraseVolume:*)",
+      "Bash(shutdown:*)",
+      "Bash(reboot:*)",
+      "Bash(chmod -R 777 /:*)",
+      "Bash(launchctl bootout:*)",
+      "Bash(launchctl unload:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.aws/**)",
+      "Read(~/.ssh/**)"
+    ]
+  }
+}

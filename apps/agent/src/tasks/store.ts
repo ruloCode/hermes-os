@@ -211,6 +211,11 @@ async function launch(
     projectSlug: slug,
     sessionId,
     resumeSdkSessionId,
+    // acceptEdits explícito: la ejecución la aprobó un humano (triage
+    // "Ejecutar" o botón del dashboard) y la deny-list de claude-settings.json
+    // bloquea lo destructivo. Sin esto caería al default restrictivo y la
+    // tarea no podría editar archivos en modo headless.
+    permissionMode: "acceptEdits",
   });
   await setTaskStatus(task.id, "running", { runId: run.id, sessionId });
   emit({ kind: "task_start", taskId: run.id, detail: `${opts.label}: ${task.title.slice(0, 100)}` });
