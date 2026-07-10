@@ -1,9 +1,12 @@
 /**
- * Cliente del agente Hermes (:8650 del Mac vía LAN/Tailscale). Mismo contrato
- * que el dashboard web (apps/web/src/lib/hermes.ts): fetch + Bearer opcional.
- * La app corre en el teléfono, así que NO hay CORS: golpea el agente directo.
+ * Cliente del agente Hermes (LAN o túnel público, según resolvió config.ts).
+ * Mismo contrato que el dashboard web (apps/web/src/lib/hermes.ts).
+ * Credencial: el JWT de la sesión Supabase (login email+contraseña); si no hay
+ * sesión cae al API key manual de Ajustes. En 401 refresca el token y reintenta
+ * una vez. La app corre en el teléfono, así que NO hay CORS.
  */
 import { getBase, getKey } from "./config";
+import { ensureFreshToken, getAccessToken, getSession, refreshSession } from "./auth";
 import type {
   ProjectStatus,
   Task,
@@ -14,18 +17,32 @@ import type {
   SystemStats,
   TaskExecution,
   TaskExecutionSummary,
+  Currency,
+  FinanceSummary,
+  Transaction,
+  TransactionKind,
+  Wallet,
 } from "./types";
 
 function authHeaders(): Record<string, string> {
-  const k = getKey();
-  return k ? { Authorization: `Bearer ${k}` } : {};
+  const token = getAccessToken() || getKey();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function req(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${getBase()}${path}`, {
-    ...init,
-    headers: { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) },
-  });
+  await ensureFreshToken();
+  const doFetch = () =>
+    fetch(`${getBase()}${path}`, {
+      ...init,
+      headers: { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) },
+    });
+  let res = await doFetch();
+  // 401 con sesión viva: el access token pudo vencer en vuelo → refresh + retry.
+  if (res.status === 401 && getSession()) {
+    const ok = await refreshSession();
+    if (ok) res = await doFetch();
+  }
+  return res;
 }
 
 export async function get<T>(path: string): Promise<T> {
@@ -210,6 +227,44 @@ export interface ClaudeRun {
 }
 export async function claudeRuns(): Promise<ClaudeRun[]> {
   return get<ClaudeRun[]>("/claude/runs");
+}
+
+// ── Finanzas personales (mismos endpoints que la página /vida) ─────────
+
+export async function financeSummary(opts: { month?: string; currency?: Currency; combined?: boolean } = {}): Promise<FinanceSummary> {
+  const q = new URLSearchParams();
+  if (opts.month) q.set("month", opts.month);
+  if (opts.currency) q.set("currency", opts.currency);
+  if (opts.combined !== false) q.set("combined", "1");
+  return get<FinanceSummary>(`/finance/summary?${q.toString()}`);
+}
+
+export async function listWallets(): Promise<Wallet[]> {
+  return get<Wallet[]>("/finance/wallets");
+}
+
+export async function listTransactions(opts: { limit?: number; month?: string } = {}): Promise<Transaction[]> {
+  const q = new URLSearchParams();
+  q.set("limit", String(opts.limit ?? 25));
+  if (opts.month) q.set("month", opts.month);
+  return get<Transaction[]>(`/finance/transactions?${q.toString()}`);
+}
+
+export async function addTransaction(input: {
+  kind: TransactionKind;
+  amount: number;
+  currency?: Currency;
+  category?: string;
+  account?: string;
+  note?: string;
+}): Promise<Transaction & { deduped?: boolean }> {
+  return post<Transaction & { deduped?: boolean }>("/finance/transactions", input);
+}
+
+export async function voidTransaction(id: number): Promise<{ ok: boolean }> {
+  const res = await req(`/finance/transactions/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`void → ${res.status}`);
+  return (await res.json()) as { ok: boolean };
 }
 
 // ── Token efímero de ElevenLabs (endpoint nuevo del agente) ────────────

@@ -141,11 +141,13 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       ? "reuniones"
       : raw.includes("tarea") || raw.includes("task") || raw.includes("mision") || raw.includes("misión")
         ? "tareas"
-        : raw.includes("proyect") || raw.includes("project")
-          ? "proyectos"
-          : raw.includes("voz") || raw.includes("voice")
-            ? "voz"
-            : null;
+        : raw.includes("finan") || raw.includes("dinero") || raw.includes("plata") || raw.includes("gasto")
+          ? "finanzas"
+          : raw.includes("proyect") || raw.includes("project")
+            ? "proyectos"
+            : raw.includes("voz") || raw.includes("voice")
+              ? "voz"
+              : null;
     if (!tab) return `No conozco el panel "${raw}".`;
     app.setTab(tab);
     return `Mostrando ${tab}.`;
@@ -235,6 +237,217 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       return data.brief;
     } catch {
       return "No pude armar el resumen del día.";
+    }
+  });
+
+  useConversationClientTool("show_project_status", async (p: any) => {
+    const slug = app.resolveSlug(str(p?.project));
+    if (slug) {
+      app.setFocused(slug);
+      app.setTab("proyectos");
+      flashAction(`Estado de ${slug}`);
+    }
+    try {
+      const data = await api.toolGetProjectStatus(slug ?? undefined);
+      return JSON.stringify(data).slice(0, 1500);
+    } catch {
+      return "No pude leer el estado de los proyectos.";
+    }
+  });
+
+  // ── Finanzas personales (asesor financiero por voz, paridad con la web) ─
+  const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+
+  useConversationClientTool("log_transaction", async (p: any) => {
+    const amount = typeof p?.amount === "number" ? p.amount : Number(p?.amount);
+    if (!amount || amount <= 0) return "¿De cuánto fue el movimiento?";
+    try {
+      const res = await api.post<{ ok: boolean; deduped?: boolean; confirmation?: string; error?: string }>(
+        "/tools/log_transaction",
+        {
+          kind: str(p?.kind) ?? "expense",
+          amount,
+          currency: str(p?.currency),
+          category: str(p?.category),
+          account: str(p?.account),
+          note: str(p?.note),
+          occurred_on: str(p?.date),
+          allow_duplicate: p?.allow_duplicate === true,
+        },
+      );
+      if (!res.ok) return res.error ?? "No pude registrar el movimiento.";
+      if (res.deduped)
+        return `Ojo: ya tenía ese registro hoy, no lo dupliqué. Si es un movimiento distinto, dime "regístralo de todos modos".`;
+      flashAction("Movimiento registrado");
+      return res.confirmation ?? "Registrado.";
+    } catch {
+      return "No alcanzo al agente para registrar el movimiento.";
+    }
+  });
+
+  useConversationClientTool("correct_last_transaction", async (p: any) => {
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/correct_last_transaction",
+        {
+          amount: num(p?.amount),
+          currency: str(p?.currency),
+          category: str(p?.category),
+          void: p?.void === true,
+        },
+      );
+      return res.ok ? (res.confirmation ?? "Corregida.") : (res.error ?? "No pude corregirla.");
+    } catch {
+      return "No alcanzo al agente para corregir.";
+    }
+  });
+
+  useConversationClientTool("get_finance_summary", async (p: any) => {
+    try {
+      const res = await api.post<{ text: string }>("/tools/get_finance_summary", {
+        month: str(p?.month),
+        currency: str(p?.currency),
+      });
+      return res.text;
+    } catch {
+      return "No pude consultar las finanzas.";
+    }
+  });
+
+  useConversationClientTool("get_balance", async () => {
+    try {
+      const res = await api.post<{ text: string }>("/tools/get_balance", {});
+      return res.text;
+    } catch {
+      return "No pude consultar el saldo.";
+    }
+  });
+
+  useConversationClientTool("set_wallet_balance", async (p: any) => {
+    const wallet = str(p?.wallet);
+    const balance = typeof p?.balance === "number" ? p.balance : Number(p?.balance);
+    if (!wallet || !Number.isFinite(balance)) return "¿Qué billetera y qué saldo fijo?";
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/set_wallet_balance",
+        { wallet, balance, currency: str(p?.currency) },
+      );
+      return res.ok ? (res.confirmation ?? "Saldo fijado.") : (res.error ?? "No pude fijarlo.");
+    } catch {
+      return "No alcanzo al agente para fijar el saldo.";
+    }
+  });
+
+  // ── Hábitos y metas (coach por voz) ────────────────────────────────────
+  useConversationClientTool("log_habit", async (p: any) => {
+    const habit = str(p?.habit);
+    if (!habit) return "¿Qué hábito marco?";
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/log_habit",
+        { habit, note: str(p?.note) },
+      );
+      return res.ok ? (res.confirmation ?? "Marcado.") : (res.error ?? "No pude marcarlo.");
+    } catch {
+      return "No alcanzo al agente para marcar el hábito.";
+    }
+  });
+
+  useConversationClientTool("get_habits_today", async () => {
+    try {
+      const data = await api.post<unknown>("/tools/get_habits_today", {});
+      return JSON.stringify(data).slice(0, 1500);
+    } catch {
+      return "No pude consultar los hábitos.";
+    }
+  });
+
+  useConversationClientTool("update_goal", async (p: any) => {
+    const goal = str(p?.goal);
+    if (!goal) return "¿Qué meta actualizo?";
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/update_goal",
+        { goal, progress: num(p?.progress), delta: num(p?.delta), milestone: str(p?.milestone) },
+      );
+      return res.ok ? (res.confirmation ?? "Actualizada.") : (res.error ?? "No pude actualizarla.");
+    } catch {
+      return "No alcanzo al agente para actualizar la meta.";
+    }
+  });
+
+  // ── Google Calendar por voz ────────────────────────────────────────────
+  useConversationClientTool("create_event", async (p: any) => {
+    const title = str(p?.title);
+    const start = str(p?.start);
+    if (!title || !start) return "¿Qué evento creo y para cuándo?";
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/create_event",
+        {
+          title,
+          start,
+          end: str(p?.end),
+          duration_min: num(p?.duration_min),
+          all_day: p?.all_day === true,
+          description: str(p?.description),
+          location: str(p?.location),
+        },
+      );
+      return res.ok ? (res.confirmation ?? "Evento creado.") : (res.error ?? "No pude crearlo.");
+    } catch {
+      return "No alcanzo al agente para crear el evento.";
+    }
+  });
+
+  useConversationClientTool("find_events", async (p: any) => {
+    try {
+      const res = await api.post<{ ok: boolean; events?: unknown[]; error?: string }>(
+        "/tools/find_events",
+        { query: str(p?.query), days_ahead: num(p?.days_ahead) },
+      );
+      if (!res.ok) return res.error ?? "No pude buscar en el calendario.";
+      if (!res.events?.length) return "No encontré eventos que coincidan.";
+      return JSON.stringify(res.events).slice(0, 1500);
+    } catch {
+      return "No alcanzo al agente para buscar en el calendario.";
+    }
+  });
+
+  useConversationClientTool("update_event", async (p: any) => {
+    const eventId = str(p?.event_id);
+    if (!eventId) return "Primero busco el evento con find_events para tener su id.";
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/update_event",
+        {
+          event_id: eventId,
+          title: str(p?.title),
+          start: str(p?.start),
+          end: str(p?.end),
+          duration_min: num(p?.duration_min),
+          all_day: p?.all_day === true ? true : undefined,
+          description: str(p?.description),
+          location: str(p?.location),
+        },
+      );
+      return res.ok ? (res.confirmation ?? "Evento actualizado.") : (res.error ?? "No pude modificarlo.");
+    } catch {
+      return "No alcanzo al agente para modificar el evento.";
+    }
+  });
+
+  useConversationClientTool("cancel_event", async (p: any) => {
+    const eventId = str(p?.event_id);
+    if (!eventId) return "Primero busco el evento con find_events para tener su id.";
+    try {
+      const res = await api.post<{ ok: boolean; confirmation?: string; error?: string }>(
+        "/tools/cancel_event",
+        { event_id: eventId, title: str(p?.title) },
+      );
+      return res.ok ? (res.confirmation ?? "Evento cancelado.") : (res.error ?? "No pude cancelarlo.");
+    } catch {
+      return "No alcanzo al agente para cancelar el evento.";
     }
   });
 

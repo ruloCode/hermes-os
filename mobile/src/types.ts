@@ -116,3 +116,64 @@ export interface TaskExecution extends TaskExecutionSummary {
   vault_path?: string | null;
   finished_at?: string | null;
 }
+
+// ── Finanzas personales (subconjunto de packages/shared) ───────────────
+
+export type TransactionKind = "expense" | "income";
+export type Currency = "COP" | "USD";
+
+export interface Transaction {
+  id: number;
+  kind: TransactionKind;
+  amount: number;
+  currency: Currency;
+  category: string;
+  account?: string | null;
+  note?: string | null;
+  /** YYYY-MM-DD en America/Bogota. */
+  occurred_on: string;
+  source: string;
+  created_at: string;
+  voided_at?: string | null;
+}
+
+export interface CategorySummary {
+  category: string;
+  spent: number;
+  budget: number | null;
+  pct: number | null;
+  count: number;
+}
+
+export interface IncomeCategorySummary {
+  category: string;
+  amount: number;
+  count: number;
+}
+
+export interface FxInfo {
+  usd_cop: number;
+  as_of: string;
+  converted_count: number;
+}
+
+export interface FinanceSummary {
+  month: string;
+  currency: Currency;
+  income: number;
+  expense: number;
+  net: number;
+  by_category: CategorySummary[];
+  income_by_category: IncomeCategorySummary[];
+  budgets_at_risk: CategorySummary[];
+  tx_count: number;
+  fx?: FxInfo | null;
+}
+
+export interface Wallet {
+  id: number;
+  name: string;
+  currency: Currency;
+  balance: number;
+  updated_at?: string | null;
+}

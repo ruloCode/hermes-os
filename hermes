@@ -107,9 +107,12 @@ cmd_doctor() {
   echo
   say "  ${B}Autostart (launchd)${R}"
   local l
-  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN"; do
+  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN" "$PLIST_TUNNEL"; do
     if svc_loaded "$l"; then ok "$l cargado"; else warn "$l no cargado ${DIM}(./hermes install)${R}"; fi
   done
+  local tun_host
+  tun_host="$(curl -sf --max-time 2 "http://127.0.0.1:8654/quicktunnel" 2>/dev/null | sed -E 's/.*"hostname":"([^"]*)".*/\1/')"
+  if [[ -n "$tun_host" ]]; then ok "túnel público: https://$tun_host"; else warn "túnel cloudflared no responde (app móvil solo por LAN)"; fi
   echo
   say "  ${B}Salud${R}"
   if curl -sf -o /dev/null --max-time 2 "http://localhost:$AGENT_PORT/health"; then
@@ -137,7 +140,7 @@ cmd_stop() {
   # Si el autostart está cargado, matar el pid no sirve (KeepAlive lo revive):
   # hay que descargar el servicio de launchd.
   local l
-  for l in "$PLIST_AGENT" "$PLIST_WEB"; do
+  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_TUNNEL"; do
     if svc_loaded "$l" 2>/dev/null; then
       launchctl bootout "gui/$(id -u)/$l" 2>/dev/null || true
       ok "servicio $l descargado (vuelve al próximo login o con ./hermes install)"
@@ -172,6 +175,7 @@ LOG_DIR="$HOME/.hermes-os/logs"
 PLIST_AGENT="com.hermes-os.agent"
 PLIST_WEB="com.hermes-os.web"
 PLIST_OPEN="com.hermes-os.open"
+PLIST_TUNNEL="com.hermes-os.tunnel"
 
 # PATH para launchd (mínimo por defecto): node/pnpm reales + homebrew + claude.
 launchd_path() {
@@ -242,17 +246,19 @@ cmd_install() {
   pnpm build
 
   # Baja lo que esté corriendo (dev o instalación anterior) antes de instalar.
-  svc_bootout "$PLIST_AGENT"; svc_bootout "$PLIST_WEB"; svc_bootout "$PLIST_OPEN"
+  svc_bootout "$PLIST_AGENT"; svc_bootout "$PLIST_WEB"; svc_bootout "$PLIST_OPEN"; svc_bootout "$PLIST_TUNNEL"
   cmd_stop >/dev/null
 
-  write_plist "$PLIST_AGENT" yes agent "$pnpm_bin" --filter @hermes/agent start
-  write_plist "$PLIST_WEB"   yes web   "$pnpm_bin" --filter @hermes/web start
-  write_plist "$PLIST_OPEN"  no  open  /bin/bash "$ROOT/scripts/hermes-open.sh"
+  write_plist "$PLIST_AGENT"  yes agent  "$pnpm_bin" --filter @hermes/agent start
+  write_plist "$PLIST_WEB"    yes web    "$pnpm_bin" --filter @hermes/web start
+  write_plist "$PLIST_OPEN"   no  open   /bin/bash "$ROOT/scripts/hermes-open.sh"
+  write_plist "$PLIST_TUNNEL" yes tunnel /bin/bash "$ROOT/scripts/hermes-tunnel.sh"
 
   local u; u="$(id -u)"
-  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_AGENT.plist" && ok "agente arriba (:$AGENT_PORT)"
-  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_WEB.plist"   && ok "web arriba (:$WEB_PORT)"
-  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_OPEN.plist"  && ok "dashboard se abrirá al estar sano"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_AGENT.plist"  && ok "agente arriba (:$AGENT_PORT)"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_WEB.plist"    && ok "web arriba (:$WEB_PORT)"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_OPEN.plist"   && ok "dashboard se abrirá al estar sano"
+  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_TUNNEL.plist" && ok "túnel público del agente (URL en Supabase remote_config)"
   echo
   say "  ${GREEN}Listo:${R} Hermes arranca solo en cada login."
   say "  ${DIM}Logs: $LOG_DIR · Para desarrollo: ./hermes uninstall && ./hermes dev${R}"
@@ -260,9 +266,9 @@ cmd_install() {
 
 cmd_uninstall() {
   banner "uninstall — quitar autostart"
-  svc_bootout "$PLIST_AGENT"; svc_bootout "$PLIST_WEB"; svc_bootout "$PLIST_OPEN"
+  svc_bootout "$PLIST_AGENT"; svc_bootout "$PLIST_WEB"; svc_bootout "$PLIST_OPEN"; svc_bootout "$PLIST_TUNNEL"
   local l
-  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN"; do
+  for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN" "$PLIST_TUNNEL"; do
     [[ -f "$LA_DIR/$l.plist" ]] && rm "$LA_DIR/$l.plist" && ok "borrado $l.plist"
   done
   ok "autostart retirado (el código no se toca)"

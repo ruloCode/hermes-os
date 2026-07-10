@@ -1,6 +1,8 @@
 /**
  * Tareas (tablero de misión): lee /tracker/tasks. Filtra por proyecto en foco y
  * por estado; permite completar, ignorar, reabrir y ejecutar (lanza claude -p).
+ * El modo "Hoy" muestra lo que se movió hoy: creado, actualizado o terminado
+ * en el día (tz del teléfono), sin las ignoradas.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -19,10 +21,30 @@ const LABEL: Record<string, string> = {
   dismissed: "Ignoradas",
 };
 
+/** YYYY-MM-DD local del teléfono para un ISO (o null si no parsea). */
+function localDay(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isFromToday(t: Task): boolean {
+  const today = localDay(new Date().toISOString());
+  return (
+    t.status !== "dismissed" &&
+    (localDay(t.created_at) === today ||
+      localDay(t.updated_at) === today ||
+      localDay(t.done_at) === today ||
+      t.status === "running")
+  );
+}
+
 export function TasksScreen() {
   const app = useApp();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scope, setScope] = useState<"hoy" | "todas">("todas");
   const [status, setStatus] = useState<TaskState | "all">("all");
   const [onlyFocused, setOnlyFocused] = useState<boolean>(!!app.focused);
 
@@ -30,14 +52,19 @@ export function TasksScreen() {
     setLoading(true);
     try {
       const project = onlyFocused ? app.focused ?? undefined : undefined;
-      const st = status === "all" ? undefined : status;
-      setTasks(await api.tasks({ project, status: st }));
+      if (scope === "hoy") {
+        const all = await api.tasks({ project });
+        setTasks(all.filter(isFromToday));
+      } else {
+        const st = status === "all" ? undefined : status;
+        setTasks(await api.tasks({ project, status: st }));
+      }
     } catch {
       setTasks([]);
     } finally {
       setLoading(false);
     }
-  }, [app.focused, onlyFocused, status]);
+  }, [app.focused, onlyFocused, scope, status]);
 
   useEffect(() => {
     void load();
@@ -60,12 +87,20 @@ export function TasksScreen() {
     >
       <ScreenTitle title="Tareas" right={<Dim>{tasks.length}</Dim>} />
 
-      {/* Filtros */}
+      {/* Ámbito: lo de hoy vs histórico completo */}
       <View style={styles.chips}>
-        {STATUSES.map((s) => (
-          <Chip key={s} label={LABEL[s]} on={status === s} onPress={() => setStatus(s)} />
-        ))}
+        <Chip label="☀ Hoy" on={scope === "hoy"} onPress={() => setScope("hoy")} />
+        <Chip label="Histórico" on={scope === "todas"} onPress={() => setScope("todas")} />
       </View>
+
+      {/* Filtros por estado (solo en histórico; Hoy ya trae todos los estados) */}
+      {scope === "todas" ? (
+        <View style={styles.chips}>
+          {STATUSES.map((s) => (
+            <Chip key={s} label={LABEL[s]} on={status === s} onPress={() => setStatus(s)} />
+          ))}
+        </View>
+      ) : null}
       {app.focused ? (
         <View style={[styles.chips, { marginBottom: 12 }]}>
           <Chip
@@ -81,7 +116,13 @@ export function TasksScreen() {
       ) : app.online === false ? (
         <Empty text="No alcanzo al agente. Revisa Ajustes (⚙)." />
       ) : tasks.length === 0 ? (
-        <Empty text="Sin tareas con este filtro." />
+        <Empty
+          text={
+            scope === "hoy"
+              ? "Hoy no se ha movido ninguna tarea. Mira el Histórico."
+              : "Sin tareas con este filtro."
+          }
+        />
       ) : (
         tasks.map((t) => (
           <Card key={t.id} accent={stateColor(t.status)}>

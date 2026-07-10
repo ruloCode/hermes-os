@@ -13,18 +13,40 @@ import { VoiceScreen } from "./screens/VoiceScreen";
 import { MeetingsScreen } from "./screens/MeetingsScreen";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
+import { FinanceScreen } from "./screens/FinanceScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { LoginScreen } from "./screens/LoginScreen";
+import { Loading } from "./ui";
 
 const TABS: { key: Tab; glyph: string; label: string }[] = [
   { key: "voz", glyph: "◉", label: "Voz" },
   { key: "reuniones", glyph: "⏺", label: "Reuniones" },
   { key: "proyectos", glyph: "▦", label: "Proyectos" },
   { key: "tareas", glyph: "☰", label: "Tareas" },
+  { key: "finanzas", glyph: "◈", label: "Finanzas" },
 ];
 
 export function AppShell() {
   const app = useApp();
   const insets = useSafeAreaInsets();
+
+  // Gate de sesión: hidratando → splash; sin login → LoginScreen (con Ajustes
+  // disponible como escape hatch de conexión manual).
+  if (app.authed === null) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+        <Loading label="Hermes…" />
+      </View>
+    );
+  }
+  if (!app.authed) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+        <LoginScreen />
+        <SettingsScreen visible={app.settingsOpen} onClose={() => app.setSettingsOpen(false)} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
@@ -43,6 +65,7 @@ export function AppShell() {
         {app.tab === "reuniones" ? <MeetingsScreen /> : null}
         {app.tab === "proyectos" ? <ProjectsScreen /> : null}
         {app.tab === "tareas" ? <TasksScreen /> : null}
+        {app.tab === "finanzas" ? <FinanceScreen /> : null}
       </View>
 
       {/* Tab bar */}
