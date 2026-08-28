@@ -12,10 +12,11 @@
     "migrate:clawd": "pnpm --filter @hermes/agent exec tsx scripts/migrate-clawd-memories.ts",
     "backfill:conversations": "pnpm --filter @hermes/agent exec tsx scripts/backfill-conversations.ts",
     "backfill:embeddings": "pnpm --filter @hermes/agent exec tsx scripts/backfill-embeddings.ts",
+    "backfill:knowledge": "pnpm --filter @hermes/agent exec tsx scripts/backfill-knowledge.ts",
     "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.2.4"
   },
   "packageManager": "pnpm@10.20.0"
 }

@@ -7,22 +7,31 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "google:auth": "tsx scripts/google-oauth.ts",
+    "live:sim": "tsx scripts/live-sim.ts",
+    "seed:content": "tsx scripts/seed-content.ts",
+    "seed:guiones": "tsx scripts/seed-guiones.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.198",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.247",
     "@hermes/shared": "workspace:*",
-    "@hono/node-server": "^1.14.0",
-    "@supabase/supabase-js": "^2.49.0",
+    "@hono/node-server": "^2.1.1",
+    "@jitsi/robotjs": "^0.6.24",
+    "@supabase/supabase-js": "^2.112.4",
     "chokidar": "^4.0.3",
-    "dotenv": "^16.4.7",
+    "chrome-devtools-mcp": "^1.8.0",
+    "dotenv": "^16.6.1",
     "gray-matter": "^4.0.3",
-    "hono": "^4.7.0",
-    "zod": "^3.24.0"
+    "hono": "^4.13.5",
+    "node-ical": "^0.27.1",
+    "ws": "^8.21.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.13.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "@types/node": "^22.20.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
   }
 }
