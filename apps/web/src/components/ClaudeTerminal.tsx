@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClaudeSessionSummary } from "@hermes/shared";
 import {
+  claudeKillRun,
   claudeRunStreamUrl,
   listClaudeSessions,
   getClaudeSession,
   deleteClaudeSession,
 } from "@/lib/hermes";
+import { PanelState } from "@/components/ui/PanelState";
+import { CLAUDE_MODELS } from "@/components/ClaudeExecBar";
 
 interface Line {
   t: number;
@@ -15,17 +18,26 @@ interface Line {
   text: string;
 }
 
-const STYLE: Record<string, { color: string; glyph: string }> = {
-  init: { color: "var(--text-dim)", glyph: "●" },
-  text: { color: "var(--text)", glyph: "" },
-  tool: { color: "var(--cyan)", glyph: "⎿" },
-  result: { color: "var(--text-dim)", glyph: "  ⤷" },
-  done: { color: "var(--green)", glyph: "✓" },
-  error: { color: "var(--red)", glyph: "⚠" },
-  raw: { color: "var(--text-dim)", glyph: "·" },
+// Estilo por tipo de línea del stream: clase de token en vez de color inline.
+const STYLE: Record<string, { className: string; glyph: string }> = {
+  init: { className: "text-text-dim", glyph: "●" },
+  text: { className: "text-text", glyph: "" },
+  tool: { className: "text-cyan", glyph: "⎿" },
+  result: { className: "text-text-dim", glyph: "  ⤷" },
+  done: { className: "text-green", glyph: "✓" },
+  error: { className: "text-red", glyph: "⚠" },
+  raw: { className: "text-text-dim", glyph: "·" },
 };
 
-const MODEL_LABEL: Record<string, string> = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku" };
+// Etiqueta del modelo en sesiones guardadas: IDs vigentes (fuente única en
+// ClaudeExecBar) + los alias con los que se guardaron las corridas viejas.
+const MODEL_LABEL: Record<string, string> = {
+  ...Object.fromEntries(CLAUDE_MODELS.map((m) => [m.value, m.label])),
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  fable: "Fable",
+};
 
 function relTime(iso: string): string {
   const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -55,6 +67,7 @@ export function ClaudeTerminal({
   onSelectSession,
   onNewSession,
   onStatus,
+  onSend,
 }: {
   project?: string | null;
   runId: string | null;
@@ -63,9 +76,19 @@ export function ClaudeTerminal({
   onNewSession: () => void;
   /** Notifica el estado de la corrida (para gatear acciones como "continuar"). */
   onStatus?: (s: Status) => void;
+  /**
+   * Composer de chat: enviar más instrucciones a la conversación (resume la
+   * sesión con un run nuevo). El padre decide la ruta (continueTask para
+   * tareas de Linear · claudeStartRun para sesiones sueltas) y actualiza el
+   * run activo. Sin onSend, el terminal es solo-lectura (comportamiento previo).
+   */
+  onSend?: (prompt: string) => Promise<{ runId: string; sessionId: string } | null>;
 }) {
   const [lines, setLines] = useState<Line[]>([]);
   const [status, setStatus] = useState<Status>("idle");
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [sessions, setSessions] = useState<ClaudeSessionSummary[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -250,18 +273,11 @@ export function ClaudeTerminal({
             aria-expanded={menuOpen}
             aria-controls="cc-session-menu"
             title="Sesiones de Claude Code de este proyecto"
-            className="flex min-w-0 items-center gap-1.5 text-[10px] tracking-[0.14em]"
-            style={{ color: "var(--violet)" }}
+            className="flex min-w-0 items-center gap-1.5 text-2xs tracking-label text-violet"
           >
-            <span className="shrink-0 opacity-70" style={{ color: "var(--text-dim)" }}>
-              ⌘
-            </span>
-            <span className="truncate" style={{ maxWidth: 200 }}>
-              {activeTitle}
-            </span>
-            <span className="shrink-0" style={{ color: "var(--text-dim)" }}>
-              {menuOpen ? "▴" : "▾"}
-            </span>
+            <span className="shrink-0 text-text-dim opacity-70">⌘</span>
+            <span className="max-w-[200px] truncate">{activeTitle}</span>
+            <span className="shrink-0 text-text-dim">{menuOpen ? "▴" : "▾"}</span>
           </button>
 
           {menuOpen && (
@@ -269,16 +285,10 @@ export function ClaudeTerminal({
               id="cc-session-menu"
               role="menu"
               aria-label="Sesiones de Claude Code"
-              className="absolute left-0 top-full z-30 mt-1 max-h-[300px] w-[300px] overflow-y-auto border shadow-lg"
-              style={{ background: "rgba(10,12,26,0.98)", borderColor: "var(--line-bright)" }}
+              className="elev-2 absolute left-0 top-full z-30 mt-1 max-h-[300px] w-[300px] overflow-y-auto border border-line-2 bg-panel-2 backdrop-blur-md"
             >
               {sessions.length === 0 && (
-                <p
-                  className="px-3 py-3 text-center text-[10px] tracking-[0.2em]"
-                  style={{ color: "var(--text-dim)" }}
-                >
-                  SIN SESIONES AÚN
-                </p>
+                <PanelState kind="empty" title="Sin sesiones aún" compact />
               )}
               {sessions.map((s) => {
                 const isActive = s.id === sessionId;
@@ -295,33 +305,30 @@ export function ClaudeTerminal({
                         selectSession(s.id);
                       }
                     }}
-                    className="group flex cursor-pointer items-start gap-2 border-b px-2.5 py-2 outline-none transition-colors focus-visible:bg-[rgba(167,139,250,0.12)]"
-                    style={{
-                      borderColor: "var(--line)",
-                      background: isActive ? "rgba(167,139,250,0.1)" : "transparent",
-                    }}
+                    className={`group flex cursor-pointer items-start gap-2 border-b border-line px-2.5 py-2 outline-none transition-colors focus-visible:bg-violet/10 ${
+                      isActive ? "bg-violet/10" : "bg-transparent"
+                    }`}
                   >
                     <span
-                      className="mt-1 shrink-0"
-                      style={{
-                        color:
-                          s.status === "running"
-                            ? "var(--amber)"
-                            : s.status === "error"
-                              ? "var(--red)"
-                              : "var(--green)",
-                      }}
+                      className={`mt-1 shrink-0 ${
+                        s.status === "running"
+                          ? "text-amber"
+                          : s.status === "error"
+                            ? "text-red"
+                            : "text-green"
+                      }`}
                     >
                       ◈
                     </span>
                     <div className="min-w-0 flex-1">
                       <p
-                        className="truncate text-[11px] leading-snug"
-                        style={{ color: isActive ? "var(--violet-hot)" : "var(--text)" }}
+                        className={`truncate text-xs leading-snug ${
+                          isActive ? "text-violet-hot" : "text-text"
+                        }`}
                       >
                         {s.title || "Sin título"}
                       </p>
-                      <p className="text-[8.5px] tracking-[0.12em] uppercase" style={{ color: "var(--text-dim)" }}>
+                      <p className="text-2xs tracking-label text-text-dim uppercase">
                         {relTime(s.updatedAt)} · {MODEL_LABEL[s.model] ?? s.model} · {s.lineCount} líneas
                       </p>
                     </div>
@@ -330,10 +337,9 @@ export function ClaudeTerminal({
                       onClick={(e) => armDelete(s.id, e)}
                       title={confirming ? "Confirmar borrado" : "Borrar esta sesión"}
                       aria-label={confirming ? "Confirmar borrado de la sesión" : "Borrar esta sesión"}
-                      className={`shrink-0 whitespace-nowrap text-[9px] tracking-[0.15em] uppercase transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-70 [@media(hover:none)]:opacity-70 ${
+                      className={`shrink-0 whitespace-nowrap text-2xs tracking-label text-red uppercase transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-70 [@media(hover:none)]:opacity-70 ${
                         confirming ? "opacity-100" : "opacity-0"
                       }`}
-                      style={{ color: "var(--red)" }}
                     >
                       {confirming ? "¿borrar?" : "✕"}
                     </button>
@@ -345,6 +351,20 @@ export function ClaudeTerminal({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {status === "running" && runId && (
+            <button
+              type="button"
+              onClick={() => {
+                setStopping(true);
+                void claudeKillRun(runId).finally(() => setStopping(false));
+              }}
+              disabled={stopping}
+              title="Detener la ejecución (kill del proceso)"
+              className="rounded-sm border border-red px-2 py-0.5 text-2xs tracking-label text-red uppercase transition-opacity hover:opacity-100 disabled:opacity-40"
+            >
+              {stopping ? "…" : "⏹ Detener"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -352,23 +372,20 @@ export function ClaudeTerminal({
               setMenuOpen(false);
             }}
             title="Empezar una conversación nueva"
-            className="rounded-sm border px-2 py-0.5 text-[9px] tracking-[0.15em] uppercase transition-colors hover:opacity-100"
-            style={{ borderColor: "var(--line-bright)", color: "var(--violet)" }}
+            className="rounded-sm border border-line-2 px-2 py-0.5 text-2xs tracking-label text-violet uppercase transition-colors hover:opacity-100"
           >
             + Nueva
           </button>
           <span
-            className="text-[9px] tracking-[0.2em] uppercase"
-            style={{
-              color:
-                status === "running"
-                  ? "var(--amber)"
-                  : status === "done"
-                    ? "var(--green)"
-                    : status === "error"
-                      ? "var(--red)"
-                      : "var(--text-dim)",
-            }}
+            className={`text-2xs tracking-label uppercase ${
+              status === "running"
+                ? "text-amber"
+                : status === "done"
+                  ? "text-green"
+                  : status === "error"
+                    ? "text-red"
+                    : "text-text-dim"
+            }`}
           >
             {status === "running"
               ? "◌ EJECUTANDO"
@@ -383,11 +400,14 @@ export function ClaudeTerminal({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto rounded-sm p-2 text-[11.5px] leading-relaxed"
-        style={{ background: "rgba(4,5,12,0.6)", fontFamily: "var(--font-mono), monospace" }}
+        className="min-h-0 flex-1 overflow-y-auto rounded-sm bg-bg/60 p-2 font-mono text-xs leading-relaxed"
       >
         {lines.length === 0 && status !== "running" && (
-          <p className="pt-6 text-center text-[11px] leading-relaxed tracking-[0.2em]" style={{ color: loadError ? "var(--red)" : "var(--text-dim)" }}>
+          <p
+            className={`pt-6 text-center text-xs leading-relaxed tracking-label ${
+              loadError ? "text-red" : "text-text-dim"
+            }`}
+          >
             {loadError
               ? "⚠ NO SE PUDO CARGAR EL TRANSCRIPT — ¿AGENTE OFFLINE? VUELVE A ABRIR LA SESIÓN"
               : sessionId
@@ -398,18 +418,58 @@ export function ClaudeTerminal({
         {lines.map((l, i) => {
           const st = STYLE[l.kind] ?? STYLE.raw;
           return (
-            <div key={i} className="whitespace-pre-wrap break-words" style={{ color: st.color }}>
+            <div key={i} className={`whitespace-pre-wrap break-words ${st.className}`}>
               {st.glyph && <span className="mr-1.5 opacity-80">{st.glyph}</span>}
               {l.text}
             </div>
           );
         })}
-        {status === "running" && (
-          <div className="cursor-blink mt-1" style={{ color: "var(--violet)" }}>
-            ▋
-          </div>
-        )}
+        {status === "running" && <div className="cursor-blink mt-1 text-violet">▋</div>}
       </div>
+
+      {/* ── Composer: seguir instruyendo como en un chat ── */}
+      {onSend && (
+        <div className="mt-2 flex shrink-0 items-end gap-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={draft.includes("\n") ? 3 : 1}
+            placeholder={
+              status === "running"
+                ? "Ejecutando… detén el run o espera para enviar más instrucciones"
+                : "Escribe más instrucciones (Enter envía · Shift+Enter salto)…"
+            }
+            disabled={status === "running" || sending}
+            className="min-w-0 flex-1 resize-none rounded-sm border border-line bg-transparent px-2 py-1.5 text-xs text-text outline-none transition-colors focus:border-line-2 disabled:opacity-40"
+          />
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={!draft.trim() || status === "running" || sending}
+            className="cmd-btn !w-auto !border-violet !text-violet disabled:opacity-40"
+          >
+            {sending ? "…" : "Enviar ↵"}
+          </button>
+        </div>
+      )}
     </div>
   );
+
+  async function send() {
+    const prompt = draft.trim();
+    if (!prompt || !onSend || status === "running" || sending) return;
+    setSending(true);
+    try {
+      const run = await onSend(prompt);
+      if (run) setDraft("");
+    } finally {
+      setSending(false);
+    }
+  }
 }

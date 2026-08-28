@@ -20,15 +20,11 @@ export function Clock() {
 
   return (
     <div className="text-right leading-none">
-      <div className="font-display text-3xl font-bold tracking-widest glow-violet">
+      <div className="font-display text-xl font-bold tracking-widest glow-text-violet">
         {hh}:{mm}
-        <span className="text-base align-top" style={{ color: "var(--text-dim)" }}>
-          :{ss}
-        </span>
+        <span className="text-base align-top text-text-dim">:{ss}</span>
       </div>
-      <div className="mt-1 text-[10px] tracking-[0.3em]" style={{ color: "var(--text-dim)" }}>
-        {date}
-      </div>
+      <div className="mt-1 text-2xs tracking-label text-text-dim">{date}</div>
     </div>
   );
 }

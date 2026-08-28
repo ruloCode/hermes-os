@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Guarda (y valida) el token OAuth de Claude Code que usa el panel "Plan ·
- * límites" del dashboard. El token va a ~/.hermes/claude-token (modo 600) y el
+ * límites" del dashboard. El token va a ~/.hermes-os/claude-token (modo 600) y el
  * API route /api/claude-limits lo lee en solo-lectura.
  *
  * Uso:
@@ -25,7 +25,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
-const TOKEN_PATH = join(homedir(), ".hermes", "claude-token");
+const TOKEN_PATH = join(homedir(), ".hermes-os", "claude-token");
 
 function die(msg) {
   console.error(`\x1b[31m✗ ${msg}\x1b[0m`);
@@ -98,7 +98,7 @@ async function main() {
 
   const data = await res.json();
 
-  mkdirSync(join(homedir(), ".hermes"), { recursive: true });
+  mkdirSync(join(homedir(), ".hermes-os"), { recursive: true });
   writeFileSync(TOKEN_PATH, token, { mode: 0o600 });
 
   console.log(`\x1b[32m✓ Token válido y guardado en ${TOKEN_PATH}\x1b[0m`);

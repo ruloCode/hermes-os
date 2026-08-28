@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ClaudeRunSummary, HermesTask } from "@hermes/shared";
-import { hermesGet, hermesPost } from "@/lib/hermes";
-import { Panel } from "./Panel";
+import { useOrchestrator } from "@/state/OrchestratorProvider";
+import { Panel } from "@/components/ui/Panel";
+import { PanelState } from "@/components/ui/PanelState";
+import { StatBlock } from "@/components/ui/StatBlock";
+import { StatusPill } from "@/components/ui/StatusPill";
 
 /**
  * Orquestador multi-proyecto: lista en vivo TODOS los runs de Claude Code
- * (`GET /claude/runs`) de todos los proyectos + las tareas async del SDK
- * (`GET /tasks`, voz/deck). Clic en un run → abre su stream en el terminal
- * central; ✕ cancela un run en curso. El header muestra el gasto real del
- * día en runs (acumulador persistente del agente, vía /stats).
+ * de todos los proyectos + las tareas async del SDK (voz/deck), desde el
+ * poll compartido de OrchestratorProvider. Clic en un run → abre su stream
+ * en el terminal central; ✕ cancela un run en curso. La cabecera muestra el
+ * gasto real del día en runs (acumulador persistente del agente, vía /stats).
  */
 
 // Segundos → "45s" / "3m 12s" / "1h 04m".
@@ -21,8 +23,12 @@ function elapsed(iso: string): string {
   return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
-const statusColor = (s: string) =>
-  s === "running" ? "var(--amber)" : s === "error" ? "var(--red)" : "var(--green)";
+// Estado del run → props del StatusPill (tono semántico + label corto).
+const RUN_PILL: Record<string, { status: "warn" | "error" | "ok"; label: string }> = {
+  running: { status: "warn", label: "RUN" },
+  error: { status: "error", label: "ERR" },
+  done: { status: "ok", label: "DONE" },
+};
 
 export function OrchestratorPanel({
   online,
@@ -36,48 +42,13 @@ export function OrchestratorPanel({
   dailyCostUsd?: number;
   runsToday?: number;
 }) {
-  const [runs, setRuns] = useState<ClaudeRunSummary[]>([]);
-  const [tasks, setTasks] = useState<HermesTask[]>([]);
+  const { runs, tasks, kill } = useOrchestrator();
   // Reloj de 1s: fuerza el recálculo de "elapsed" sin re-pedir datos.
   const [, tick] = useState(0);
-
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const [r, t] = await Promise.all([
-          hermesGet<ClaudeRunSummary[]>("/claude/runs"),
-          hermesGet<HermesTask[]>("/tasks"),
-        ]);
-        if (!alive) return;
-        setRuns(r);
-        setTasks(t.filter((x) => x.status === "running"));
-      } catch {
-        if (alive) {
-          setRuns([]);
-          setTasks([]);
-        }
-      }
-    };
-    void load();
-    const poll = setInterval(load, 4000);
     const clock = setInterval(() => tick((n) => n + 1), 1000);
-    return () => {
-      alive = false;
-      clearInterval(poll);
-      clearInterval(clock);
-    };
+    return () => clearInterval(clock);
   }, []);
-
-  // Cancela un run: optimista en UI; el agente manda SIGTERM (y SIGKILL a 5s).
-  const kill = async (id: string) => {
-    setRuns((prev) => prev.map((r) => (r.id === id ? { ...r, status: "error" as const } : r)));
-    try {
-      await hermesPost(`/claude/run/${id}/kill`);
-    } catch {
-      /* el próximo poll corrige el estado real */
-    }
-  };
 
   const activeRuns = runs.filter((r) => r.status === "running").length;
   const empty = runs.length === 0 && tasks.length === 0;
@@ -87,103 +58,109 @@ export function OrchestratorPanel({
       title="Orquestador"
       delay={130}
       right={
-        <span className="text-[9px] tracking-[0.2em] uppercase" style={{ color: "var(--text-dim)" }}>
+        <span className="text-2xs tracking-label text-text-dim uppercase">
           {activeRuns > 0 ? `${activeRuns} corriendo` : "en reposo"}
-          {dailyCostUsd != null && runsToday != null && runsToday > 0 && (
-            <span style={{ color: "var(--violet)" }}> · hoy ${dailyCostUsd.toFixed(2)}</span>
-          )}
         </span>
       }
     >
-      <div className="space-y-1.5">
-        {!online && (
-          <p className="text-[10px] tracking-[0.2em]" style={{ color: "var(--text-dim)" }}>
-            AGENTE OFFLINE
-          </p>
-        )}
-        {online && empty && (
-          <p className="text-[10px] tracking-[0.2em]" style={{ color: "var(--text-dim)" }}>
-            SIN RUNS ACTIVOS — lanza uno desde la consola o el deck
-          </p>
-        )}
+      {/* Cabecera de stats: solo con datos reales de /stats (agente nuevo). */}
+      {dailyCostUsd != null && runsToday != null && (
+        <div className="mb-2 flex items-end gap-6 border-b border-line pb-2">
+          <StatBlock
+            label="costo hoy"
+            value={`$${dailyCostUsd.toFixed(2)}`}
+            tone="violet"
+            size="lg"
+          />
+          <StatBlock label="ejecuciones" value={runsToday} size="lg" />
+        </div>
+      )}
 
+      {!online && <PanelState kind="offline" compact />}
+      {online && empty && (
+        <PanelState
+          kind="empty"
+          compact
+          title="Sin runs activos"
+          hint="lanza uno desde la consola o el deck"
+        />
+      )}
+
+      <div className="space-y-1.5">
         {/* Runs de Claude Code (clic → stream; ✕ → cancelar). div con role
             button porque una fila <button> no puede anidar el botón de kill. */}
-        {runs.map((r) => (
-          <div
-            key={r.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpenRun({ slug: r.projectSlug, runId: r.id, sessionId: r.sessionId })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter")
-                onOpenRun({ slug: r.projectSlug, runId: r.id, sessionId: r.sessionId });
-            }}
-            title={r.lastText ? `${r.title}\n→ ${r.lastText}` : r.title}
-            className="block w-full cursor-pointer rounded-sm px-2 py-1 text-left transition-colors hover:bg-[rgba(122,132,255,0.1)]"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span
-                className="min-w-0 flex-1 truncate font-display text-[11px] font-semibold tracking-[0.1em] uppercase"
-                style={{ color: "var(--cyan)" }}
-              >
-                {r.projectSlug}
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                <span
-                  className="text-[8px] tracking-[0.2em] uppercase"
-                  style={{ color: statusColor(r.status), textShadow: `0 0 8px ${statusColor(r.status)}` }}
-                >
-                  {r.status === "running" ? "● run" : r.status === "error" ? "✕ err" : "✓ done"}
+        {runs.map((r) => {
+          const pill = RUN_PILL[r.status] ?? RUN_PILL.done;
+          return (
+            <div
+              key={r.id}
+              role="button"
+              tabIndex={0}
+              onClick={() =>
+                onOpenRun({ slug: r.projectSlug, runId: r.id, sessionId: r.sessionId })
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter")
+                  onOpenRun({ slug: r.projectSlug, runId: r.id, sessionId: r.sessionId });
+              }}
+              title={r.lastText ? `${r.title}\n→ ${r.lastText}` : r.title}
+              className="block w-full cursor-pointer rounded-sm px-2 py-1 text-left transition-colors hover:bg-violet/10"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate font-display text-xs font-semibold tracking-label text-cyan uppercase">
+                  {r.projectSlug}
                 </span>
-                {r.status === "running" && (
-                  <button
-                    type="button"
-                    title="Cancelar este run"
-                    aria-label={`Cancelar run de ${r.projectSlug}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void kill(r.id);
-                    }}
-                    className="grid h-4 w-4 place-items-center rounded-sm text-[9px] leading-none opacity-60 transition-opacity hover:opacity-100"
-                    style={{ color: "var(--red)", border: "1px solid var(--red)" }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <StatusPill
+                    size="sm"
+                    status={pill.status}
+                    label={pill.label}
+                    pulse={r.status === "running"}
+                  />
+                  {r.status === "running" && (
+                    <button
+                      type="button"
+                      title="Cancelar este run"
+                      aria-label={`Cancelar run de ${r.projectSlug}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void kill(r.id);
+                      }}
+                      className="grid h-4 w-4 place-items-center rounded-sm border border-red text-2xs leading-none text-red opacity-60 transition-opacity hover:opacity-100"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-2xs text-text-dim">
+                  ▸ {r.status !== "running" && r.lastText ? r.lastText : r.title}
+                </span>
+                <span className="shrink-0 text-2xs text-text-dim tabular-nums">
+                  {r.status === "running"
+                    ? `${r.model} · ${r.toolCalls}⚙ · ${elapsed(r.startedAt)}`
+                    : [
+                        r.costUsd != null ? `$${r.costUsd.toFixed(2)}` : null,
+                        r.durationMs != null ? `${Math.round(r.durationMs / 1000)}s` : null,
+                        `${r.toolCalls}⚙`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="min-w-0 flex-1 truncate text-[10px]" style={{ color: "var(--text-dim)" }}>
-                ▸ {r.status !== "running" && r.lastText ? r.lastText : r.title}
-              </span>
-              <span className="shrink-0 text-[8.5px] tracking-[0.08em]" style={{ color: "var(--text-dim)" }}>
-                {r.status === "running"
-                  ? `${r.model} · ${r.toolCalls}⚙ · ${elapsed(r.startedAt)}`
-                  : [
-                      r.costUsd != null ? `$${r.costUsd.toFixed(2)}` : null,
-                      r.durationMs != null ? `${Math.round(r.durationMs / 1000)}s` : null,
-                      `${r.toolCalls}⚙`,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-              </span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Tareas async del SDK (voz / deck): solo estado, sin stream propio */}
         {tasks.map((t) => (
           <div key={t.id} className="rounded-sm px-2 py-1" title={t.prompt}>
             <div className="flex items-center justify-between gap-2">
-              <span className="min-w-0 flex-1 truncate text-[10px]" style={{ color: "var(--text-dim)" }}>
-                ⚡ {t.prompt}
-              </span>
-              <span
-                className="shrink-0 text-[8px] tracking-[0.2em] uppercase"
-                style={{ color: "var(--amber)", textShadow: "0 0 8px var(--amber)" }}
-              >
-                ● async · {t.toolCalls}⚙
+              <span className="min-w-0 flex-1 truncate text-2xs text-text-dim">⚡ {t.prompt}</span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <StatusPill size="sm" status="warn" label="ASYNC" pulse />
+                <span className="text-2xs text-text-dim tabular-nums">{t.toolCalls}⚙</span>
               </span>
             </div>
           </div>

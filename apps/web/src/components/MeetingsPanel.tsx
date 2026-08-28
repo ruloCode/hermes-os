@@ -4,7 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeetingSummary } from "@hermes/shared";
 import { listMeetings, uploadMeeting, getMeetingJob } from "@/lib/hermes";
 import { useMediaRecorder } from "@/hooks/useMediaRecorder";
+import { useLiveMeeting } from "@/state/LiveMeetingProvider";
+import { PanelState } from "@/components/ui/PanelState";
+import { LiveMeetingView } from "./live/LiveMeetingView";
+import { LiveSetupCard } from "./live/LiveSetupCard";
 import { MeetingDetail } from "./MeetingDetail";
+
+// Campos de texto: mismo borde/focus que el resto del design system.
+const FIELD =
+  "rounded-sm border border-line bg-transparent outline-none transition-colors focus:border-line-2";
 
 /**
  * Panel de Reuniones de un proyecto: graba en vivo, sube un archivo de audio,
@@ -19,7 +27,10 @@ export function MeetingsPanel({
 }: {
   project: string | null;
   projectName?: string;
-  onExecute: (r: { slug: string; runId: string; sessionId: string }) => void;
+  onExecute: (
+    r: { slug: string; runId: string; sessionId: string },
+    task?: import("@hermes/shared").Task | null,
+  ) => void;
 }) {
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -27,7 +38,9 @@ export function MeetingsPanel({
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [pasteText, setPasteText] = useState("");
+  const [liveNotice, setLiveNotice] = useState<string | null>(null);
   const rec = useMediaRecorder();
+  const live = useLiveMeeting();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const textFileRef = useRef<HTMLInputElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -51,12 +64,31 @@ export function MeetingsPanel({
   useEffect(() => {
     setSelected(null);
     setError(null);
+    setLiveNotice(null);
     setBusy(false);
     stopPoll();
     refresh();
   }, [project, refresh, stopPoll]);
 
   useEffect(() => stopPoll, [stopPoll]);
+
+  // La junta EN VIVO terminó de procesarse: abre su detalle si el foco sigue
+  // en ese proyecto (MeetingDetail carga por {project, id}); si el foco
+  // cambió, deja un aviso honesto en vez de secuestrar la navegación.
+  const liveResult = live.result;
+  useEffect(() => {
+    if (!liveResult) return;
+    if (liveResult.project === project) {
+      setSelected(liveResult.meetingId);
+      refresh();
+    } else {
+      setLiveNotice(
+        `La junta de ${liveResult.project} quedó procesada — enfoca ese proyecto para verla.`,
+      );
+    }
+    live.consumeResult();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveResult, project]);
 
   /**
    * Sigue el job de ingest. Robusto: si el endpoint devuelve null (404/red)
@@ -159,10 +191,18 @@ export function MeetingsPanel({
     e.target.value = "";
   };
 
+  // Takeover: con junta en curso (conectando/viva/cerrando/procesando/error)
+  // la vista EN VIVO reemplaza todo el panel — mismo patrón "el detalle
+  // reemplaza la lista". Va ANTES del guard de proyecto: una junta reanudada
+  // tras ⌘R existe aunque no haya proyecto en foco.
+  if (live.phase !== "idle") {
+    return <LiveMeetingView />;
+  }
+
   if (!project) {
     return (
       <div className="grid h-full place-items-center px-6 text-center">
-        <p className="text-[11px] leading-relaxed tracking-[0.1em]" style={{ color: "var(--text-dim)" }}>
+        <p className="text-xs leading-relaxed text-text-dim">
           Enfoca un proyecto en la barra izquierda para grabar, subir y ver sus reuniones.
         </p>
       </div>
@@ -177,19 +217,53 @@ export function MeetingsPanel({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={`Título (opcional) · junta de ${projectName ?? project}`}
-          className="w-full rounded-sm border bg-transparent px-2.5 py-1.5 text-[11px] outline-none"
-          style={{ borderColor: "var(--line)", color: "var(--text)" }}
+          className={`${FIELD} w-full px-2.5 py-1.5 text-xs text-text`}
         />
+
+        {/* Junta EN VIVO: copiloto en tiempo real (takeover al iniciar).
+            Usa el proyecto en foco y el input de título de arriba; modo de
+            audio e idiomas se eligen en el card. */}
+        <LiveSetupCard
+          projectLabel={projectName ?? project}
+          disabled={busy || rec.recording}
+          disabledTitle={
+            rec.recording ? "Detén la grabación batch antes de iniciar la junta en vivo" : undefined
+          }
+          onStart={(opts) => {
+            const t = title.trim();
+            setTitle("");
+            void live.start({ project, title: t || undefined, ...opts });
+          }}
+        />
+        {/* Guards del provider (p. ej. llamada de voz activa) sin takeover */}
+        {live.error && (
+          <p className="text-2xs leading-snug text-red">
+            ⚠ {live.error}
+          </p>
+        )}
+        {liveNotice && (
+          <p className="text-2xs leading-snug text-green">
+            ✓ {liveNotice}
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           {!rec.recording ? (
             <button
               type="button"
               onClick={() => void rec.start()}
-              disabled={busy || !rec.supported}
-              title={rec.supported ? "Grabar la junta" : "Grabación no soportada (usa subir archivo)"}
+              disabled={busy || !rec.supported || live.active}
+              title={
+                live.active
+                  ? "Hay una junta en vivo usando el micrófono"
+                  : rec.supported
+                    ? "Grabar la junta"
+                    : "Grabación no soportada (usa subir archivo)"
+              }
               className="cmd-btn !w-auto"
-              style={{ borderColor: "var(--red)", color: "var(--red)" }}
+              // `.cmd-btn` vive fuera de @layer y le gana a las utilities:
+              // el tinte va por style con las vars nuevas (ver CmdButton.tsx).
+              style={{ borderColor: "var(--color-red)", color: "var(--color-red)" }}
             >
               ● Grabar
             </button>
@@ -197,8 +271,7 @@ export function MeetingsPanel({
             <button
               type="button"
               onClick={() => void onStopRecording()}
-              className="flex items-center gap-2 rounded-sm border px-3 py-2 text-[11px] tracking-[0.14em] uppercase"
-              style={{ borderColor: "var(--red)", color: "var(--red)", background: "rgba(251,113,133,0.08)" }}
+              className="flex items-center gap-2 rounded-sm border border-red bg-red/10 px-3 py-2 text-xs tracking-label text-red uppercase"
             >
               <Waveform />■ Detener · {fmt(rec.elapsed)}
             </button>
@@ -209,7 +282,7 @@ export function MeetingsPanel({
             onClick={() => fileRef.current?.click()}
             disabled={busy}
             className="cmd-btn !w-auto"
-            style={{ borderColor: "var(--cyan)", color: "var(--cyan)" }}
+            style={{ borderColor: "var(--color-cyan)", color: "var(--color-cyan)" }}
           >
             ⇪ Subir audio
           </button>
@@ -221,7 +294,7 @@ export function MeetingsPanel({
             disabled={busy}
             title="Subir un .txt/.md/.vtt/.srt con la transcripción (Otter, Fireflies, Zoom…)"
             className="cmd-btn !w-auto"
-            style={{ borderColor: "var(--blue)", color: "var(--blue)" }}
+            style={{ borderColor: "var(--color-blue)", color: "var(--color-blue)" }}
           >
             ⎗ Subir texto
           </button>
@@ -241,8 +314,7 @@ export function MeetingsPanel({
             onChange={(e) => setPasteText(e.target.value)}
             placeholder="…o pega aquí la transcripción de la junta"
             rows={2}
-            className="min-h-[40px] flex-1 resize-y rounded-sm border bg-transparent px-2.5 py-1.5 text-[11px] leading-snug outline-none"
-            style={{ borderColor: "var(--line)", color: "var(--text)" }}
+            className={`${FIELD} min-h-[40px] flex-1 resize-y px-2.5 py-1.5 text-xs leading-snug text-text`}
           />
           <button
             type="button"
@@ -253,24 +325,24 @@ export function MeetingsPanel({
             }}
             disabled={busy || !pasteText.trim()}
             className="cmd-btn !w-auto self-stretch disabled:opacity-40"
-            style={{ borderColor: "var(--green)", color: "var(--green)" }}
+            style={{ borderColor: "var(--color-green)", color: "var(--color-green)" }}
           >
             ⏎ Procesar
           </button>
         </div>
 
         {rec.error && (
-          <p className="text-[10px] leading-snug" style={{ color: "var(--amber)" }}>
+          <p className="text-2xs leading-snug text-amber">
             ⚠ {rec.error}
           </p>
         )}
         {busy && (
-          <p className="text-[10.5px] tracking-[0.14em] pulse-dot" style={{ color: "var(--violet)" }}>
+          <p className="text-2xs tracking-label text-violet pulse-dot">
             ◈ Transcribiendo y resumiendo la reunión…
           </p>
         )}
         {error && (
-          <p className="text-[10.5px] leading-snug" style={{ color: "var(--red)" }}>
+          <p className="text-2xs leading-snug text-red">
             ⚠ {error}
           </p>
         )}
@@ -287,9 +359,11 @@ export function MeetingsPanel({
             onExecute={onExecute}
           />
         ) : meetings.length === 0 ? (
-          <p className="pt-6 text-center text-[10.5px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
-            Sin reuniones todavía. Graba, sube o pega la primera junta de {projectName ?? project}.
-          </p>
+          <PanelState
+            kind="empty"
+            title="Sin reuniones todavía"
+            hint={`Graba, sube o pega la primera junta de ${projectName ?? project}.`}
+          />
         ) : (
           <div className="h-full space-y-1.5 overflow-y-auto pr-1">
             {meetings.map((m) => (
@@ -297,18 +371,17 @@ export function MeetingsPanel({
                 key={m.id}
                 type="button"
                 onClick={() => setSelected(m.id)}
-                className="flex w-full items-center justify-between gap-2 rounded-sm border px-2.5 py-2 text-left transition-colors hover:border-[var(--violet)]"
-                style={{ borderColor: "var(--line)", background: "rgba(122,132,255,0.03)" }}
+                className="flex w-full items-center justify-between gap-2 rounded-sm border border-line bg-violet/5 px-2.5 py-2 text-left transition-colors hover:border-violet"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[11.5px]" style={{ color: "var(--text)" }}>
+                  <span className="block truncate text-xs text-text">
                     {m.title}
                   </span>
-                  <span className="text-[9px] tracking-[0.14em] uppercase" style={{ color: "var(--text-dim)" }}>
+                  <span className="text-2xs tracking-label text-text-dim uppercase">
                     {m.fecha.slice(0, 10)} · {m.accionables_count} accionables
                   </span>
                 </span>
-                <span className="text-[10px]" style={{ color: "var(--violet)" }}>
+                <span className="text-2xs text-violet">
                   →
                 </span>
               </button>
@@ -322,9 +395,10 @@ export function MeetingsPanel({
 
 function Waveform() {
   return (
-    <span className="flex items-end gap-[2px]" style={{ height: 12 }} aria-hidden>
+    <span className="flex h-3 items-end gap-[2px]" aria-hidden>
       {[0, 1, 2, 3].map((i) => (
-        <span key={i} className="wave-bar" style={{ height: 12, animationDelay: `${i * 0.12}s` }} />
+        // animationDelay depende del índice: se queda inline a propósito.
+        <span key={i} className="wave-bar h-3" style={{ animationDelay: `${i * 0.12}s` }} />
       ))}
     </span>
   );

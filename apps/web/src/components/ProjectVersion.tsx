@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectContext } from "@hermes/shared";
 import { getProjectContext } from "@/lib/hermes";
+import { PanelState } from "@/components/ui/PanelState";
 
 /**
  * Vista "Versión" del proyecto en foco: rama, último commit y archivos con
@@ -49,29 +50,28 @@ export function ProjectVersion({ slug }: { slug: string }) {
   }, [slug]);
 
   if (error) {
-    return (
-      <Notice>
-        AGENTE OFFLINE — corre <code className="text-[10px]">pnpm dev:agent</code>
-      </Notice>
-    );
+    return <PanelState kind="offline" title="Agente offline" hint="corre pnpm dev:agent" />;
   }
   if (!ctx) {
-    return (
-      <p className="pt-6 text-center text-[10px] tracking-[0.25em] pulse-dot" style={{ color: "var(--text-dim)" }}>
-        LEYENDO REPO…
-      </p>
-    );
+    return <PanelState kind="loading" title="Leyendo repo…" />;
   }
   if (!ctx.found) {
     return (
-      <Notice>
-        Sin repo local. Agrega <code className="text-[10px]">ruta_local</code> al frontmatter del
-        proyecto en el vault.
-      </Notice>
+      <PanelState
+        kind="empty"
+        title="Sin repo local"
+        hint="Agrega ruta_local al frontmatter del proyecto en el vault."
+      />
     );
   }
   if (!ctx.git) {
-    return <Notice>La ruta local no es un repo git (o no tiene commits todavía).</Notice>;
+    return (
+      <PanelState
+        kind="empty"
+        title="Sin repo git"
+        hint="La ruta local no es un repo git (o no tiene commits todavía)."
+      />
+    );
   }
 
   const { rama, commit, mensaje, descripcion, commitAt, archivosCambiados } = ctx.git;
@@ -81,8 +81,7 @@ export function ProjectVersion({ slug }: { slug: string }) {
     <div className="flex h-full flex-col overflow-y-auto">
       <Row label="Rama" hint="HEAD">
         <div
-          className="font-display mt-1 truncate text-xl font-bold tracking-wider"
-          style={{ color: "var(--amber)", textShadow: "0 0 16px rgba(251,191,36,0.33)" }}
+          className="font-display mt-1 truncate text-xl font-bold tracking-wider text-amber glow-text-amber"
           title={rama}
         >
           <span className="mr-1.5 text-sm align-middle">⌥</span>
@@ -91,23 +90,15 @@ export function ProjectVersion({ slug }: { slug: string }) {
       </Row>
 
       <Row label="Commit" hint={timeAgo(commitAt)}>
-        <div
-          className="font-display mt-1 text-2xl font-bold tracking-wider"
-          style={{ color: "var(--violet)", textShadow: "0 0 16px rgba(167,139,250,0.33)" }}
-        >
+        <div className="font-display mt-1 text-2xl font-bold tracking-wider tabular-nums text-violet glow-text-violet">
           {commit}
         </div>
-        <p
-          className="mt-1 text-[10.5px] leading-snug"
-          style={{ color: "var(--text)" }}
-          title={mensaje}
-        >
+        <p className="mt-1 text-xs leading-snug text-text" title={mensaje}>
           {mensaje || "(sin mensaje)"}
         </p>
         {descripcion && (
           <p
-            className="mt-1 line-clamp-4 text-[10px] leading-relaxed whitespace-pre-line"
-            style={{ color: "var(--text-dim)" }}
+            className="mt-1 line-clamp-4 text-2xs leading-relaxed whitespace-pre-line text-text-dim"
             title={descripcion}
           >
             {descripcion}
@@ -117,23 +108,18 @@ export function ProjectVersion({ slug }: { slug: string }) {
 
       <Row label="Cambios" hint="SIN COMMITEAR">
         <div
-          className="font-display mt-1 text-2xl font-bold tracking-wider"
-          style={{
-            color: dirty ? "var(--amber)" : "var(--green)",
-            textShadow: `0 0 16px ${dirty ? "rgba(251,191,36,0.33)" : "rgba(110,231,160,0.33)"}`,
-          }}
+          className={`font-display mt-1 text-2xl font-bold tracking-wider tabular-nums ${
+            dirty ? "text-amber glow-text-amber" : "text-green glow-text-green"
+          }`}
         >
           {archivosCambiados}
-          <span className="ml-2 text-[10px] font-normal tracking-[0.22em] uppercase" style={{ color: "var(--text-dim)" }}>
+          <span className="ml-2 text-2xs font-normal tracking-label text-text-dim uppercase">
             {archivosCambiados === 1 ? "archivo" : "archivos"}
           </span>
         </div>
       </Row>
 
-      <div
-        className="mt-auto flex items-center justify-between pt-2 text-[9px] tracking-[0.18em] uppercase"
-        style={{ color: "var(--text-dim)" }}
-      >
+      <div className="mt-auto flex items-center justify-between pt-2 text-2xs tracking-label text-text-dim uppercase">
         <span>{dirty ? "● working tree sucio" : "○ working tree limpio"}</span>
         <span>git · local</span>
       </div>
@@ -153,26 +139,12 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-b py-2.5 last:border-b-0" style={{ borderColor: "var(--line)" }}>
+    <div className="border-b border-line py-2.5 last:border-b-0">
       <div className="flex items-baseline justify-between">
-        <span className="text-[10px] tracking-[0.22em] uppercase" style={{ color: "var(--text-dim)" }}>
-          {label}
-        </span>
-        {hint && (
-          <span className="text-[9px] tracking-widest" style={{ color: "var(--text-dim)" }}>
-            {hint}
-          </span>
-        )}
+        <span className="text-2xs tracking-label text-text-dim uppercase">{label}</span>
+        {hint && <span className="text-2xs tracking-widest text-text-dim">{hint}</span>}
       </div>
       {children}
     </div>
-  );
-}
-
-function Notice({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="pt-4 text-center text-[10px] leading-relaxed tracking-[0.2em]" style={{ color: "var(--text-dim)" }}>
-      {children}
-    </p>
   );
 }

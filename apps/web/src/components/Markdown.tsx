@@ -117,9 +117,13 @@ export function Markdown({ source, project }: { source: string; project?: string
     if (h) {
       const lvl = Math.min(h[1].length, 4);
       const Tag = `h${lvl}` as "h1" | "h2" | "h3" | "h4";
+      // Ojo: el key de JSX se evalúa DESPUÉS de los children — key++ inline
+      // dentro de los children desfasaba el key del elemento y chocaba con el
+      // del bloque siguiente. Se fija ANTES en una const.
+      const k = key++;
       blocks.push(
-        <Tag key={key} className={`md-h md-h${lvl}`}>
-          {renderInline(h[2], `h${key++}`)}
+        <Tag key={k} className={`md-h md-h${lvl}`}>
+          {renderInline(h[2], `h${k}`)}
         </Tag>,
       );
       i++;
@@ -137,9 +141,10 @@ export function Markdown({ source, project }: { source: string; project?: string
     if (/^>\s?/.test(line)) {
       const buf: string[] = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ""));
+      const k = key++;
       blocks.push(
-        <blockquote key={key} className="md-quote">
-          {renderInline(buf.join(" "), `q${key++}`)}
+        <blockquote key={k} className="md-quote">
+          {renderInline(buf.join(" "), `q${k}`)}
         </blockquote>,
       );
       continue;
@@ -194,9 +199,10 @@ export function Markdown({ source, project }: { source: string; project?: string
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !SPECIAL.test(lines[i])) {
       buf.push(lines[i++]);
     }
+    const k = key++;
     blocks.push(
-      <p key={key} className="md-p">
-        {renderInline(buf.join(" "), `p${key++}`)}
+      <p key={k} className="md-p">
+        {renderInline(buf.join(" "), `p${k}`)}
       </p>,
     );
   }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { TaskExecution } from "@hermes/shared";
 import { getTaskExecution } from "@/lib/hermes";
 import { Markdown } from "./Markdown";
+import { PanelState } from "@/components/ui/PanelState";
 
 /**
  * Detalle legible de UNA ejecución de tarea: metadata (costo · duración · turnos
@@ -40,28 +41,19 @@ export function ExecutionDetail({
       <button
         type="button"
         onClick={onBack}
-        className="mb-2 flex w-fit items-center gap-1.5 text-[10px] tracking-[0.2em] uppercase transition-colors hover:opacity-100"
-        style={{ color: "var(--text-dim)" }}
+        className="mb-2 flex w-fit items-center gap-1.5 text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-text"
       >
         ← Ejecuciones
       </button>
 
-      {loading && (
-        <p className="pt-6 text-center text-[10px] tracking-[0.25em] pulse-dot" style={{ color: "var(--text-dim)" }}>
-          CARGANDO EJECUCIÓN…
-        </p>
-      )}
+      {loading && <PanelState kind="loading" compact />}
 
-      {!loading && !exec && (
-        <p className="pt-6 text-center text-[10.5px]" style={{ color: "var(--text-dim)" }}>
-          No se pudo cargar la ejecución.
-        </p>
-      )}
+      {!loading && !exec && <PanelState kind="error" title="No se pudo cargar la ejecución" />}
 
       {exec && (
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] tracking-[0.14em] uppercase" style={{ color: "var(--text-dim)" }}>
-            <span style={{ color: exec.status === "done" ? "var(--green)" : "var(--red)" }}>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-2xs tracking-label text-text-dim uppercase">
+            <span className={exec.status === "done" ? "text-green" : "text-red"}>
               ● {exec.status === "done" ? "hecha" : "error"}
             </span>
             <span>▸ {exec.kind === "continue" ? "continuación" : "ejecución"}</span>

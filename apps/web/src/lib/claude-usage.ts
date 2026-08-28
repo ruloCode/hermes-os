@@ -20,6 +20,7 @@ interface ModelPrice {
 const M = 1_000_000;
 
 const PRICING: Record<string, ModelPrice> = {
+  "claude-opus-5": { input: 5 / M, output: 25 / M },
   "claude-opus-4-8": { input: 5 / M, output: 25 / M },
   "claude-opus-4-7": { input: 5 / M, output: 25 / M },
   "claude-opus-4-6": { input: 5 / M, output: 25 / M },
@@ -39,7 +40,7 @@ const CACHE_WRITE_1H_MULT = 2.0;
 function priceFor(model: string): ModelPrice | null {
   if (PRICING[model]) return PRICING[model];
   // Modelos Claude desconocidos → tarifa Opus para no dar coste cero silencioso.
-  if (model.startsWith("claude-")) return PRICING["claude-opus-4-8"];
+  if (model.startsWith("claude-")) return PRICING["claude-opus-5"];
   return null;
 }
 

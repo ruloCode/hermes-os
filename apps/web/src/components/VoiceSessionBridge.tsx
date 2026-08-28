@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { AgentActivityEvent } from "@hermes/shared";
-import { useConversation, useConversationControls } from "@elevenlabs/react";
+import { useConversation, useConversationControls, useConversationStatus } from "@elevenlabs/react";
 import { hermesGet } from "@/lib/hermes";
 import { useVoice } from "./VoiceBusyContext";
 
@@ -25,22 +25,37 @@ export function VoiceSessionBridge({
   /** Se llama en cada (re)conexión → la página cambia a la vista Voz. */
   onConnected?: () => void;
 }) {
-  const { pushLine, transcript, artifact, setArtifact } = useVoice();
+  const { pushLine, transcript, artifact, setArtifact, mode, setMode } = useVoice();
   const { sendContextualUpdate } = useConversationControls();
+  const { status } = useConversationStatus();
 
   const transcriptRef = useRef(transcript);
   transcriptRef.current = transcript;
   const connectedBeforeRef = useRef(false);
+  /** Modo de la conexión ANTERIOR: cambiar de agente invalida el recap. */
+  const lastModeRef = useRef(mode);
   const onConnectedRef = useRef(onConnected);
   onConnectedRef.current = onConnected;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   useConversation({
-    onMessage: (p) => pushLine({ who: p.role === "user" ? "TÚ" : "HERMES", text: p.message }),
+    onMessage: (p) =>
+      pushLine({
+        who: p.role === "user" ? "TÚ" : modeRef.current === "tutor" ? "TUTOR" : "HERMES",
+        text: p.message,
+      }),
     onConnect: () => {
       onConnectedRef.current?.();
       // Reconexión (ya hubo una conexión antes en esta carga de página) con
-      // historial → reinyecta el contexto para no perder el hilo.
-      if (connectedBeforeRef.current && transcriptRef.current.length) {
+      // historial → reinyecta el contexto para no perder el hilo. SOLO si es
+      // el MISMO agente: al conmutar Hermes↔tutor el recap del otro agente
+      // contaminaría la sesión nueva.
+      if (
+        connectedBeforeRef.current &&
+        transcriptRef.current.length &&
+        lastModeRef.current === modeRef.current
+      ) {
         const recap = transcriptRef.current
           .slice(-24)
           .map((l) => `${l.who}: ${l.text}`)
@@ -53,8 +68,19 @@ export function VoiceSessionBridge({
         );
       }
       connectedBeforeRef.current = true;
+      lastModeRef.current = modeRef.current;
     },
   });
+
+  // Colgar la llamada devuelve el modo a Hermes (la próxima conexión desde el
+  // orb es el asistente normal; al tutor se entra explícito por ⌘K/botón/tool).
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    if (prevStatusRef.current === "connected" && status === "disconnected" && modeRef.current === "tutor") {
+      setMode("hermes");
+    }
+    prevStatusRef.current = status;
+  }, [status, setMode]);
 
   // Artefacto: al terminar la tarea de voz en curso, trae el resultado completo.
   const artRef = useRef(artifact);

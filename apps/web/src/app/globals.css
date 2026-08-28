@@ -1,19 +1,102 @@
 @import "tailwindcss";
 
+/* ── Tokens del design system (Tailwind v4 @theme) ──────────────────
+   Genera utilidades (text-violet, bg-panel, border-line…) y emite las
+   mismas variables en :root, así canvas/SVG/JS las leen con
+   getComputedStyle sin duplicar valores. */
+@theme {
+  /* Superficies */
+  --color-bg: #05060f;
+  --color-panel: rgb(10 13 28 / 0.8);
+  --color-panel-2: rgb(16 20 40 / 0.85);
+  --color-line: rgb(122 132 255 / 0.14);
+  --color-line-2: rgb(139 148 255 / 0.35);
+
+  /* Acentos */
+  --color-violet: #a78bfa;
+  --color-violet-hot: #c4b5fd;
+  --color-cyan: #67e8f9;
+  --color-blue: #60a5fa;
+  --color-green: #6ee7a0;
+  --color-amber: #fbbf24;
+  --color-red: #fb7185;
+
+  /* Texto — contraste apto para uso diario (dim ≈ 6.7:1 sobre bg) */
+  --color-text: #e2e7ff;
+  --color-text-dim: #8891c5;
+  --color-text-faint: #6b74a8; /* solo decorativo/disabled, nunca información */
+
+  /* Tipografía (las vars --font-chakra/--font-plex las inyecta next/font) */
+  --font-display: var(--font-chakra), sans-serif;
+  --font-mono: var(--font-plex), monospace;
+  --text-2xs: 10px;
+  --text-2xs--line-height: 1.5;
+  --text-xs: 11px;
+  --text-xs--line-height: 1.5;
+  --text-sm: 12px;
+  --text-sm--line-height: 1.55;
+  --text-base: 13px;
+  --text-base--line-height: 1.6;
+  --text-md: 14px;
+  --text-md--line-height: 1.65;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
+
+  /* Radios (estética HUD: casi recto) */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+
+  /* Tracking semántico */
+  --tracking-label: 0.2em;
+  --tracking-title: 0.28em;
+  --tracking-hero: 0.35em;
+
+  /* Breakpoint "wide": el riel vertical de métricas aparece y la consola
+     gana columnas (nombrado, no arbitrario, para que ordene bien vs lg/xl). */
+  --breakpoint-wide: 1500px;
+}
+
+/* Paleta categórica de charts (donuts/series) en orden FIJO 1→5; la cola se
+   pliega en "otros" (gris text-faint). Validada contra la superficie del
+   panel: CVD adyacente ΔE ≥ 25 y contraste ≥ 3:1 (validate_palette.js);
+   vive fuera de la banda L 0.48–0.67 a propósito — banda neón de la marca.
+   amber/red quedan reservados a estado (riesgo de presupuesto), nunca series.
+   `static`: solo se consumen vía chartVar() en JS/SVG — sin utilidades que
+   las referencien, el @theme normal las tree-shakea y llegan vacías. */
+@theme static {
+  --color-chart-1: #a78bfa; /* = violet */
+  --color-chart-2: #22d3ee; /* paso más denso del ramp cyan */
+  --color-chart-3: #fb923c;
+  --color-chart-4: #60a5fa; /* = blue */
+  --color-chart-5: #2dd4bf;
+}
+
+/* Aliases legacy: el código previo al design system usa
+   style={{ color: "var(--violet)" }} y sigue resolviendo mientras dura
+   la migración. Se eliminan en la fase final del rediseño. */
 :root {
-  --bg: #04050c;
-  --bg-panel: rgba(10, 12, 26, 0.72);
-  --line: rgba(122, 132, 255, 0.14);
-  --line-bright: rgba(139, 148, 255, 0.35);
-  --violet: #a78bfa;
-  --violet-hot: #c4b5fd;
-  --cyan: #67e8f9;
-  --blue: #60a5fa;
-  --green: #6ee7a0;
-  --amber: #fbbf24;
-  --red: #fb7185;
-  --text: #dbe1ff;
-  --text-dim: #6b74a8;
+  --bg: var(--color-bg);
+  --bg-panel: var(--color-panel);
+  --line: var(--color-line);
+  --line-bright: var(--color-line-2);
+  --violet: var(--color-violet);
+  --violet-hot: var(--color-violet-hot);
+  --cyan: var(--color-cyan);
+  --blue: var(--color-blue);
+  --green: var(--color-green);
+  --amber: var(--color-amber);
+  --red: var(--color-red);
+  --text: var(--color-text);
+  --text-dim: var(--color-text-dim);
+  /* Capas (z-index) */
+  --z-ambient: -1;
+  --z-dropdown: 30;
+  --z-overlay: 60;
+  --z-toast: 70;
 }
 
 html,
@@ -25,7 +108,7 @@ body {
 }
 
 body {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   /* Atmósfera: nébulas violeta/cian + grid + scanlines */
   background-image:
@@ -42,25 +125,27 @@ body {
     44px 44px;
 }
 
-/* Scanlines sutiles por encima de todo */
+/* Scanlines ambientales: DETRÁS del contenido (z negativo). Encima del
+   texto castigaban la legibilidad diaria; aquí solo dan atmósfera y los
+   paneles glass las dejan traslucir con su backdrop-blur. */
 body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 50;
+  z-index: var(--z-ambient);
   background: repeating-linear-gradient(
     0deg,
     transparent 0px,
     transparent 3px,
-    rgba(0, 0, 0, 0.14) 3px,
-    rgba(0, 0, 0, 0.14) 4px
+    rgba(0, 0, 0, 0.1) 3px,
+    rgba(0, 0, 0, 0.1) 4px
   );
   mix-blend-mode: multiply;
 }
 
 .font-display {
-  font-family: var(--font-display), sans-serif;
+  font-family: var(--font-display);
 }
 
 /* ── Panel HUD con esquinas bracket ─────────────────────────────── */
@@ -92,7 +177,7 @@ body::after {
 }
 
 .hud-title {
-  font-family: var(--font-display), sans-serif;
+  font-family: var(--font-display);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.28em;
@@ -108,6 +193,53 @@ body::after {
   height: 6px;
   background: var(--violet);
   box-shadow: 0 0 8px var(--violet);
+}
+
+/* Tonos del dot del título (Panel v2 / SectionTitle) */
+.hud-title-cyan::before {
+  background: var(--color-cyan);
+  box-shadow: 0 0 8px var(--color-cyan);
+}
+.hud-title-green::before {
+  background: var(--color-green);
+  box-shadow: 0 0 8px var(--color-green);
+}
+.hud-title-amber::before {
+  background: var(--color-amber);
+  box-shadow: 0 0 8px var(--color-amber);
+}
+.hud-title-red::before {
+  background: var(--color-red);
+  box-shadow: 0 0 8px var(--color-red);
+}
+.hud-title-neutral::before {
+  background: var(--color-text-dim);
+  box-shadow: none;
+}
+
+/* Variante hero del panel: brackets grandes + línea de acento superior */
+.hud-panel-hero::before,
+.hud-panel-hero::after {
+  width: 18px;
+  height: 18px;
+}
+.hud-accent {
+  position: absolute;
+  top: -1px;
+  left: 12%;
+  width: 42%;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--color-violet), transparent);
+  box-shadow: 0 0 12px rgb(167 139 250 / 0.5);
+}
+
+/* Variante alert: borde teñido por tono */
+.hud-alert-amber {
+  border-color: rgb(251 191 36 / 0.4);
+}
+.hud-alert-red {
+  border-color: rgb(251 113 133 / 0.4);
 }
 
 .glow-violet {
@@ -547,6 +679,59 @@ body::after {
   background: transparent;
 }
 
+/* ── Riel de scroll propio (<ScrollArea rail />) ─────────────────────
+   Ojo Chrome 121+: la propiedad estándar `scrollbar-width` ANULA los
+   ::-webkit-scrollbar. Por eso aquí se OCULTA el nativo del todo y el riel se
+   dibuja a mano — es la única forma de tener glow, auto-hide y drag. */
+.hud-scroll-hide {
+  scrollbar-width: none;
+}
+.hud-scroll-hide::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Hairline permanente: dice "aquí se scrollea" sin gritar */
+.hud-rail {
+  position: absolute;
+  width: 3px;
+  border-radius: 3px;
+  background: rgba(122, 132, 255, 0.07);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  z-index: 5;
+}
+.hud-rail.is-live, /* mientras scrolleas */
+.hud-rail:hover {
+  opacity: 1;
+}
+.hud-scroll-hide:hover ~ .hud-rail {
+  opacity: 1;
+}
+.hud-rail-thumb {
+  position: absolute;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--violet);
+  opacity: 0.3;
+  box-shadow: 0 0 7px rgba(167, 139, 250, 0.55);
+  transition: opacity 0.25s ease, background 0.2s ease;
+  cursor: grab;
+}
+.hud-rail:hover .hud-rail-thumb {
+  opacity: 0.7;
+}
+.hud-rail.is-live .hud-rail-thumb {
+  opacity: 0.55;
+}
+.hud-rail-thumb:active {
+  cursor: grabbing;
+  opacity: 1;
+  background: var(--violet-hot);
+}
+
 /* ── Botón de comando ───────────────────────────────────────────── */
 .cmd-btn {
   display: flex;
@@ -577,4 +762,107 @@ body::after {
 .cmd-btn::before {
   content: ">";
   color: var(--violet);
+}
+
+/* ── Design system: utilidades nuevas ───────────────────────────── */
+
+/* Foco visible global (navegación por teclado) */
+:focus-visible {
+  outline: 1px solid var(--color-cyan);
+  outline-offset: 2px;
+}
+
+/* Campos dentro de un contenedor que YA señala el foco (composer: el borde
+   pasa a violeta con focus-within). Sin esto se ve una caja dentro de otra.
+   Ojo, dos cosas se juntan aquí:
+   1. Por spec los campos de texto SIEMPRE matchean :focus-visible, también al
+      hacer clic con ratón — no solo navegando por teclado.
+   2. Esta regla va sin @layer, así que le gana a `outline-none` de Tailwind
+      (las utilidades viven en una capa, y lo no-capado siempre gana).
+   No se pierde accesibilidad: el foco sigue siendo visible en el contenedor. */
+.hud-field :focus-visible {
+  outline: none;
+}
+
+/* Glow de texto por tono. Regla social: máx. 1–2 glows por panel para
+   que el estado anómalo salte de verdad. */
+.glow-text-violet {
+  text-shadow: 0 0 18px rgb(167 139 250 / 0.55);
+}
+.glow-text-cyan {
+  text-shadow: 0 0 18px rgb(103 232 249 / 0.45);
+}
+.glow-text-green {
+  text-shadow: 0 0 16px rgb(110 231 160 / 0.45);
+}
+.glow-text-amber {
+  text-shadow: 0 0 16px rgb(251 191 36 / 0.45);
+}
+.glow-text-red {
+  text-shadow: 0 0 16px rgb(251 113 133 / 0.5);
+}
+
+/* Glow de caja por tono (bordes/controles "vivos") */
+.glow-box-violet {
+  box-shadow: 0 0 14px rgb(167 139 250 / 0.25), inset 0 0 10px rgb(167 139 250 / 0.05);
+}
+.glow-box-cyan {
+  box-shadow: 0 0 14px rgb(103 232 249 / 0.22), inset 0 0 10px rgb(103 232 249 / 0.05);
+}
+.glow-box-green {
+  box-shadow: 0 0 14px rgb(110 231 160 / 0.22), inset 0 0 10px rgb(110 231 160 / 0.05);
+}
+.glow-box-amber {
+  box-shadow: 0 0 14px rgb(251 191 36 / 0.22), inset 0 0 10px rgb(251 191 36 / 0.05);
+}
+.glow-box-red {
+  box-shadow: 0 0 14px rgb(251 113 133 / 0.25), inset 0 0 10px rgb(251 113 133 / 0.06);
+}
+
+/* Elevaciones: 0 = .hud-panel base · 1 = superficie elevada (dropdowns,
+   cards internas) · 2 = overlay flotante */
+.elev-1 {
+  background: var(--color-panel-2);
+  border-color: var(--color-line-2);
+}
+.elev-2 {
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.5);
+}
+
+/* Skeleton de carga (PanelState) */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -160px 0;
+  }
+  100% {
+    background-position: 160px 0;
+  }
+}
+.skeleton {
+  border-radius: var(--radius-xs);
+  background:
+    linear-gradient(90deg, transparent, rgb(139 148 255 / 0.1), transparent) no-repeat,
+    rgb(122 132 255 / 0.07);
+  background-size: 160px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Reduced motion: loops y reveals se apagan, los cambios de estado
+   quedan instantáneos ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .hud-in {
+    animation: none;
+  }
+  .pulse-dot,
+  .wave-bar,
+  .voice-orb-live,
+  .skeleton,
+  .cursor-blink::after {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
 }

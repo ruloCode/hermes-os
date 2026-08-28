@@ -8,7 +8,7 @@
  * Claude Code). En su lugar TÚ aportas el token y aquí se usa en solo-lectura:
  *
  *   1. env  CLAUDE_OAUTH_TOKEN   (en apps/web/.env)
- *   2. file ~/.hermes/claude-token   (lo escribe scripts/hermes-usage-token.mjs)
+ *   2. file ~/.hermes-os/claude-token   (lo escribe scripts/hermes-usage-token.mjs)
  *   3. Keychain (opt-in con CLAUDE_USAGE_KEYCHAIN=1; puede pedir permiso)
  */
 
@@ -42,7 +42,7 @@ interface Credential {
 }
 
 function tokenFilePath(): string {
-  return path.join(os.homedir(), ".hermes", "claude-token");
+  return path.join(os.homedir(), ".hermes-os", "claude-token");
 }
 
 // Deriva la etiqueta del plan que muestra la referencia ("Max (20x)") a partir

@@ -3,10 +3,17 @@
 import { useState } from "react";
 import type { ClaudeExecConfig } from "@/lib/hermes";
 
+/**
+ * Modelos vigentes de Claude Code. Se guarda el ID COMPLETO (no el alias
+ * `opus`/`sonnet`): el alias apunta siempre al último modelo, así que la
+ * etiqueta se desactualiza sola en cuanto sale uno nuevo. Con el ID explícito,
+ * lo que dice el botón es lo que corre.
+ */
 export const CLAUDE_MODELS = [
-  { label: "Opus 4.8", value: "opus" },
-  { label: "Sonnet", value: "sonnet" },
-  { label: "Haiku", value: "haiku" },
+  { label: "Opus 5", value: "claude-opus-5" },
+  { label: "Sonnet 5", value: "claude-sonnet-5" },
+  { label: "Haiku 4.5", value: "claude-haiku-4-5" },
+  { label: "Fable 5", value: "claude-fable-5" },
 ] as const;
 
 export const CLAUDE_EFFORTS = [
@@ -24,7 +31,7 @@ export const CLAUDE_PERMISSIONS = [
 ] as const;
 
 export const DEFAULT_CLAUDE_CONFIG: ClaudeExecConfig = {
-  model: "opus",
+  model: "claude-opus-5",
   effort: "high",
   permissionMode: "acceptEdits",
 };
@@ -33,6 +40,9 @@ const labelOf = (
   list: ReadonlyArray<{ label: string; value: string }>,
   value: string,
 ): string => list.find((o) => o.value === value)?.label ?? value;
+
+/** Nombre corto del modelo ("Opus 5") a partir de su ID, para avisos y chips. */
+export const claudeModelLabel = (value: string): string => labelOf(CLAUDE_MODELS, value);
 
 /**
  * Selector de ejecución de Claude Code (estilo la barra de model/effort del
@@ -53,23 +63,22 @@ export function ClaudeExecBar({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="mt-2 rounded-sm border" style={{ borderColor: "var(--line)" }}>
+    <div className="mt-2 rounded-sm border border-line">
       {/* Barra resumen + acciones */}
       <div className="flex items-center justify-between gap-2 px-2 py-1.5">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex items-center gap-1.5 text-[9px] tracking-[0.18em] uppercase"
-          style={{ color: "var(--violet)" }}
+          className="flex items-center gap-1.5 text-2xs tracking-[0.18em] text-violet uppercase"
           title="Configurar cómo se ejecuta en Claude Code"
         >
           <span>⚡ Claude Code</span>
-          <span style={{ color: "var(--text-dim)" }}>
+          <span className="text-text-dim">
             {labelOf(CLAUDE_MODELS, config.model)} · {labelOf(CLAUDE_EFFORTS, config.effort)} ·{" "}
             {labelOf(CLAUDE_PERMISSIONS, config.permissionMode)}
           </span>
-          <span style={{ color: "var(--text-dim)" }}>{open ? "▴" : "▾"}</span>
+          <span className="text-text-dim">{open ? "▴" : "▾"}</span>
         </button>
 
         <div className="flex items-center gap-1.5">
@@ -78,8 +87,7 @@ export function ClaudeExecBar({
             disabled={disabled}
             onClick={() => onRun("terminal")}
             title="Abrir una Terminal.app real con claude corriendo"
-            className="rounded-sm border px-2 py-1 text-[9px] tracking-[0.15em] uppercase transition-colors disabled:opacity-40"
-            style={{ borderColor: "var(--line-bright)", color: "var(--text)" }}
+            className="rounded-sm border border-line-2 px-2 py-1 text-2xs tracking-[0.15em] text-text uppercase transition-colors disabled:opacity-40"
           >
             ▶ Terminal
           </button>
@@ -88,8 +96,7 @@ export function ClaudeExecBar({
             disabled={disabled}
             onClick={() => onRun("embedded")}
             title="Ejecutar aquí, en el panel embebido"
-            className="rounded-sm px-2 py-1 text-[9px] tracking-[0.15em] uppercase transition-colors disabled:opacity-40"
-            style={{ background: "rgba(167,139,250,0.16)", color: "var(--violet-hot)" }}
+            className="rounded-sm bg-violet/15 px-2 py-1 text-2xs tracking-[0.15em] text-violet-hot uppercase transition-colors disabled:opacity-40"
           >
             ▣ Panel
           </button>
@@ -98,7 +105,7 @@ export function ClaudeExecBar({
 
       {/* Controles */}
       {open && (
-        <div className="space-y-2 border-t px-2 py-2" style={{ borderColor: "var(--line)" }}>
+        <div className="space-y-2 border-t border-line px-2 py-2">
           <Field label="Modelo">
             <div className="flex gap-1">
               {CLAUDE_MODELS.map((m) => (
@@ -142,7 +149,7 @@ export function ClaudeExecBar({
               </div>
             </Field>
             {config.permissionMode === "manual" && (
-              <p className="mt-1 pl-[72px] text-[8px] tracking-[0.1em]" style={{ color: "var(--amber)" }}>
+              <p className="mt-1 pl-[72px] text-2xs tracking-[0.1em] text-amber">
                 “Manual” solo aplica en ▶ Terminal; en ▣ Panel (headless) equivale a “default”.
               </p>
             )}
@@ -156,10 +163,7 @@ export function ClaudeExecBar({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span
-        className="w-16 shrink-0 text-[8.5px] tracking-[0.2em] uppercase"
-        style={{ color: "var(--text-dim)" }}
-      >
+      <span className="w-16 shrink-0 text-2xs tracking-label text-text-dim uppercase">
         {label}
       </span>
       {children}
@@ -181,12 +185,11 @@ function Segment({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className="rounded-sm px-1.5 py-0.5 text-[9px] tracking-[0.1em] transition-colors"
-      style={{
-        background: active ? "rgba(103,232,249,0.14)" : "transparent",
-        color: active ? "var(--cyan)" : "var(--text-dim)",
-        boxShadow: active ? "inset 0 0 0 1px var(--cyan)" : "inset 0 0 0 1px var(--line)",
-      }}
+      className={`rounded-sm px-1.5 py-0.5 text-2xs tracking-[0.1em] transition-colors ${
+        active
+          ? "bg-cyan/15 text-cyan inset-ring inset-ring-cyan"
+          : "bg-transparent text-text-dim inset-ring inset-ring-line"
+      }`}
     >
       {children}
     </button>

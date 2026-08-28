@@ -14,6 +14,22 @@ try {
   /* sin .env raíz o Node antiguo: se usan los defaults del código */
 }
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  // /orquestador se fusionó al dashboard (tab TAREAS); los links viejos siguen
+  // vivos vía redirect permanente.
+  redirects: async () => [{ source: "/orquestador", destination: "/", permanent: true }],
+  // @hermes/shared se consume como TS crudo (main: src/index.ts) con imports
+  // ESM "./types.js": transpilar el package y mapear .js → .ts para que
+  // webpack resuelva igual que tsx/tsc. Necesario desde que la web importa
+  // VALORES del shared (FINANCE_CATEGORIES), no solo tipos.
+  transpilePackages: ["@hermes/shared"],
+  webpack: (config) => {
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      ".js": [".ts", ".tsx", ".js"],
+    };
+    return config;
+  },
+};
 
 export default nextConfig;

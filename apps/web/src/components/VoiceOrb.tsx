@@ -3,28 +3,43 @@
 import { useEffect, useRef } from "react";
 import { useConversationControls, useConversationMode } from "@elevenlabs/react";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
+import { useWorkspace } from "@/state/WorkspaceContext";
 import { useVoiceBusy } from "./VoiceBusyContext";
 
 /**
- * Orbe de voz del header: el control siempre visible para iniciar/colgar la
- * llamada con Hermes desde cualquier vista. El orbe reacciona al AUDIO REAL
- * (volumen de entrada cuando escucha, de salida cuando habla) y su color refleja
- * el estado: OFF · CONECTANDO · ESCUCHANDO · HABLANDO · EJECUTANDO (una client
- * tool de voz en curso). Vive DENTRO del ConversationProvider.
+ * Orbe de voz del header: INDICADOR de estado siempre visible + atajo a la
+ * vista Voz en vivo (la entrada canónica a la llamada vive en el composer de
+ * la consola y en ⌘K — patrón ChatGPT: un solo botón de iniciar por superficie).
+ * El orbe reacciona al AUDIO REAL (volumen de entrada cuando escucha, de
+ * salida cuando habla) y su color refleja el estado: OFF · CONECTANDO ·
+ * ESCUCHANDO · HABLANDO · EJECUTANDO (una client tool de voz en curso).
+ * Vive DENTRO del ConversationProvider.
  */
 type OrbState = "na" | "off" | "connecting" | "listening" | "speaking" | "exec";
 
+// Color runtime del orbe (alimenta la var --orb del CSS); no mapeable a clase.
 const COLOR: Record<OrbState, string> = {
-  na: "var(--text-dim)",
-  off: "var(--violet)",
-  connecting: "var(--amber)",
-  listening: "var(--green)",
-  speaking: "var(--violet-hot)",
-  exec: "var(--cyan)",
+  na: "var(--color-text-dim)",
+  off: "var(--color-violet)",
+  connecting: "var(--color-amber)",
+  listening: "var(--color-green)",
+  speaking: "var(--color-violet-hot)",
+  exec: "var(--color-cyan)",
+};
+
+// Clase de color del label según estado (mismo tono que el orbe).
+const LABEL_CLASS: Record<OrbState, string> = {
+  na: "text-text-dim",
+  off: "text-violet",
+  connecting: "text-amber",
+  listening: "text-green",
+  speaking: "text-violet-hot",
+  exec: "text-cyan",
 };
 
 export function VoiceOrb() {
-  const { connect, disconnect, error, configured, connected, connecting } = useVoiceConnect();
+  const { error, configured, connected, connecting } = useVoiceConnect();
+  const ws = useWorkspace();
   const { isSpeaking } = useConversationMode();
   const { getInputVolume, getOutputVolume } = useConversationControls();
   const { action } = useVoiceBusy();
@@ -49,7 +64,7 @@ export function VoiceOrb() {
     state === "na"
       ? "VOZ N/A"
       : state === "off"
-        ? "HABLAR"
+        ? "OFF"
         : state === "connecting"
           ? "CONECTANDO"
           : state === "exec"
@@ -75,10 +90,10 @@ export function VoiceOrb() {
     return () => cancelAnimationFrame(raf);
   }, [connected, getInputVolume, getOutputVolume]);
 
+  // El orbe ya no conecta/cuelga: es estado + atajo (colgar vive en la vista Voz).
   const onClick = () => {
     if (!configured) return;
-    if (connected || connecting) disconnect();
-    else void connect();
+    ws.showPanel("voz");
   };
 
   const color = COLOR[state];
@@ -88,7 +103,7 @@ export function VoiceOrb() {
       type="button"
       onClick={onClick}
       disabled={!configured}
-      title={error || (connected ? "Terminar llamada con Hermes" : "Hablar con Hermes")}
+      title={error || (connected ? "Llamada activa — abrir Voz en vivo" : "Abrir Voz en vivo")}
       aria-label={configured ? label : "Voz no configurada"}
       className="voice-orb-btn mb-0.5 flex items-center gap-2"
     >
@@ -98,12 +113,8 @@ export function VoiceOrb() {
         style={{ ["--orb" as string]: color }}
       />
       <span className="hidden flex-col items-start leading-none sm:flex">
-        <span className="text-[9px] tracking-[0.25em] uppercase" style={{ color }}>
-          {label}
-        </span>
-        <span className="text-[8px] tracking-[0.28em] uppercase" style={{ color: "var(--text-dim)" }}>
-          Voz
-        </span>
+        <span className={`text-2xs tracking-label uppercase ${LABEL_CLASS[state]}`}>{label}</span>
+        <span className="text-2xs tracking-title uppercase text-text-dim">Voz</span>
       </span>
     </button>
   );

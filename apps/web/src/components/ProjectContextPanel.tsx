@@ -3,7 +3,9 @@
 import { Children, useEffect, useRef, useState } from "react";
 import type { ProjectContext } from "@hermes/shared";
 import { getProjectContext, openProjectInCursor } from "@/lib/hermes";
-import { Panel } from "./Panel";
+import { Panel } from "@/components/ui/Panel";
+import { PanelState } from "@/components/ui/PanelState";
+import type { Tone } from "@/components/ui/tones";
 import { Markdown } from "./Markdown";
 
 /**
@@ -88,8 +90,7 @@ export function ProjectContextPanel({
           type="button"
           onClick={onClear}
           title="Quitar foco de proyecto"
-          className="flex items-center gap-1.5 text-[9px] tracking-[0.2em] uppercase transition-colors"
-          style={{ color: "var(--cyan)" }}
+          className="flex items-center gap-1.5 text-2xs tracking-label text-cyan uppercase transition-colors"
         >
           <span>◈ {name ?? slug}</span>
           <span className="opacity-60 hover:opacity-100">✕</span>
@@ -99,10 +100,10 @@ export function ProjectContextPanel({
       <div className="max-h-[46vh] space-y-3 overflow-y-auto pr-1">
         {/* Estado del proyecto (del vault): las referencias .md son clickables. */}
         {(estadoActual?.trim() || (tareas && tareas.length > 0)) && (
-          <div className="space-y-2 border-b pb-3" style={{ borderColor: "var(--line)" }}>
+          <div className="space-y-2 border-b border-line pb-3">
             {estadoActual?.trim() && (
               <div>
-                <p className="mb-1 text-[9px] tracking-[0.25em] uppercase" style={{ color: "var(--green)" }}>
+                <p className="mb-1 text-2xs tracking-title text-green uppercase">
                   ▸ Estado actual
                 </p>
                 <Markdown source={estadoActual} project={slug} />
@@ -110,7 +111,7 @@ export function ProjectContextPanel({
             )}
             {tareas && tareas.length > 0 && (
               <div>
-                <p className="mb-1 text-[9px] tracking-[0.25em] uppercase" style={{ color: "var(--amber)" }}>
+                <p className="mb-1 text-2xs tracking-title text-amber uppercase">
                   ▸ Tareas pendientes
                 </p>
                 <Markdown source={tareas.map((t) => `- ${t}`).join("\n")} project={slug} />
@@ -119,22 +120,16 @@ export function ProjectContextPanel({
           </div>
         )}
 
-        {loading && (
-          <p className="pt-4 text-center text-[10px] tracking-[0.25em] pulse-dot" style={{ color: "var(--text-dim)" }}>
-            LEYENDO CONTEXTO…
-          </p>
-        )}
+        {loading && <PanelState kind="loading" compact />}
 
         {error && (
-          <p className="pt-4 text-center text-[10px] leading-relaxed tracking-[0.2em]" style={{ color: "var(--text-dim)" }}>
-            AGENTE OFFLINE — corre <code className="text-[10px]">pnpm dev:agent</code>
-          </p>
+          <PanelState kind="offline" compact title="Agente offline" hint="corre pnpm dev:agent" />
         )}
 
         {ctx && !ctx.found && (
-          <p className="pt-3 text-[10.5px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
-            Sin repo local para <span style={{ color: "var(--cyan)" }}>{name ?? slug}</span>. Agrega{" "}
-            <code className="text-[10px]">ruta_local</code> al frontmatter del proyecto en el vault para
+          <p className="pt-3 text-xs leading-relaxed text-text-dim">
+            Sin repo local para <span className="text-cyan">{name ?? slug}</span>. Agrega{" "}
+            <code className="text-2xs">ruta_local</code> al frontmatter del proyecto en el vault para
             ver sus skills, MCP y herramientas.
           </p>
         )}
@@ -142,14 +137,14 @@ export function ProjectContextPanel({
         {ctx && ctx.found && (
           <>
             {/* Meta: rama · CLAUDE.md · ruta */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] tracking-[0.14em] uppercase" style={{ color: "var(--text-dim)" }}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs tracking-label text-text-dim uppercase">
               {ctx.rama && (
                 <span className="flex items-center gap-1">
-                  <span style={{ color: "var(--amber)" }}>⌥</span> {ctx.rama}
+                  <span className="text-amber">⌥</span> {ctx.rama}
                 </span>
               )}
               <span className="flex items-center gap-1">
-                <span style={{ color: ctx.hasClaudeMd ? "var(--green)" : "var(--text-dim)" }}>
+                <span className={ctx.hasClaudeMd ? "text-green" : "text-text-dim"}>
                   {ctx.hasClaudeMd ? "◉" : "○"}
                 </span>{" "}
                 CLAUDE.md
@@ -158,8 +153,7 @@ export function ProjectContextPanel({
             {ctx.ruta_local && (
               <div className="flex items-center gap-2">
                 <p
-                  className="min-w-0 flex-1 truncate text-[9.5px]"
-                  style={{ color: "var(--text-dim)" }}
+                  className="min-w-0 flex-1 truncate text-2xs text-text-dim"
                   title={ctx.ruta_local}
                 >
                   {ctx.ruta_local}
@@ -170,8 +164,7 @@ export function ProjectContextPanel({
                   disabled={opening}
                   title="Abrir el proyecto en Cursor"
                   aria-label="Abrir el proyecto en Cursor"
-                  className="flex shrink-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[9px] tracking-[0.18em] uppercase opacity-80 transition-opacity hover:opacity-100 disabled:opacity-40"
-                  style={{ borderColor: "var(--cyan)", color: "var(--cyan)", background: "rgba(103,232,249,0.05)" }}
+                  className="flex shrink-0 items-center gap-1 rounded-sm border border-cyan bg-cyan/5 px-1.5 py-0.5 text-2xs tracking-label text-cyan uppercase opacity-80 transition-opacity hover:opacity-100 disabled:opacity-40"
                 >
                   <CursorGlyph spinning={opening} />
                   {opening ? "Abriendo…" : "Cursor"}
@@ -179,38 +172,33 @@ export function ProjectContextPanel({
               </div>
             )}
 
-            {openError && (
-              <p className="text-[9.5px] leading-snug" style={{ color: "var(--red)" }}>
-                ⚠ {openError}
-              </p>
-            )}
+            {openError && <p className="text-2xs leading-snug text-red">⚠ {openError}</p>}
 
             {empty && (
-              <p className="pt-1 text-[10px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
+              <p className="pt-1 text-2xs leading-relaxed text-text-dim">
                 Este proyecto no declara skills, MCP ni permisos en su{" "}
-                <code className="text-[10px]">.claude/</code>.
+                <code className="text-2xs">.claude/</code>.
               </p>
             )}
 
-            <Section label="Skills" color="var(--violet)" count={ctx.skills.length}>
+            <Section label="Skills" tone="violet" count={ctx.skills.length}>
               {ctx.skills.map((s) => (
-                <Chip key={s.name} color="var(--violet)" title={s.description || undefined}>
+                <Chip key={s.name} tone="violet" title={s.description || undefined}>
                   {s.name}
                 </Chip>
               ))}
             </Section>
 
-            <Section label="MCP" color="var(--cyan)" count={ctx.mcpServers.length}>
+            <Section label="MCP" tone="cyan" count={ctx.mcpServers.length}>
               {ctx.mcpServers.map((m) => (
                 <Chip
                   key={m.name}
-                  color="var(--cyan)"
+                  tone="cyan"
                   title={`${m.kind}${m.detail ? ` · ${m.detail}` : ""}`}
                   dim={m.enabled === false}
                 >
                   <span
-                    className="mr-1 text-[8px]"
-                    style={{ color: m.enabled === false ? "var(--text-dim)" : "var(--cyan)" }}
+                    className={`mr-1 text-2xs ${m.enabled === false ? "text-text-dim" : "text-cyan"}`}
                   >
                     {m.enabled === false ? "○" : "◉"}
                   </span>
@@ -219,18 +207,18 @@ export function ProjectContextPanel({
               ))}
             </Section>
 
-            <Section label="Permitidas" color="var(--green)" count={ctx.allowTools.length}>
+            <Section label="Permitidas" tone="green" count={ctx.allowTools.length}>
               {ctx.allowTools.map((t) => (
-                <Chip key={t} color="var(--green)" title={t}>
+                <Chip key={t} tone="green" title={t}>
                   {t}
                 </Chip>
               ))}
             </Section>
 
             {ctx.denyTools.length > 0 && (
-              <Section label="Denegadas" color="var(--red)" count={ctx.denyTools.length}>
+              <Section label="Denegadas" tone="red" count={ctx.denyTools.length}>
                 {ctx.denyTools.map((t) => (
-                  <Chip key={t} color="var(--red)" title={t}>
+                  <Chip key={t} tone="red" title={t}>
                     {t}
                   </Chip>
                 ))}
@@ -238,9 +226,9 @@ export function ProjectContextPanel({
             )}
 
             {ctx.commands.length > 0 && (
-              <Section label="Comandos" color="var(--blue)" count={ctx.commands.length}>
+              <Section label="Comandos" tone="blue" count={ctx.commands.length}>
                 {ctx.commands.map((cmd) => (
-                  <Chip key={cmd} color="var(--blue)">
+                  <Chip key={cmd} tone="blue">
                     /{cmd}
                   </Chip>
                 ))}
@@ -258,14 +246,36 @@ export function ProjectContextPanel({
 // Cuántas chips muestra una sección antes de colapsar el resto en "+N más".
 const SECTION_MAX = 8;
 
+// Clases estáticas por tono (Tailwind necesita literales completos, no
+// nombres de clase interpolados).
+const TONE_TEXT: Record<Tone, string> = {
+  violet: "text-violet",
+  cyan: "text-cyan",
+  blue: "text-blue",
+  green: "text-green",
+  amber: "text-amber",
+  red: "text-red",
+  neutral: "text-text-dim",
+};
+
+const TONE_CHIP: Record<Tone, string> = {
+  violet: "border-violet text-violet",
+  cyan: "border-cyan text-cyan",
+  blue: "border-blue text-blue",
+  green: "border-green text-green",
+  amber: "border-amber text-amber",
+  red: "border-red text-red",
+  neutral: "border-line text-text-dim",
+};
+
 function Section({
   label,
-  color,
+  tone,
   count,
   children,
 }: {
   label: string;
-  color: string;
+  tone: Tone;
   count: number;
   children: React.ReactNode;
 }) {
@@ -275,19 +285,12 @@ function Section({
   const shown = open || rest <= 0 ? all : all.slice(0, SECTION_MAX);
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-2 text-[9px] tracking-[0.25em] uppercase">
-        <span style={{ color }}>▸ {label}</span>
-        <span
-          className="rounded-full px-1.5 text-[8px]"
-          style={{ color: "var(--text-dim)", background: "rgba(122,132,255,0.08)" }}
-        >
-          {count}
-        </span>
+      <div className="mb-1.5 flex items-center gap-2 text-2xs tracking-title uppercase">
+        <span className={TONE_TEXT[tone]}>▸ {label}</span>
+        <span className="rounded-full bg-violet/10 px-1.5 text-2xs text-text-dim">{count}</span>
       </div>
       {count === 0 ? (
-        <p className="text-[9.5px] tracking-[0.1em]" style={{ color: "var(--text-dim)" }}>
-          —
-        </p>
+        <p className="text-2xs tracking-widest text-text-dim">—</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {shown}
@@ -296,8 +299,7 @@ function Section({
               type="button"
               onClick={() => setOpen((v) => !v)}
               title={open ? "Mostrar menos" : `Mostrar las ${rest} restantes`}
-              className="inline-flex items-center rounded-sm border border-dashed px-1.5 py-0.5 text-[9.5px] leading-none transition-colors hover:opacity-100"
-              style={{ borderColor: "var(--line)", color: "var(--text-dim)" }}
+              className="inline-flex items-center rounded-sm border border-dashed border-line px-1.5 py-0.5 text-2xs leading-none text-text-dim transition-colors hover:border-line-2 hover:text-text"
             >
               {open ? "menos ▴" : `+${rest} más ▾`}
             </button>
@@ -310,24 +312,21 @@ function Section({
 
 function Chip({
   children,
-  color,
+  tone,
   title,
   dim = false,
 }: {
   children: React.ReactNode;
-  color: string;
+  tone: Tone;
   title?: string;
   dim?: boolean;
 }) {
   return (
     <span
       title={title}
-      className="inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] leading-none"
-      style={{
-        borderColor: dim ? "var(--line)" : color,
-        color: dim ? "var(--text-dim)" : color,
-        background: dim ? "transparent" : "rgba(122,132,255,0.04)",
-      }}
+      className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-2xs leading-none ${
+        dim ? "border-line bg-transparent text-text-dim" : `${TONE_CHIP[tone]} bg-violet/5`
+      }`}
     >
       {children}
     </span>

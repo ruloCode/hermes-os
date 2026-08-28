@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ChatSessionSummary } from "@hermes/shared";
+import type { ChatSessionSummary, ChatToolStep } from "@hermes/shared";
 import {
   streamChat,
   listChatSessions,
@@ -12,7 +12,11 @@ import {
   type ClaudeExecConfig,
 } from "@/lib/hermes";
 import { useSpeechDictation } from "@/hooks/useSpeechDictation";
-import { ClaudeExecBar } from "./ClaudeExecBar";
+import { useVoiceConnect } from "@/hooks/useVoiceConnect";
+import { useWorkspace } from "@/state/WorkspaceContext";
+import { ClaudeExecBar, claudeModelLabel } from "./ClaudeExecBar";
+import { AgentSteps } from "./AgentSteps";
+import { PanelState } from "@/components/ui/PanelState";
 
 /**
  * Consola con TABS: cada tab es una conversación (una sesión del Agent SDK).
@@ -28,6 +32,12 @@ interface ChatTab {
   sdkSessionId: string | null;
   title: string;
   messages: ChatMessage[];
+  /**
+   * Pasos agénticos por índice de mensaje del asistente. Van APARTE de
+   * `messages` a propósito: el historial que se manda al agente es solo
+   * role/content — los pasos son presentación del turno en vivo.
+   */
+  steps: Record<number, ChatToolStep[]>;
   draft: string;
   busy: boolean;
 }
@@ -42,6 +52,7 @@ const newTab = (): ChatTab => ({
   sdkSessionId: null,
   title: "",
   messages: [],
+  steps: {},
   draft: "",
   busy: false,
 });
@@ -62,6 +73,19 @@ function timeAgo(iso: string): string {
   return `hace ${Math.floor(s / 86400)} d`;
 }
 
+/** Acción bajo una respuesta terminada (copiar · reintentar). */
+function TurnAction({ children, onClick }: { children: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="cursor-pointer rounded-sm px-2 py-1 text-2xs text-text-faint transition-colors hover:bg-violet/8 hover:text-violet"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function ChatPanel({
   online,
   selectedProject,
@@ -71,6 +95,10 @@ export function ChatPanel({
   onClaudeConfigChange,
   onClaudeRun,
   claudeSessionId,
+  externalDraft,
+  onExternalDraftConsumed,
+  onEmptyChange,
+  hideEmptyHint,
 }: {
   online: boolean;
   selectedProject?: string | null;
@@ -81,10 +109,23 @@ export function ChatPanel({
   onClaudeRun: (runId: string, sessionId: string) => void;
   /** Sesión de Claude Code activa a resumir (null = corrida nueva). */
   claudeSessionId?: string | null;
+  /** Borrador externo (chips/palette): se vuelca al input del tab activo. */
+  externalDraft?: string | null;
+  onExternalDraftConsumed?: () => void;
+  /** Conversación vacía → el home muestra el hero (orbe + saludo); con
+   *  mensajes el orbe se va al muelle y manda la respuesta. */
+  onEmptyChange?: (empty: boolean) => void;
+  /** El hero del home ya da la bienvenida: no la repitas dentro. */
+  hideEmptyHint?: boolean;
 }) {
   const [state, setState] = useState<TabsState>(freshState);
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Entrada CANÓNICA a la voz (patrón ChatGPT/Pi: la llamada vive en el
+  // composer). El orbe del header queda como indicador de estado.
+  const voice = useVoiceConnect();
+  const ws = useWorkspace();
 
   // Tabs por proyecto: al cambiar el foco se guardan y restauran (en memoria).
   const byProject = useRef(new Map<string, TabsState>());
@@ -106,6 +147,28 @@ export function ChatPanel({
   const dictationTabRef = useRef("");
 
   const active = state.tabs.find((t) => t.key === state.active) ?? state.tabs[0];
+
+  // El home necesita saber si la conversación está vacía para decidir entre
+  // hero (orbe grande + saludo) y hilo (orbe en el muelle).
+  const empty = active.messages.length === 0;
+  const onEmptyRef = useRef(onEmptyChange);
+  onEmptyRef.current = onEmptyChange;
+  useEffect(() => {
+    onEmptyRef.current?.(empty);
+  }, [empty]);
+
+  // Borrador externo (chips /planificar día, palette): se vuelca al draft del
+  // tab activo, enfoca el input y se consume una sola vez.
+  useEffect(() => {
+    if (externalDraft == null) return;
+    setState((s) => ({
+      ...s,
+      tabs: s.tabs.map((t) => (t.key === s.active ? { ...t, draft: externalDraft } : t)),
+    }));
+    onExternalDraftConsumed?.();
+    setTimeout(() => inputRef.current?.focus(), 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalDraft]);
 
   // ── Helpers de estado ─────────────────────────────────────────────────
   // Actualiza un tab por key aunque su proyecto ya no esté en foco (los
@@ -245,6 +308,9 @@ export function ChatPanel({
       sdkSessionId: detail.id,
       title: detail.title.slice(0, 60),
       messages: detail.transcript,
+      // El historial del jsonl se lee como role/content: una sesión reabierta
+      // no trae pasos (solo los turnos vividos en vivo los tienen).
+      steps: {},
       draft: "",
       busy: false,
     };
@@ -265,6 +331,9 @@ export function ChatPanel({
     if (listening && dictationTabRef.current === tabKey) micStop();
 
     const history: ChatMessage[] = [...tab.messages, { role: "user", content }];
+    // Índice del mensaje del asistente que este turno va a escribir: ancla
+    // de sus pasos (los tool_use llegan antes que el primer delta de texto).
+    const replyIdx = history.length;
     updateTab(tabKey, (t) => ({
       ...t,
       draft: "",
@@ -295,6 +364,13 @@ export function ChatPanel({
           // resumen ese MISMO jsonl (visible también desde Cursor).
           onSession: (sid) =>
             updateTab(tabKey, (t) => ({ ...t, sdkSessionId: t.sdkSessionId ?? sid })),
+          onTool: (step) => {
+            updateTab(tabKey, (t) => ({
+              ...t,
+              steps: { ...t.steps, [replyIdx]: [...(t.steps[replyIdx] ?? []), step] },
+            }));
+            scrollDown();
+          },
         },
       );
     } catch (err) {
@@ -326,7 +402,9 @@ export function ChatPanel({
     try {
       if (mode === "terminal") {
         await claudeOpenTerminal(content, claudeConfig, selectedProject);
-        setClaudeNote(`▶ Terminal.app abierta (${claudeConfig.model} · ${claudeConfig.effort}).`);
+        setClaudeNote(
+          `▶ Terminal.app abierta (${claudeModelLabel(claudeConfig.model)} · ${claudeConfig.effort}).`,
+        );
       } else {
         const { runId, sessionId } = await claudeStartRun(
           content,
@@ -351,15 +429,22 @@ export function ChatPanel({
   return (
     <div className="flex h-full flex-col">
       {/* Barra de tabs: historial · tabs (una conversación c/u) · nuevo */}
-      <div className="relative mb-1.5 flex items-center gap-1.5 border-b pb-1.5" style={{ borderColor: "var(--line)" }}>
+      {/* Tira de tabs: en el hero estorba (una sola conversación vacía no
+          necesita gestor de pestañas). Reaparece al primer mensaje. */}
+      <div
+        className={`relative mb-1.5 items-center gap-1.5 border-b border-line pb-1.5 ${
+          hideEmptyHint && empty ? "hidden" : "flex"
+        }`}
+      >
         <button
           type="button"
           title="Historial de conversaciones (las mismas que ve Claude Code en este repo)"
           aria-label="Historial de conversaciones"
           aria-expanded={histOpen}
           onClick={() => void toggleHist()}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm transition-colors"
-          style={{ color: histOpen ? "var(--violet)" : "var(--text-dim)" }}
+          className={`grid h-6 w-6 shrink-0 place-items-center rounded-sm transition-colors ${
+            histOpen ? "text-violet" : "text-text-dim"
+          }`}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
             <path
@@ -380,15 +465,14 @@ export function ChatPanel({
                 key={t.key}
                 onClick={() => setState((s) => ({ ...s, active: t.key }))}
                 title={t.title || "Conversación nueva"}
-                className="group flex max-w-[160px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border px-2 py-1 text-[10px] leading-none transition-colors"
-                style={{
-                  borderColor: isActive ? "var(--violet)" : "var(--line)",
-                  color: isActive ? "var(--text)" : "var(--text-dim)",
-                  background: isActive ? "rgba(167,139,250,0.08)" : "transparent",
-                }}
+                className={`group flex max-w-[160px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border px-2 py-1 text-2xs leading-none transition-colors ${
+                  isActive
+                    ? "border-violet bg-violet/10 text-text"
+                    : "border-line bg-transparent text-text-dim"
+                }`}
               >
                 {t.busy && (
-                  <span className="pulse-dot shrink-0" style={{ color: "var(--amber)" }}>
+                  <span className="pulse-dot shrink-0 text-amber">
                     ●
                   </span>
                 )}
@@ -413,8 +497,7 @@ export function ChatPanel({
             title="Nueva conversación"
             aria-label="Nueva conversación"
             onClick={addTab}
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-dashed transition-colors hover:opacity-100"
-            style={{ borderColor: "var(--line)", color: "var(--text-dim)" }}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-dashed border-line text-text-dim transition-colors hover:opacity-100"
           >
             +
           </button>
@@ -424,29 +507,16 @@ export function ChatPanel({
         {histOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setHistOpen(false)} />
-            <div
-              className="absolute top-8 left-0 z-20 max-h-80 w-[26rem] max-w-full overflow-y-auto rounded-sm border p-1"
-              style={{
-                borderColor: "var(--line-bright)",
-                background: "rgba(8,10,22,0.96)",
-                backdropFilter: "blur(8px)",
-              }}
-            >
-              <p className="px-2 pt-1 pb-1.5 text-[8.5px] tracking-[0.22em] uppercase" style={{ color: "var(--text-dim)" }}>
+            <div className="absolute top-8 left-0 z-20 max-h-80 w-[26rem] max-w-full overflow-y-auto rounded-sm border border-line-2 bg-panel-2 p-1 backdrop-blur-md">
+              <p className="px-2 pt-1 pb-1.5 text-2xs tracking-label text-text-dim uppercase">
                 Sesiones de {selectedProject ? (projectName ?? selectedProject) : "Hermes (vault)"} · ~/.claude
               </p>
               {histError ? (
-                <p className="px-2 py-3 text-center text-[10px] tracking-[0.2em]" style={{ color: "var(--red)" }}>
-                  ⚠ NO SE PUDO LEER EL HISTORIAL
-                </p>
+                <PanelState kind="error" compact title="No se pudo leer el historial" />
               ) : hist === null ? (
-                <p className="px-2 py-3 text-center text-[10px] tracking-[0.25em] pulse-dot" style={{ color: "var(--text-dim)" }}>
-                  CARGANDO…
-                </p>
+                <PanelState kind="loading" compact />
               ) : hist.length === 0 ? (
-                <p className="px-2 py-3 text-center text-[10px] tracking-[0.2em]" style={{ color: "var(--text-dim)" }}>
-                  SIN CONVERSACIONES PREVIAS
-                </p>
+                <PanelState kind="empty" compact title="Sin conversaciones previas" />
               ) : (
                 hist.map((s) => (
                   <button
@@ -454,12 +524,12 @@ export function ChatPanel({
                     type="button"
                     onClick={() => void openSession(s.id)}
                     title={s.title}
-                    className="flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-[rgba(122,132,255,0.1)]"
+                    className="flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-violet/10"
                   >
-                    <span className="min-w-0 flex-1 truncate text-[10.5px]" style={{ color: "var(--text)" }}>
+                    <span className="min-w-0 flex-1 truncate text-xs text-text">
                       {s.title}
                     </span>
-                    <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-dim)" }}>
+                    <span className="shrink-0 text-2xs text-text-dim tabular-nums">
                       {timeAgo(s.updatedAt)} · {s.messages} msg
                     </span>
                   </button>
@@ -478,48 +548,101 @@ export function ChatPanel({
           if (!el) return;
           nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+        className={
+          // Con hero y sin mensajes el área colapsa: así el composer queda
+          // JUSTO bajo el saludo en vez de clavado al fondo del viewport.
+          hideEmptyHint && empty
+            ? "hidden"
+            : "hud-scroll-hide min-h-0 flex-1 space-y-6 overflow-y-auto pr-1"
+        }
       >
-        {active.messages.length === 0 && (
-          <p className="pt-6 text-center text-[11px] leading-relaxed tracking-[0.2em]" style={{ color: "var(--text-dim)" }}>
+        {/* Con hero (home vacío) el saludo ya dice todo esto: repetirlo aquí
+            era ruido duplicado. */}
+        {active.messages.length === 0 && !hideEmptyHint && (
+          <p className="pt-6 text-center text-xs leading-relaxed tracking-label text-text-dim">
             {online
               ? selectedProject
                 ? `CONVERSACIÓN NUEVA SOBRE ${(projectName ?? selectedProject).toUpperCase()}`
                 : "CONSOLA DIRECTA AL AGENTE — escribe una orden"
               : "AGENTE OFFLINE — corre `pnpm dev:agent`"}
             <br />
-            <span className="text-[9px] tracking-[0.15em] opacity-70">
+            <span className="text-2xs tracking-[0.15em] opacity-70">
               Enter envía · Shift+Enter salto de línea · ⟲ abre el historial del repo
             </span>
           </p>
         )}
-        {active.messages.map((m, i) => (
-          <div key={i} className="text-[12.5px] leading-relaxed">
-            <span
-              className="mr-2 text-[9px] font-semibold tracking-[0.2em]"
-              style={{ color: m.role === "user" ? "var(--cyan)" : "var(--violet)" }}
-            >
-              {m.role === "user" ? "RULO ›" : "HERMES ›"}
-            </span>
-            <span className="whitespace-pre-wrap">
-              {m.content ||
-                (active.busy && i === active.messages.length - 1 ? (
-                  <span className="pulse-dot">pensando…</span>
-                ) : (
-                  ""
-                ))}
-            </span>
-          </div>
-        ))}
+        {/* Asimetría deliberada (patrón ChatGPT · Claude · Copilot): el turno
+            del USUARIO es un objeto discreto (píldora a la derecha); el del
+            asistente NO lleva contenedor — es el contenido de la página. Darles
+            el mismo peso visual aplana la jerarquía del hilo. */}
+        {active.messages.map((m, i) => {
+          const steps = active.steps[i] ?? [];
+          const streaming = active.busy && i === active.messages.length - 1;
+
+          if (m.role === "user") {
+            return (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[78%] rounded-lg border border-line bg-violet/10 px-3.5 py-2.5 text-base leading-relaxed whitespace-pre-wrap">
+                  {m.content}
+                </div>
+              </div>
+            );
+          }
+
+          const ultimo = i === active.messages.length - 1;
+          return (
+            <div key={i} className="flex flex-col gap-2.5">
+              <span className="text-2xs tracking-title text-text-faint uppercase">
+                <b className="font-normal text-violet">Hermes</b>
+              </span>
+              {/* Pasos del turno ANTES del texto: el trabajo se ve mientras
+                  ocurre y la respuesta aterriza debajo (patrón Replit). */}
+              {steps.length > 0 && <AgentSteps steps={steps} busy={streaming} />}
+              <div className="text-base leading-loose whitespace-pre-wrap text-text-dim">
+                {m.content ||
+                  // "pensando…" solo hasta el primer paso: a partir de ahí los
+                  // pasos ya cuentan qué está haciendo.
+                  (streaming && steps.length === 0 ? (
+                    <span className="pulse-dot">pensando…</span>
+                  ) : (
+                    ""
+                  ))}
+              </div>
+              {/* Acciones SOLO al terminar (patrón Claude · ChatGPT · Bard):
+                  durante el stream la respuesta aún no es copiable ni final. */}
+              {!streaming && m.content && (
+                <div className="flex gap-1">
+                  <TurnAction onClick={() => void navigator.clipboard?.writeText(m.content)}>
+                    copiar
+                  </TurnAction>
+                  {ultimo && (
+                    <TurnAction
+                      onClick={() => {
+                        // Reintentar = devolver la orden anterior al composer.
+                        // No re-dispara sola: mandar tokens sin que lo pidas es
+                        // peor que un clic extra.
+                        const prev = [...active.messages.slice(0, i)]
+                          .reverse()
+                          .find((x) => x.role === "user");
+                        if (!prev) return;
+                        updateTab(active.key, (t) => ({ ...t, draft: prev.content }));
+                        setTimeout(() => inputRef.current?.focus(), 40);
+                      }}
+                    >
+                      reintentar
+                    </TurnAction>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Chip de foco de proyecto */}
       {selectedProject && (
-        <div
-          className="mt-2 flex items-center gap-2 self-start rounded-sm border px-2 py-1 text-[9px] tracking-[0.2em] uppercase"
-          style={{ borderColor: "var(--cyan)", color: "var(--cyan)", background: "rgba(103,232,249,0.06)" }}
-        >
-          <span style={{ boxShadow: "0 0 8px var(--cyan)" }}>◈</span>
+        <div className="mt-2 flex items-center gap-2 self-start rounded-sm border border-cyan bg-cyan/5 px-2 py-1 text-2xs tracking-label text-cyan uppercase">
+          <span className="glow-text-cyan">◈</span>
           <span>Hablando de {projectName ?? selectedProject}</span>
           <button
             type="button"
@@ -540,22 +663,24 @@ export function ChatPanel({
         disabled={active.busy || claudeBusy}
       />
       {claudeNote && (
-        <p className="mt-1 text-[9.5px] tracking-[0.1em]" style={{ color: "var(--text-dim)" }}>
+        <p className="mt-1 text-2xs tracking-[0.1em] text-text-dim">
           {claudeNote}
         </p>
       )}
 
       {/* Input: textarea auto-crecible · Enter envía · mic · enviar */}
+      {/* Composer como CAJA, no como línea con borde superior: es el objeto
+          más importante de la vista, así que se lee como objeto. El anillo de
+          foco vive aquí (focus-within), no en el textarea. */}
       <form
-        className="mt-2 flex items-end gap-2 border-t pt-2"
-        style={{ borderColor: "var(--line)" }}
+        className="hud-field mt-3 flex items-end gap-3 rounded-lg border border-line-2 bg-panel-2 px-4 py-3 shadow-[0_22px_60px_-20px_rgb(0_0_0_/_0.85)] transition-colors focus-within:border-violet/60"
         onSubmit={(e) => {
           e.preventDefault();
           void send(active.key);
         }}
       >
-        <span className="pb-1" style={{ color: "var(--violet)" }}>
-          {active.busy ? "◌" : "❯"}
+        <span className="pb-1 text-violet">
+          {active.busy ? "◌" : "›"}
         </span>
         <textarea
           ref={inputRef}
@@ -581,9 +706,46 @@ export function ChatPanel({
                   ? `pregunta sobre ${projectName ?? selectedProject}…`
                   : "ordena algo…"
           }
-          className="max-h-[120px] flex-1 resize-none bg-transparent text-[12.5px] leading-snug outline-none placeholder:opacity-40"
+          className="max-h-[120px] flex-1 resize-none bg-transparent text-base leading-snug outline-none placeholder:opacity-40"
           disabled={active.busy}
         />
+
+        {/* Llamada de voz con Hermes (entrada canónica; conectada = ir a Voz) */}
+        {voice.configured && (
+          <button
+            type="button"
+            title={
+              voice.connected
+                ? "Colgar la llamada"
+                : voice.connecting
+                  ? "Conectando la llamada…"
+                  : "Hablar con Hermes (llamada de voz)"
+            }
+            aria-label={voice.connected ? "Colgar la llamada" : "Hablar con Hermes"}
+            onClick={() => {
+              // No navega: la llamada ocurre aquí mismo. Conectado = colgar.
+              if (voice.connected) void voice.disconnect();
+              else if (!voice.connecting) void voice.connect();
+            }}
+            className={`grid h-6 w-6 shrink-0 place-items-center rounded-full transition-colors ${
+              voice.connected
+                ? "bg-green/10 text-green"
+                : voice.connecting
+                  ? "animate-pulse text-amber"
+                  : "text-violet"
+            }`}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M4 13a8 8 0 0 1 16 0M4 13v4a2 2 0 0 0 2 2h1v-6H6a2 2 0 0 0-2 2Zm16 0v4a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
 
         {/* Micrófono (dictado voz → texto) */}
         {micSupported && (
@@ -600,17 +762,12 @@ export function ChatPanel({
             aria-pressed={listening}
             onClick={toggleMic}
             disabled={active.busy}
-            className="relative grid h-6 w-6 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-40"
-            style={{
-              color: listening ? "var(--red)" : "var(--text-dim)",
-              background: listening ? "rgba(251,113,133,0.12)" : "transparent",
-            }}
+            className={`relative grid h-6 w-6 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-40 ${
+              listening ? "bg-red/10 text-red" : "bg-transparent text-text-dim"
+            }`}
           >
             {listening && (
-              <span
-                className="absolute inset-0 animate-ping rounded-full"
-                style={{ background: "rgba(251,113,133,0.35)" }}
-              />
+              <span className="absolute inset-0 animate-ping rounded-full bg-red/35" />
             )}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="relative">
               <path
@@ -636,8 +793,7 @@ export function ChatPanel({
           title="Enviar (Enter)"
           aria-label="Enviar"
           disabled={active.busy || !active.draft.trim()}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border transition-opacity disabled:opacity-30"
-          style={{ borderColor: "var(--violet)", color: "var(--violet)", background: "rgba(167,139,250,0.06)" }}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-violet bg-violet/5 text-violet transition-opacity disabled:opacity-30"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
             <path

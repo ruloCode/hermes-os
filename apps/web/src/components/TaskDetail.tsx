@@ -1,11 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Task, TaskExecutionSummary } from "@hermes/shared";
-import { continueTask } from "@/lib/hermes";
+import type { Task, TaskExecutionSummary, TaskState } from "@hermes/shared";
+import { continueTask, executeTask, setTaskStatus } from "@/lib/hermes";
 import { useTaskExecutions } from "@/hooks/useTaskExecutions";
 import { ClaudeTerminal } from "./ClaudeTerminal";
 import { ExecutionDetail } from "./ExecutionDetail";
+import { TabBar } from "@/components/ui/TabBar";
+import { PanelState } from "@/components/ui/PanelState";
+import { Badge } from "@/components/ui/Badge";
+import type { Tone } from "@/components/ui/tones";
+
+const SOURCE_LABEL: Record<Task["source"], string> = {
+  meeting: "junta",
+  manual: "manual",
+  vault: "vault",
+  voice: "voz",
+};
+
+// Estado de tarea → label + tono (mismo mapeo que las columnas del tablero).
+const STATUS_META: Record<TaskState, { label: string; tone: Tone }> = {
+  pending: { label: "Pendiente", tone: "amber" },
+  running: { label: "Ejecutando", tone: "cyan" },
+  done: { label: "Hecha", tone: "green" },
+  dismissed: { label: "Ignorada", tone: "neutral" },
+};
 
 /** Qué mostrar en el panel de detalle: una tarea y/o un run/sesión a transmitir. */
 export interface DetailTarget {
@@ -31,6 +50,9 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"live" | "execs">("live");
   const [openExec, setOpenExec] = useState<string | null>(null);
+  // Estado local de la tarea: las acciones del panel lo reflejan al instante
+  // (el tablero se pone al día solo, con su poll de 5s).
+  const [statusOverride, setStatusOverride] = useState<TaskState | null>(null);
 
   const { executions, loading: execsLoading } = useTaskExecutions(target?.task?.id ?? null);
 
@@ -40,21 +62,34 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
     setDraft("");
     setTab("live");
     setOpenExec(null);
+    setStatusOverride(null);
   }, [target?.project, target?.runId, target?.sessionId, target?.task?.id]);
+
+  // El stream es la verdad más fresca: al terminar el run, el pill deja de
+  // decir "Ejecutando" aunque el snapshot de la tarea siga viejo.
+  useEffect(() => {
+    if (statusOverride !== "running") return;
+    if (execStatus === "done") setStatusOverride("done");
+    else if (execStatus === "error") setStatusOverride(null);
+  }, [execStatus, statusOverride]);
 
   if (!target) {
     return (
-      <div className="grid h-full place-items-center px-6 text-center">
-        <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
-          Elige una tarea o una ejecución para ver su detalle y el stream en vivo.
-        </p>
+      <div className="grid h-full place-items-center px-6">
+        <PanelState
+          kind="empty"
+          title="Sin selección"
+          hint="Elige una tarea o una ejecución para ver su detalle y el stream en vivo."
+        />
       </div>
     );
   }
 
   const t = target.task;
+  const status: TaskState | undefined = statusOverride ?? t?.status;
   // No se puede inyectar a un `claude -p` vivo: continuar solo cuando NO corre.
-  const running = execStatus === "running" || t?.status === "running";
+  // Si el stream ya terminó (done/error), el snapshot "running" quedó viejo.
+  const running = execStatus === "running" || (status === "running" && execStatus === "idle");
 
   const send = async (prompt?: string) => {
     if (!t || busy || running) return;
@@ -69,44 +104,101 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
     }
   };
 
+  // Acciones del panel: mismas capacidades que el tablero, con label completo.
+  const execNow = async () => {
+    if (!t || busy || running) return;
+    setBusy(true);
+    const run = await executeTask(t.id);
+    setBusy(false);
+    if (run) {
+      setStatusOverride("running");
+      setRunId(run.runId);
+      setSessionId(run.sessionId);
+      setTab("live");
+    }
+  };
+
+  const changeStatus = async (s: TaskState) => {
+    if (!t) return;
+    await setTaskStatus(t.id, s);
+    setStatusOverride(s);
+  };
+
   return (
     <div className="flex h-full flex-col gap-2">
       {t && (
-        <div className="shrink-0 space-y-1 border-b pb-2" style={{ borderColor: "var(--line)" }}>
-          <p className="text-[12px] font-semibold leading-snug" style={{ color: "var(--text)" }}>
-            {t.title}
-          </p>
-          <div className="flex flex-wrap gap-x-3 text-[9px] tracking-[0.12em] uppercase" style={{ color: "var(--text-dim)" }}>
-            <span style={{ color: "var(--cyan)" }}>{t.project_slug}</span>
-            <span>· {t.status}</span>
-            <span>· {t.source}</span>
+        <div className="shrink-0 space-y-1.5 border-b border-line pb-2">
+          {/* Anatomía FIJA (patrón Jira/Linear): título → estado SIEMPRE
+              primero y visible → metadata → detalle → acciones con label.
+              Entre estados solo cambian los valores y las acciones. */}
+          <p className="text-sm leading-snug font-semibold text-text">{t.title}</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Badge tone={STATUS_META[status ?? t.status].tone}>
+              {STATUS_META[status ?? t.status].label}
+            </Badge>
+            <span className="text-2xs tracking-label text-cyan uppercase">{t.project_slug}</span>
+            <span className="text-2xs tracking-label text-text-dim uppercase">
+              · {SOURCE_LABEL[t.source] ?? t.source}
+            </span>
           </div>
-          {t.detail && (
-            <p className="text-[10.5px] leading-snug" style={{ color: "var(--text-dim)" }}>
-              {t.detail}
-            </p>
-          )}
+          {t.detail && <p className="text-xs leading-snug text-text-dim">{t.detail}</p>}
           {t.exec_prompt && (
-            <details className="text-[10px]">
-              <summary className="cursor-pointer" style={{ color: "var(--violet)" }}>
-                prompt de ejecución
-              </summary>
-              <p className="mt-1 whitespace-pre-wrap leading-snug" style={{ color: "var(--text-dim)" }}>
+            <details className="text-2xs">
+              <summary className="cursor-pointer text-violet">prompt de ejecución</summary>
+              <p className="mt-1 leading-snug whitespace-pre-wrap text-text-dim">
                 {t.exec_prompt}
               </p>
             </details>
           )}
+          {/* Acciones etiquetadas (los glyphs del tablero son solo el atajo) */}
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {status === "pending" && (
+              <>
+                <ActBtn tone="green" disabled={busy || running} onClick={() => void execNow()}>
+                  ▶ Ejecutar
+                </ActBtn>
+                <ActBtn tone="green" onClick={() => void changeStatus("done")}>
+                  ✓ Marcar hecha
+                </ActBtn>
+                <ActBtn tone="dim" onClick={() => void changeStatus("dismissed")}>
+                  ✕ Ignorar
+                </ActBtn>
+              </>
+            )}
+            {status === "running" && (
+              <>
+                <ActBtn tone="green" onClick={() => void changeStatus("done")}>
+                  ✓ Marcar hecha
+                </ActBtn>
+                <ActBtn tone="amber" onClick={() => void changeStatus("pending")}>
+                  ↩ Devolver a pendiente
+                </ActBtn>
+              </>
+            )}
+            {status === "done" && (
+              <ActBtn tone="amber" onClick={() => void changeStatus("pending")}>
+                ↩ Reabrir
+              </ActBtn>
+            )}
+            {status === "dismissed" && (
+              <ActBtn tone="amber" onClick={() => void changeStatus("pending")}>
+                ↩ Reactivar
+              </ActBtn>
+            )}
+          </div>
         </div>
       )}
 
       {/* Segmentado: stream en vivo · memoria de ejecuciones */}
       {t && (
-        <div className="flex shrink-0 gap-1.5">
-          <TabButton active={tab === "live"} onClick={() => setTab("live")} label="En vivo" />
-          <TabButton
-            active={tab === "execs"}
-            onClick={() => setTab("execs")}
-            label={`Ejecuciones${executions.length ? ` (${executions.length})` : ""}`}
+        <div className="shrink-0">
+          <TabBar
+            tabs={[
+              { id: "live", label: "En vivo" },
+              { id: "execs", label: "Ejecuciones", badge: executions.length || undefined },
+            ]}
+            active={tab}
+            onChange={(id) => setTab(id as "live" | "execs")}
           />
         </div>
       )}
@@ -143,8 +235,7 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
       {/* Continuar / enviar otro prompt (resume de la sesión de la tarea) */}
       {t && tab === "live" && (
         <form
-          className="shrink-0 border-t pt-2"
-          style={{ borderColor: "var(--line)" }}
+          className="shrink-0 border-t border-line pt-2"
           onSubmit={(e) => {
             e.preventDefault();
             void send(draft.trim() || undefined);
@@ -167,30 +258,24 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
                   ? "El run está activo… espera a que termine para continuar"
                   : "Continuar o enviar otro prompt a esta tarea…"
               }
-              className="max-h-[90px] min-h-[30px] flex-1 resize-none rounded-sm border bg-transparent px-2 py-1 text-[11px] leading-snug outline-none disabled:opacity-40"
-              style={{ borderColor: "var(--line)", color: "var(--text)" }}
+              className="max-h-[90px] min-h-[30px] flex-1 resize-none rounded-sm border border-line bg-transparent px-2 py-1 text-xs leading-snug text-text outline-none transition-colors focus:border-line-2 disabled:opacity-40"
             />
-            <button
-              type="button"
-              title="Continuar donde se quedó (resume la sesión)"
-              onClick={() => void send()}
-              disabled={running || busy}
-              className="cmd-btn !w-auto disabled:opacity-40"
-              style={{ borderColor: "var(--cyan)", color: "var(--cyan)" }}
-            >
-              {busy ? "…" : "↻ Continuar"}
-            </button>
+            {/* UN solo botón: sin texto continúa donde quedó; con texto envía
+                ese prompt (mismo send(), misma sesión — patrón follow-up). */}
             <button
               type="submit"
-              title="Enviar este prompt a la tarea"
-              disabled={running || busy || !draft.trim()}
-              className="cmd-btn !w-auto disabled:opacity-40"
-              style={{ borderColor: "var(--violet)", color: "var(--violet)" }}
+              title={
+                draft.trim()
+                  ? "Enviar este prompt a la tarea (nuevo run, misma sesión)"
+                  : "Continuar donde se quedó (resume la sesión)"
+              }
+              disabled={running || busy}
+              className="cmd-btn !w-auto !border-cyan !text-cyan disabled:opacity-40"
             >
-              ▶
+              {busy ? "…" : draft.trim() ? "▶ Enviar" : "↻ Continuar"}
             </button>
           </div>
-          <p className="mt-1 text-[8.5px] tracking-[0.1em]" style={{ color: "var(--text-dim)" }}>
+          <p className="mt-1 text-2xs text-text-dim">
             {running
               ? "El run sigue corriendo en el agente aunque navegues. Podrás continuar al terminar."
               : "Reanuda la MISMA conversación de la tarea con un run nuevo."}
@@ -201,28 +286,32 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
   );
 }
 
-function TabButton({
-  active,
+// Botón de acción del panel: icono + label completo (nunca glyph suelto).
+const ACT_CLASS = {
+  green: "border-green text-green",
+  amber: "border-amber text-amber",
+  dim: "border-text-dim text-text-dim",
+} as const;
+
+function ActBtn({
+  tone,
   onClick,
-  label,
+  disabled,
+  children,
 }: {
-  active: boolean;
+  tone: keyof typeof ACT_CLASS;
   onClick: () => void;
-  label: string;
+  disabled?: boolean;
+  children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="rounded-sm border px-2.5 py-1 text-[9px] tracking-[0.14em] uppercase transition-opacity"
-      style={{
-        borderColor: active ? "var(--violet)" : "var(--line)",
-        color: active ? "var(--violet)" : "var(--text-dim)",
-        background: active ? "rgba(167,139,250,0.08)" : "transparent",
-        opacity: active ? 1 : 0.7,
-      }}
+      disabled={disabled}
+      className={`rounded-sm border bg-panel-2 px-2 py-1 text-2xs tracking-label uppercase opacity-85 transition-opacity hover:opacity-100 disabled:opacity-40 ${ACT_CLASS[tone]}`}
     >
-      {label}
+      {children}
     </button>
   );
 }
@@ -237,18 +326,15 @@ function ExecutionsList({
   onOpen: (id: string) => void;
 }) {
   if (loading && executions.length === 0) {
-    return (
-      <p className="pt-6 text-center text-[10px] tracking-[0.25em] pulse-dot" style={{ color: "var(--text-dim)" }}>
-        CARGANDO EJECUCIONES…
-      </p>
-    );
+    return <PanelState kind="loading" compact />;
   }
   if (executions.length === 0) {
     return (
-      <p className="pt-6 text-center text-[10.5px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
-        Sin ejecuciones todavía. Cuando ejecutes o continúes esta tarea, aquí quedará el
-        registro de lo que se hizo y su resultado.
-      </p>
+      <PanelState
+        kind="empty"
+        title="Sin ejecuciones todavía"
+        hint="Cuando ejecutes o continúes esta tarea, aquí quedará el registro de lo que se hizo y su resultado."
+      />
     );
   }
   return (
@@ -258,25 +344,22 @@ function ExecutionsList({
           key={e.id}
           type="button"
           onClick={() => onOpen(e.id)}
-          className="flex w-full items-start justify-between gap-2 rounded-sm border px-2.5 py-2 text-left transition-colors hover:border-[var(--violet)]"
-          style={{ borderColor: "var(--line)", background: "rgba(122,132,255,0.03)" }}
+          className="flex w-full items-start justify-between gap-2 rounded-sm border border-line bg-panel-2 px-2.5 py-2 text-left transition-colors hover:border-violet"
         >
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2 text-[9px] tracking-[0.12em] uppercase" style={{ color: "var(--text-dim)" }}>
-              <span style={{ color: e.status === "done" ? "var(--green)" : "var(--red)" }}>
+            <span className="flex items-center gap-2 text-2xs tracking-label text-text-dim uppercase">
+              <span className={e.status === "done" ? "text-green" : "text-red"}>
                 ● {e.status === "done" ? "hecha" : "error"}
               </span>
               <span>{e.kind === "continue" ? "continuación" : "ejecución"}</span>
               <span>· {e.created_at.slice(0, 16).replace("T", " ")}</span>
               {e.cost_usd != null && <span>· ${e.cost_usd.toFixed(2)}</span>}
             </span>
-            <span className="mt-1 block truncate text-[11px]" style={{ color: "var(--text)" }}>
+            <span className="mt-1 block truncate text-xs text-text">
               {e.result_snippet || "—"}
             </span>
           </span>
-          <span className="text-[10px]" style={{ color: "var(--violet)" }}>
-            →
-          </span>
+          <span className="text-2xs text-violet">→</span>
         </button>
       ))}
     </div>

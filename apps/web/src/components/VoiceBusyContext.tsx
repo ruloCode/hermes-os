@@ -12,9 +12,12 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
  *    (p.ej. un reporte pedido por voz).
  */
 export interface VoiceLine {
-  who: "TÚ" | "HERMES";
+  who: "TÚ" | "HERMES" | "TUTOR";
   text: string;
 }
+
+/** Agente activo de la llamada: Hermes (default) o el tutor de inglés. */
+export type VoiceMode = "hermes" | "tutor";
 
 export interface VoiceArtifact {
   /** Título (el prompt/pedido que lo originó). */
@@ -30,6 +33,12 @@ export interface VoiceArtifact {
 export interface VoiceScope {
   slug: string;
   name: string;
+  /**
+   * Contexto libre para el system prompt de la voz (dynamic var session_scope).
+   * Si viene, REEMPLAZA el texto por defecto de "proyecto enfocado" — lo usa la
+   * página /vida para inyectar el estado financiero real como asesor.
+   */
+  prompt?: string;
 }
 
 interface VoiceValue {
@@ -44,6 +53,9 @@ interface VoiceValue {
   /** Proyecto enfocado (o null = vista general). Lo sincroniza VoiceScopeSync. */
   scope: VoiceScope | null;
   setScope: (s: VoiceScope | null) => void;
+  /** Con qué agente está (o estará) la llamada. Gatea scope/labels/UI. */
+  mode: VoiceMode;
+  setMode: (m: VoiceMode) => void;
 }
 
 const VoiceContext = createContext<VoiceValue>({
@@ -57,6 +69,8 @@ const VoiceContext = createContext<VoiceValue>({
   setArtifact: () => {},
   scope: null,
   setScope: () => {},
+  mode: "hermes",
+  setMode: () => {},
 });
 
 export function VoiceBusyProvider({ children }: { children: ReactNode }) {
@@ -64,6 +78,7 @@ export function VoiceBusyProvider({ children }: { children: ReactNode }) {
   const [transcript, setTranscript] = useState<VoiceLine[]>([]);
   const [artifact, setArtifact] = useState<VoiceArtifact | null>(null);
   const [scope, setScope] = useState<VoiceScope | null>(null);
+  const [mode, setMode] = useState<VoiceMode>("hermes");
 
   const pushLine = useCallback((line: VoiceLine) => {
     // Cota alta: la memoria de sesión no necesita miles de líneas.
@@ -89,6 +104,8 @@ export function VoiceBusyProvider({ children }: { children: ReactNode }) {
         setArtifact,
         scope,
         setScope,
+        mode,
+        setMode,
       }}
     >
       {children}

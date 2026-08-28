@@ -1,20 +1,29 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Devuelve credenciales efímeras para conectar el browser con el agente
+ * Devuelve credenciales efímeras para conectar el browser con un agente
  * privado de ElevenLabs sin exponer la API key:
  *  - conversationToken (WebRTC, preferido)
  *  - signedUrl (WebSocket, fallback)
+ *
+ * `?agent=tutor` pide el token del tutor de inglés; sin query, el Hermes normal.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+  const which = request.nextUrl.searchParams.get("agent");
+  const agentId =
+    which === "tutor"
+      ? process.env.NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID
+      : process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
   if (!apiKey || !agentId) {
     // Config faltante ≠ crash del server → 503 (servicio no disponible aún).
     return NextResponse.json(
       {
         notConfigured: true,
-        error: "Configura ELEVENLABS_API_KEY y NEXT_PUBLIC_ELEVENLABS_AGENT_ID en .env",
+        error:
+          which === "tutor"
+            ? "Configura NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID en .env (pnpm setup:elevenlabs lo crea)"
+            : "Configura ELEVENLABS_API_KEY y NEXT_PUBLIC_ELEVENLABS_AGENT_ID en .env",
       },
       { status: 503 },
     );
