@@ -1,7 +1,7 @@
 /**
  * Espejo humano de las tareas en la nota del proyecto: "## Tareas Pendientes"
  * como checkboxes. La verdad del ESTADO vive en Supabase (tabla tasks); esto es
- * para que Rulo vea/edite las tareas en Obsidian. Reusa getProjectNote.
+ * para que el dueño vea/edite las tareas en Obsidian. Reusa getProjectNote.
  */
 import { writeFile } from "node:fs/promises";
 import { getProjectNote } from "./projects.js";

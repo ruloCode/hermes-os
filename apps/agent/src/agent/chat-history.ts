@@ -18,7 +18,7 @@ import { join } from "node:path";
 import readline from "node:readline";
 import type { ChatSessionDetail, ChatSessionMessage, ChatSessionSummary } from "@hermes/shared";
 import { env } from "../env.js";
-import { readProjects } from "../vault/projects.js";
+import { readProjects, resolveProjectRoot } from "../vault/projects.js";
 
 const MAX_SESSIONS = 30;
 const MAX_MESSAGES = 200;
@@ -28,13 +28,10 @@ export function encodeCwd(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
-function expandHome(p: string): string {
-  return p.startsWith("~") ? join(homedir(), p.slice(1)) : p;
-}
-
 /**
- * Resuelve el cwd de las sesiones de la consola para un proyecto en foco:
- * su ruta_local (si existe en disco); sin foco o sin ruta → el vault.
+ * Resuelve el cwd de las sesiones de la consola para un proyecto en foco: el
+ * repo del proyecto EN ESTA MÁQUINA (resolveProjectRoot cubre el caso de un PC
+ * donde los clones viven en otra carpeta); sin foco o sin repo → el vault.
  */
 export async function resolveChatCwd(projectSlug?: string | null): Promise<string> {
   const fallback = env.VAULT_PATH || process.cwd();
@@ -42,14 +39,8 @@ export async function resolveChatCwd(projectSlug?: string | null): Promise<strin
   const project = (await readProjects()).find(
     (p) => p.slug.toLowerCase() === projectSlug.toLowerCase(),
   );
-  if (!project?.ruta_local) return fallback;
-  const cwd = expandHome(project.ruta_local);
-  try {
-    await stat(cwd);
-    return cwd;
-  } catch {
-    return fallback;
-  }
+  if (!project) return fallback;
+  return resolveProjectRoot(project) ?? fallback;
 }
 
 // ── Parsing de un jsonl de sesión ───────────────────────────────────────

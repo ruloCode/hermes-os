@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Task, TaskSource, TaskState } from "@hermes/shared";
+import type { Task, TaskSource, TaskState, TrackerSummary } from "@hermes/shared";
 import { env } from "../env.js";
 import { supabase } from "../supabase.js";
 import { emit } from "../events.js";
@@ -105,6 +105,69 @@ export async function listTasks(
   if (opts.status) q = q.eq("status", opts.status);
   const { data } = await q;
   return (data ?? []) as Task[];
+}
+
+// ── Conteos por estado (header del tablero + progreso de proyecto) ─────
+
+const EMPTY_SUMMARY: TrackerSummary = {
+  available: false,
+  pending: 0,
+  running: 0,
+  done: 0,
+  dismissed: 0,
+};
+
+let summaryCache: { at: number; key: string; summary: TrackerSummary } | null = null;
+const SUMMARY_TTL_MS = 15_000;
+
+export async function trackerSummary(opts?: {
+  project?: string;
+  byProject?: boolean;
+}): Promise<TrackerSummary> {
+  if (!supabase) return EMPTY_SUMMARY;
+  const db = supabase;
+  const key = `${opts?.project ?? ""}|${opts?.byProject ? 1 : 0}`;
+  if (summaryCache && summaryCache.key === key && Date.now() - summaryCache.at < SUMMARY_TTL_MS) {
+    return summaryCache.summary;
+  }
+  const states: TaskState[] = ["pending", "running", "done", "dismissed"];
+  const counts = await Promise.all(
+    states.map(async (status) => {
+      let q = db.from("tasks").select("*", { count: "exact", head: true }).eq("status", status);
+      if (opts?.project) q = q.eq("project_slug", safeName(opts.project));
+      const { count, error } = await q;
+      if (error) console.error("[tracker] summary:", error.message);
+      return count ?? 0;
+    }),
+  );
+  const summary: TrackerSummary = {
+    available: true,
+    pending: counts[0],
+    running: counts[1],
+    done: counts[2],
+    dismissed: counts[3],
+  };
+  if (opts?.byProject) {
+    // Pocas filas hoy: se agrupa en el agente. Si crece, promover a RPC.
+    const { data, error } = await db.from("tasks").select("project_slug,status").limit(2000);
+    if (error) {
+      console.error("[tracker] summary byProject:", error.message);
+    } else if (data) {
+      const acc = new Map<string, { pending: number; running: number; done: number }>();
+      for (const row of data) {
+        const p = acc.get(row.project_slug) ?? { pending: 0, running: 0, done: 0 };
+        if (row.status === "pending") p.pending += 1;
+        else if (row.status === "running") p.running += 1;
+        else if (row.status === "done") p.done += 1;
+        acc.set(row.project_slug, p);
+      }
+      summary.byProject = [...acc.entries()]
+        .map(([project_slug, c]) => ({ project_slug, ...c }))
+        .sort((a, b) => a.project_slug.localeCompare(b.project_slug));
+    }
+  }
+  summaryCache = { at: Date.now(), key, summary };
+  return summary;
 }
 
 export async function getTask(id: number): Promise<Task | null> {
@@ -243,6 +306,7 @@ async function launch(
         costUsd: run.costUsd,
         durationMs: run.durationMs,
         numTurns: run.numTurns,
+        usage: run.usage,
       }).catch((e) => console.error("[executions]", e));
       unsub?.();
     }

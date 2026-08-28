@@ -13,9 +13,42 @@ export interface SaveMemoryInput {
   summary?: string;
 }
 
+/** Umbral de coseno a partir del cual dos memorias se consideran la misma. */
+const DEDUP_SIMILARITY = 0.9;
+
 export async function saveMemory(input: SaveMemoryInput): Promise<string> {
   if (!supabase) return "Supabase no configurado: la memoria no se guardó.";
   const embedding = await embed(input.content);
+
+  // Dedup semántico: si ya existe una memoria casi idéntica del mismo tipo,
+  // se refresca (contenido + fecha + importancia máxima) en vez de duplicarla.
+  // Así la base no se llena de variantes de "prefiere pnpm".
+  if (embedding) {
+    const { data: similar } = await supabase.rpc("match_memories", {
+      query_embedding: embedding,
+      match_count: 5,
+      filter_type: input.type,
+    });
+    const top = ((similar ?? []) as (Memory & { similarity: number })[])
+      .filter((m) => typeof m.similarity === "number")
+      .sort((a, b) => b.similarity - a.similarity)[0];
+    if (top && top.similarity >= DEDUP_SIMILARITY) {
+      const { error } = await supabase
+        .from("memories")
+        .update({
+          content: input.content,
+          summary: input.summary ?? top.summary,
+          embedding,
+          project_slug: input.project ?? top.project_slug,
+          tags: [...new Set([...(top.tags ?? []), ...(input.tags ?? [])])],
+          importance: Math.max(top.importance ?? 3, input.importance ?? 3),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", top.id);
+      if (!error) return `Memoria actualizada (${top.id}): ya existía una casi idéntica.`;
+    }
+  }
+
   const { data, error } = await supabase
     .from("memories")
     .insert({

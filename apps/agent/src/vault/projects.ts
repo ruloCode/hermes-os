@@ -1,5 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
 import matter from "gray-matter";
 import type { ProjectStatus } from "@hermes/shared";
 import { env } from "../env.js";
@@ -36,7 +38,14 @@ export function extractTasks(section: string): string[] {
 
 export async function readProjects(force = false): Promise<ProjectStatus[]> {
   if (!force && cache && Date.now() - cache.at < TTL) return cache.data;
-  if (!env.VAULT_PATH) return [];
+  // Máquina sin vault (el PC que solo ejecuta): los proyectos se leen del
+  // espejo que publica la máquina dueña del vault. Se cachea igual, pero
+  // NUNCA se re-sincroniza hacia arriba: aquí no hay verdad que aportar.
+  if (!env.VAULT_PATH) {
+    const mirrored = await readProjectsFromCache();
+    if (mirrored.length) cache = { at: Date.now(), data: mirrored };
+    return mirrored;
+  }
 
   const projectsDir = join(env.VAULT_PATH, "projects");
   const results: ProjectStatus[] = [];
@@ -52,8 +61,14 @@ export async function readProjects(force = false): Promise<ProjectStatus[]> {
   for (const slug of dirs) {
     try {
       const files = await readdir(join(projectsDir, slug));
-      const note = files.find((f) => f.endsWith(".md"));
-      if (!note) continue;
+      const mds = files.filter((f) => f.endsWith(".md"));
+      if (!mds.length) continue;
+      // La nota PRINCIPAL es la que se llama como la carpeta (ikigai/Ikigai.md),
+      // no la primera alfabética: una carpeta puede tener notas satélite
+      // ("Estructura...", "Framework...") que antes se colaban como el proyecto.
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+      const note =
+        mds.find((f) => norm(f.replace(/\.md$/, "")) === norm(slug)) ?? mds[0];
       const raw = await readFile(join(projectsDir, slug, note), "utf8");
       const { data, content } = matter(raw);
       const estadoActual = extractSection(content, /^#{1,3}\s*.*Estado Actual/i);
@@ -123,4 +138,68 @@ async function syncToSupabase(projects: ProjectStatus[]) {
   }));
   const { error } = await supabase.from("projects_cache").upsert(rows);
   if (error) console.error("[hermes] projects_cache upsert", error.message);
+}
+
+/**
+ * Proyectos leídos de projects_cache (el espejo que sube la máquina con vault).
+ * Es el modo de una máquina "solo ejecución": ve los mismos proyectos y sus
+ * pendientes, sin sincronizar un vault ni escribir notas.
+ */
+async function readProjectsFromCache(): Promise<ProjectStatus[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("projects_cache")
+    .select("slug,name,estado,rama,ruta_local,estado_actual,tareas_pendientes");
+  if (error || !data) {
+    if (error) console.error("[hermes] projects_cache read", error.message);
+    return [];
+  }
+  return data.map((r) => ({
+    slug: r.slug,
+    name: r.name ?? r.slug,
+    estado: r.estado ?? "desconocido",
+    rama: r.rama ?? undefined,
+    ruta_local: r.ruta_local ?? undefined,
+    estado_actual: r.estado_actual ?? "",
+    tareas_pendientes: Array.isArray(r.tareas_pendientes) ? (r.tareas_pendientes as string[]) : [],
+  }));
+}
+
+const expandHome = (p: string) => (p.startsWith("~") ? join(homedir(), p.slice(1)) : p);
+
+/**
+ * Carpeta REAL del proyecto en ESTA máquina.
+ *
+ * El vault guarda una sola `ruta_local` (la de la máquina donde se escribió la
+ * nota), pero el mismo proyecto vive en otra parte en cada PC. Orden:
+ *   1. la ruta_local tal cual, si existe aquí (la máquina dueña del vault);
+ *   2. <HERMES_CODE_ROOT>/<carpeta> — el clon local, buscando por nombre de
+ *      carpeta y también un nivel adentro (dev/side/proyecto);
+ *   3. null → quien llama debe negarse en vez de correr en el cwd equivocado.
+ */
+export function resolveProjectRoot(p: Pick<ProjectStatus, "slug" | "ruta_local">): string | null {
+  const raw = p.ruta_local ? expandHome(p.ruta_local) : "";
+  if (raw && isAbsolute(raw) && existsSync(raw)) return raw;
+
+  const names = [raw ? basename(raw) : "", p.slug].filter(Boolean);
+  for (const name of names) {
+    const direct = join(env.CODE_ROOT, name);
+    if (existsSync(direct)) return direct;
+    // Un nivel adentro: ~/dev/side/<proyecto>, ~/dev/work/<proyecto>…
+    let subs: string[] = [];
+    try {
+      subs = existsSync(env.CODE_ROOT)
+        ? readdirSync(env.CODE_ROOT, { withFileTypes: true })
+            .filter((d) => d.isDirectory())
+            .map((d) => d.name)
+        : [];
+    } catch {
+      subs = [];
+    }
+    for (const sub of subs) {
+      const nested = join(env.CODE_ROOT, sub, name);
+      if (existsSync(nested)) return nested;
+    }
+  }
+  return null;
 }

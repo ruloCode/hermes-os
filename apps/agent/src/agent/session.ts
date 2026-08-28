@@ -1,6 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
-import type { HermesTask } from "@hermes/shared";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import type { ChatToolStep, HermesTask } from "@hermes/shared";
 import { env } from "../env.js";
 import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
@@ -9,6 +11,55 @@ import { supabase } from "../supabase.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { checkTool } from "./guardrails.js";
 import { hermesMcpServer, HERMES_TOOL_NAMES } from "./tools.js";
+import { linearEnabled } from "../linear.js";
+import { ensureCdpChrome, CDP_URL } from "../browser.js";
+
+/**
+ * MCP oficial de Linear (remoto, hosteado por ellos). Auth headless: la misma
+ * LINEAR_API_KEY como Bearer — sin flujo OAuth interactivo. Híbrido a
+ * propósito: crear issues va por la tool custom create_linear_issue (formato
+ * "Copy prompt" garantizado por código); el MCP aporta el resto del catálogo
+ * (actualizar estados, comentar, buscar proyectos/ciclos…).
+ */
+function linearMcpServer() {
+  return {
+    type: "http" as const,
+    url: "https://mcp.linear.app/mcp",
+    headers: { Authorization: `Bearer ${env.LINEAR_API_KEY}` },
+  };
+}
+
+/**
+ * MCP de chrome-devtools (navegación web agéntica). Stdio local: el node del
+ * agente + el bin del paquete por ruta ABSOLUTA (launchd no tiene npx/PATH).
+ * Con --browserUrl el MCP solo se CONECTA al Chrome CDP dedicado que maneja
+ * browser.ts (ensureCdpChrome) — nunca lanza Chrome él mismo, así N sesiones
+ * SDK concurrentes comparten la misma instancia visible.
+ */
+const localRequire = createRequire(import.meta.url);
+let chromeMcpBin: string | null | undefined;
+function resolveChromeMcpBin(): string | null {
+  if (chromeMcpBin !== undefined) return chromeMcpBin;
+  try {
+    const pkgPath = localRequire.resolve("chrome-devtools-mcp/package.json");
+    const pkg = localRequire("chrome-devtools-mcp/package.json") as {
+      bin?: Record<string, string>;
+    };
+    const rel = pkg.bin?.["chrome-devtools-mcp"];
+    chromeMcpBin = rel ? resolve(dirname(pkgPath), rel) : null;
+  } catch {
+    chromeMcpBin = null;
+  }
+  return chromeMcpBin;
+}
+
+function chromeMcpServer(bin: string) {
+  return {
+    type: "stdio" as const,
+    command: process.execPath,
+    args: [bin, `--browserUrl=${CDP_URL}`],
+  };
+}
 
 /**
  * Corre UN turno agéntico con el Claude Agent SDK.
@@ -34,6 +85,33 @@ export interface RunTurnOptions {
   onDelta?: (text: string) => void;
   /** Avisa el session id del SDK apenas llega el init (para tabs/resume). */
   onSession?: (sdkSessionId: string) => void;
+  /** Avisa cada tool_use del turno (la consola los pinta como pasos). */
+  onTool?: (step: ChatToolStep) => void;
+}
+
+/**
+ * Campo del input que mejor describe QUÉ tocó la tool, en orden de preferencia
+ * (Read→file_path, Grep→pattern, WebFetch→url…). Solo extrae el dato; la UI
+ * decide el verbo y cómo lo acorta.
+ */
+const TARGET_KEYS = [
+  "file_path",
+  "pattern",
+  "url",
+  "command",
+  "query",
+  "slug",
+  "title",
+  "name",
+  "content",
+];
+
+function toolTarget(input: Record<string, unknown>): string {
+  for (const key of TARGET_KEYS) {
+    const v = input[key];
+    if (typeof v === "string" && v.trim()) return v.trim().slice(0, 120);
+  }
+  return "";
 }
 
 export interface RunTurnResult {
@@ -64,7 +142,13 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
         includePartialMessages: true,
         settingSources: [],
         resume: opts.resumeSessionId,
-        mcpServers: { hermes: hermesMcpServer },
+        mcpServers: {
+          hermes: hermesMcpServer,
+          ...(linearEnabled() ? { linear: linearMcpServer() } : {}),
+          ...(env.BROWSER_AGENT_ENABLED && resolveChromeMcpBin()
+            ? { "chrome-devtools": chromeMcpServer(resolveChromeMcpBin()!) }
+            : {}),
+        },
         allowedTools: [
           "Read",
           "Glob",
@@ -73,9 +157,23 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
           "WebFetch",
           "TodoWrite",
           ...HERMES_TOOL_NAMES,
+          // "mcp__linear" pelado = todas las tools del server (regla de permisos
+          // por prefijo). Son mutaciones de workspace, no de la máquina.
+          ...(linearEnabled() ? ["mcp__linear"] : []),
         ],
         permissionMode: "default",
         canUseTool: async (toolName, input) => {
+          // Tools del navegador: NO van en allowedTools a propósito — pasar
+          // por aquí garantiza el Chrome CDP dedicado ANTES de cada uso (el
+          // MCP solo se conecta; si el Chrome no está, el tool fallaría).
+          if (toolName.startsWith("mcp__chrome-devtools__")) {
+            const chrome = await ensureCdpChrome();
+            if (!chrome.ok) {
+              emit({ kind: "error", taskId: opts.taskId, toolName, detail: chrome.error });
+              return { behavior: "deny", message: chrome.error ?? "Chrome CDP no disponible" };
+            }
+            return { behavior: "allow", updatedInput: input };
+          }
           const verdict = checkTool(toolName, input as Record<string, unknown>);
           if (!verdict.allowed) {
             emit({
@@ -124,12 +222,14 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
           if (block.type === "tool_use") {
             toolCalls += 1;
             setPresence("thinking", `${block.name}`);
+            const input = (block.input ?? {}) as Record<string, unknown>;
             emit({
               kind: "tool_call",
               taskId: opts.taskId,
               toolName: block.name as string,
-              detail: JSON.stringify(block.input ?? {}).slice(0, 300),
+              detail: JSON.stringify(input).slice(0, 300),
             });
+            opts.onTool?.({ name: block.name as string, target: toolTarget(input) });
           }
         }
         continue;
@@ -162,6 +262,13 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
       }
     }
   } catch (err) {
+    // Resume de una sesión SDK que ya no existe (transcript limpiado o CLI
+    // actualizado): reintenta UNA vez con sesión fresca. El session_id nuevo
+    // se guarda al terminar el turno, así el mapeo stale se auto-repara.
+    if (opts.resumeSessionId && /No conversation found with session ID/i.test(String(err))) {
+      setPresence("idle");
+      return runAgentTurn({ ...opts, resumeSessionId: undefined });
+    }
     isError = true;
     finalText = finalText || `Error ejecutando al agente: ${String(err).slice(0, 500)}`;
     emit({ kind: "error", taskId: opts.taskId, detail: String(err).slice(0, 300) });

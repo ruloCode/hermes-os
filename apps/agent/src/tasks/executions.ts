@@ -15,6 +15,7 @@ import matter from "gray-matter";
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type {
+  RunTokenUsage,
   Task,
   TaskExecution,
   TaskExecutionKind,
@@ -23,9 +24,11 @@ import type {
 } from "@hermes/shared";
 import { env } from "../env.js";
 import { supabase } from "../supabase.js";
+import { embed } from "../embeddings.js";
 import { safeName } from "../conversations.js";
 import { extractSection, readProjects } from "../vault/projects.js";
 import type { ClaudeLine } from "../agent/claude-cli.js";
+import { OWNER } from "../owner.js";
 
 // ── Entrada desde el punto de captura (launch en tasks/store.ts) ────────
 
@@ -46,6 +49,8 @@ export interface SaveExecutionInput {
   costUsd?: number;
   durationMs?: number;
   numTurns?: number;
+  /** Tokens del run (evento result del CLI); se espejan en task_executions. */
+  usage?: RunTokenUsage;
 }
 
 // ── Helpers de ruta / id / idempotencia ────────────────────────────────
@@ -167,7 +172,7 @@ async function narrateExecution(input: {
 
   const systemPrompt = `# Hermes — Analista de ejecuciones
 
-Eres **Hermes**, el AI OS de Rulo. Acabas de ejecutar una tarea con Claude Code en el repo del proyecto **${input.projectSlug}** y debes documentar QUÉ pasó, para dejar memoria de la ejecución.
+Eres **Hermes**, el AI OS de ${OWNER}. Acabas de ejecutar una tarea con Claude Code en el repo del proyecto **${input.projectSlug}** y debes documentar QUÉ pasó, para dejar memoria de la ejecución.
 
 La ejecución terminó con estado: **${input.status === "done" ? "éxito" : "error/fallo"}**.
 
@@ -316,15 +321,21 @@ ${finalResult.trim()}
     finished_at: fecha.toISOString(),
   };
 
-  void mirrorExecution(execution);
+  void mirrorExecution(execution, input.usage);
   return execution;
 }
 
-async function mirrorExecution(e: TaskExecution): Promise<void> {
+async function mirrorExecution(e: TaskExecution, usage?: RunTokenUsage): Promise<void> {
   if (!supabase) return;
+  // Se embebe prompt + análisis + resultado: así las ejecuciones pasadas son
+  // recuperables por match_knowledge ("¿qué hicimos con el login de X?").
+  const embedding = await embed(
+    [e.prompt, e.analysis, e.result].filter(Boolean).join("\n"),
+  );
   const { error } = await supabase.from("task_executions").upsert(
     {
       local_key: execLocalKey(e.project_slug, e.run_id ?? e.id),
+      embedding,
       execution_id: e.id,
       task_id: e.task_id,
       project_slug: safeName(e.project_slug),
@@ -340,6 +351,10 @@ async function mirrorExecution(e: TaskExecution): Promise<void> {
       cost_usd: e.cost_usd,
       duration_ms: e.duration_ms,
       num_turns: e.num_turns,
+      input_tokens: usage?.inputTokens ?? null,
+      output_tokens: usage?.outputTokens ?? null,
+      cache_creation_tokens: usage?.cacheCreationTokens ?? null,
+      cache_read_tokens: usage?.cacheReadTokens ?? null,
       machine: e.machine ?? null,
       vault_path: e.vault_path ?? null,
       finished_at: e.finished_at ?? null,

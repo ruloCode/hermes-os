@@ -13,11 +13,11 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { ClaudeRunSummary } from "@hermes/shared";
+import type { ClaudeRunSummary, RunTokenUsage } from "@hermes/shared";
 import { env } from "../env.js";
 import { addRunCost } from "../usage.js";
 import { notifyMac } from "../notify.js";
@@ -26,8 +26,12 @@ import { startSession, finishSession, checkpointSession } from "./claude-session
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
 const MODELS = new Set([
+  // Alias (el CLI los resuelve al último modelo de cada línea).
   "opus", "sonnet", "haiku", "fable",
-  "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5",
+  // IDs vigentes — los que ofrece la UI.
+  "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5",
+  // Anteriores: siguen activos y aparecen en sesiones guardadas.
+  "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
 ]);
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 const PERMISSIONS = new Set(["default", "acceptEdits", "plan", "manual", "auto"]);
@@ -91,13 +95,15 @@ function commonFlags(s: { model: string; effort: string; permissionMode: string 
 
 // Ubica el binario `claude` (el server puede no tener ~/.local/bin en PATH).
 let cachedBin: string | null = null;
-function resolveClaudeBin(): string {
+export function resolveClaudeBin(): string {
   if (cachedBin) return cachedBin;
   const candidates = [
     process.env.CLAUDE_BIN,
     join(process.env.HOME ?? "", ".local/bin/claude"),
+    join(process.env.HOME ?? "", ".claude/local/claude"),
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
+    "/usr/bin/claude",
   ].filter(Boolean) as string[];
   for (const c of candidates) {
     try {
@@ -117,6 +123,14 @@ export async function openClaudeTerminal(
 ): Promise<{ ok: boolean; error?: string }> {
   const s = sanitize(opts);
   if (!s.prompt) return { ok: false, error: "prompt vacío" };
+  // Terminal.app + osascript: solo la Mac. En otra máquina se usa el panel
+  // embebido (startClaudeRun), que es multiplataforma.
+  if (platform() !== "darwin") {
+    return {
+      ok: false,
+      error: `Abrir Terminal.app solo funciona en la Mac (esta máquina: ${env.MACHINE_NAME}). Usa la consola embebida.`,
+    };
+  }
   const bin = resolveClaudeBin();
   const cwd = env.VAULT_PATH || process.cwd();
   const flags = commonFlags(s).map(sq).join(" ");
@@ -164,6 +178,7 @@ interface ClaudeRun {
   costUsd?: number;
   durationMs?: number;
   numTurns?: number;
+  usage?: RunTokenUsage;
   /** true si el run murió por killClaudeRun (para reportarlo distinto). */
   cancelled?: boolean;
   lines: ClaudeLine[];
@@ -358,6 +373,16 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
           if (typeof ev.total_cost_usd === "number") run.costUsd = ev.total_cost_usd;
           if (typeof ev.duration_ms === "number") run.durationMs = ev.duration_ms;
           if (typeof ev.num_turns === "number") run.numTurns = ev.num_turns;
+          // Tokens del run (antes se descartaban): alimentan el acumulado
+          // diario y el espejo en task_executions.
+          if (ev.usage && typeof ev.usage === "object") {
+            run.usage = {
+              inputTokens: Number(ev.usage.input_tokens) || 0,
+              outputTokens: Number(ev.usage.output_tokens) || 0,
+              cacheCreationTokens: Number(ev.usage.cache_creation_input_tokens) || 0,
+              cacheReadTokens: Number(ev.usage.cache_read_input_tokens) || 0,
+            };
+          }
         }
         for (const line of eventToLines(ev)) pushLine(run, line);
       } catch {
@@ -388,7 +413,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
       text: `proceso finalizó (código ${code ?? "?"})`,
     });
     // Cierra el loop: suma al gasto del día y avisa aunque nadie mire el dashboard.
-    addRunCost(run.costUsd);
+    addRunCost(run.costUsd, run.usage);
     const meta = [
       run.costUsd != null ? `$${run.costUsd.toFixed(2)}` : null,
       run.durationMs != null ? `${Math.round(run.durationMs / 1000)}s` : null,
@@ -463,6 +488,7 @@ export function listClaudeRuns(): ClaudeRunSummary[] {
       costUsd: run.costUsd,
       durationMs: run.durationMs,
       numTurns: run.numTurns,
+      usage: run.usage,
       // Último texto del asistente como preview del resultado (sin el eco
       // "❯ prompt" que también es kind text).
       lastText: [...run.lines]

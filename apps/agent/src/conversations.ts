@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import type { ChatSummary } from "@hermes/shared";
 import { REPO_ROOT, env } from "./env.js";
 import { supabase } from "./supabase.js";
+import { embedBatch } from "./embeddings.js";
 
 export interface StoredMessage {
   role: "user" | "assistant";
@@ -29,10 +30,14 @@ export function conversationLocalKey(project: string, msg: StoredMessage): strin
   return createHash("sha1").update(basis).digest("hex");
 }
 
+/** Mensajes más cortos no aportan señal semántica ("ok", "dale"): sin vector. */
+const MIN_EMBED_CHARS = 20;
+
 /**
  * Espejo best-effort de mensajes a Supabase (conversation_messages). Fire and
  * forget: nunca rompe el chat si falla la red. Idempotente vía local_key.
  * chatId = null → conversación activa; slug del archivo si viene del archive.
+ * Cada mensaje se vectoriza (embedding) para que el chat entre a match_knowledge.
  */
 export function mirrorMessages(
   project: string,
@@ -40,22 +45,26 @@ export function mirrorMessages(
   chatId: string | null = null,
 ): void {
   if (!supabase || msgs.length === 0) return;
-  const rows = msgs.map((m) => ({
-    local_key: conversationLocalKey(project, m),
-    project_slug: safeName(project),
-    role: m.role,
-    content: m.content,
-    ts: m.ts,
-    session_id: m.sessionId ?? null,
-    machine: env.MACHINE_NAME,
-    chat_id: chatId,
-  }));
-  void supabase
-    .from("conversation_messages")
-    .upsert(rows, { onConflict: "local_key", ignoreDuplicates: true })
-    .then(({ error }) => {
-      if (error) console.error("[conversations] espejo Supabase:", error.message);
-    });
+  const db = supabase;
+  void (async () => {
+    const vectors = await embedBatch(msgs.map((m) => m.content));
+    const rows = msgs.map((m, i) => ({
+      local_key: conversationLocalKey(project, m),
+      project_slug: safeName(project),
+      role: m.role,
+      content: m.content,
+      ts: m.ts,
+      session_id: m.sessionId ?? null,
+      machine: env.MACHINE_NAME,
+      chat_id: chatId,
+      channel: "text",
+      embedding: m.content.trim().length >= MIN_EMBED_CHARS ? vectors[i] : null,
+    }));
+    const { error } = await db
+      .from("conversation_messages")
+      .upsert(rows, { onConflict: "local_key", ignoreDuplicates: true });
+    if (error) console.error("[conversations] espejo Supabase:", error.message);
+  })().catch((err) => console.error("[conversations] espejo Supabase:", err));
 }
 
 const DIR = join(REPO_ROOT, ".data", "conversations");
