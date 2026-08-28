@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hermes",
     "slug": "mobile",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hermes",
@@ -52,7 +52,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Hermes usa el micrófono para hablar por voz y grabar reuniones."
+          "microphonePermission": "Hermes usa el micrófono para hablar por voz y grabar reuniones.",
+          "enableBackgroundRecording": true
         }
       ],
       [

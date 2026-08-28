@@ -1,7 +1,7 @@
 /**
  * Controlador de voz de Hermes. Vive en la RAÍZ (siempre montado, no atado a un
  * tab) para que la llamada y las client tools sobrevivan al navegar. Expone su
- * estado por contexto (useVoice) y la UI (VoiceScreen) solo lo consume.
+ * estado por contexto (useVoice) y la UI (HermesScreen) solo lo consume.
  *
  * Las client tools corren EN EL TELÉFONO (igual que en el browser del dashboard)
  * y llaman al agente en :8650. Se registran con los MISMOS nombres que espera el
@@ -18,6 +18,7 @@ import { useConversationClientTool } from "@elevenlabs/react";
 import { AudioSession } from "@livekit/react-native";
 import * as api from "./hermes";
 import { useApp, type Tab } from "./store";
+import { useChat } from "./chat";
 
 export interface Line {
   who: "TÚ" | "HERMES";
@@ -65,17 +66,28 @@ async function ensureMic(): Promise<boolean> {
 
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const app = useApp();
+  const chat = useChat();
   const [transcript, setTranscript] = useState<Line[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
   const connectedBefore = useRef(false);
+  // Espejo del transcript + marca de lo ya plegado al chat: al colgar, las
+  // líneas nuevas de la llamada se pliegan al hilo de texto (patrón ChatGPT).
+  const transcriptRef = useRef<Line[]>([]);
+  const foldedRef = useRef(0);
 
   // Ref a la conversación para poder usarla dentro de sus propios callbacks
   // (onConnect) sin caer en la zona muerta temporal del const.
   const convRef = useRef<ReturnType<typeof useConversation> | null>(null);
 
   const pushLine = useCallback((l: Line) => {
-    setTranscript((prev) => [...prev.slice(-60), l]);
+    setTranscript((prev) => {
+      const next = [...prev.slice(-60), l];
+      // El slice corre la ventana: el índice de plegado se corre igual.
+      foldedRef.current = Math.max(0, foldedRef.current - (prev.length + 1 - next.length));
+      transcriptRef.current = next;
+      return next;
+    });
   }, []);
 
   const flashAction = useCallback((label: string, ms = 1600) => {
@@ -114,6 +126,12 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       }
       connectedBefore.current = true;
     },
+    onDisconnect: () => {
+      // Pliega lo hablado en ESTA llamada al hilo de chat (queda unificado).
+      const fresh = transcriptRef.current.slice(foldedRef.current);
+      foldedRef.current = transcriptRef.current.length;
+      if (fresh.length) chat.addVoiceLines(fresh);
+    },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (msg: any) => setError(typeof msg === "string" ? msg : "Error de la llamada."),
   });
@@ -145,7 +163,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           ? "finanzas"
           : raw.includes("proyect") || raw.includes("project")
             ? "proyectos"
-            : raw.includes("voz") || raw.includes("voice")
+            : raw.includes("voz") || raw.includes("voice") || raw.includes("chat") || raw.includes("hermes")
               ? "voz"
               : null;
     if (!tab) return `No conozco el panel "${raw}".`;

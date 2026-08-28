@@ -5,6 +5,7 @@
  * sesión cae al API key manual de Ajustes. En 401 refresca el token y reintenta
  * una vez. La app corre en el teléfono, así que NO hay CORS.
  */
+import { fetch as expoFetch } from "expo/fetch";
 import { getBase, getKey } from "./config";
 import { ensureFreshToken, getAccessToken, getSession, refreshSession } from "./auth";
 import type {
@@ -22,6 +23,10 @@ import type {
   Transaction,
   TransactionKind,
   Wallet,
+  ChatToolStep,
+  LinearBoardIssue,
+  LinearIssueFull,
+  LinearStateType,
 } from "./types";
 
 function authHeaders(): Record<string, string> {
@@ -265,6 +270,240 @@ export async function voidTransaction(id: number): Promise<{ ok: boolean }> {
   const res = await req(`/finance/transactions/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`void → ${res.status}`);
   return (await res.json()) as { ok: boolean };
+}
+
+// ── Chat de texto con Hermes (contrato /v1/chat/completions, SSE) ──────
+// Mismo contrato que el dashboard web (apps/web/src/lib/hermes.ts):
+// OpenAI-compatible + X-Hermes-Session-Id (memoria) + X-Hermes-Resume
+// ("new" = sesión SDK fresca · uuid = resume) + X-Hermes-Project (foco).
+// El fetch nativo de RN no expone response.body → usamos expo/fetch
+// (WinterCG), que sí streamea. Funciona igual por LAN o por el túnel.
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** TextDecoder incremental con fallback puro-JS (por si el runtime no lo trae). */
+function makeUtf8Decoder(): {
+  decode: (chunk: Uint8Array) => string;
+  /** Vuelca lo retenido al cerrar el stream (multi-byte cortado en el último chunk). */
+  flush: () => string;
+} {
+  if (typeof TextDecoder !== "undefined") {
+    const td = new TextDecoder();
+    return {
+      decode: (chunk) => td.decode(chunk, { stream: true }),
+      flush: () => td.decode(),
+    };
+  }
+  // Junta bytes y decodifica dejando en cola la secuencia multi-byte incompleta
+  // del final (un delta SSE puede cortar un emoji/tilde a la mitad).
+  let pending: number[] = [];
+  return {
+    decode(chunk: Uint8Array): string {
+      const bytes = pending.concat(Array.from(chunk));
+      let end = bytes.length;
+      for (let i = Math.max(0, bytes.length - 4); i < bytes.length; i++) {
+        const b = bytes[i];
+        if (b < 0xc0) continue;
+        const need = b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : 2;
+        if (i + need > bytes.length) {
+          end = i;
+          break;
+        }
+      }
+      pending = bytes.slice(end);
+      let out = "";
+      for (let i = 0; i < end; ) {
+        const b = bytes[i];
+        let cp: number;
+        let len: number;
+        if (b < 0x80) {
+          cp = b;
+          len = 1;
+        } else if (b < 0xe0) {
+          cp = b & 0x1f;
+          len = 2;
+        } else if (b < 0xf0) {
+          cp = b & 0x0f;
+          len = 3;
+        } else {
+          cp = b & 0x07;
+          len = 4;
+        }
+        for (let j = 1; j < len && i + j < end; j++) cp = (cp << 6) | (bytes[i + j] & 0x3f);
+        out += String.fromCodePoint(cp > 0x10ffff ? 0xfffd : cp);
+        i += len;
+      }
+      return out;
+    },
+    flush() {
+      const out = pending.length ? "�" : "";
+      pending = [];
+      return out;
+    },
+  };
+}
+
+/**
+ * Stream de chat contra el agente. Va llamando onDelta con cada trozo de texto;
+ * onSession anuncia el session id del SDK (para resumir la MISMA conversación
+ * en turnos siguientes) y onTool cada paso agéntico del turno.
+ */
+export async function streamChat(
+  messages: ChatMessage[],
+  opts: {
+    /** Clave de sesión del cliente (estable por conversación). */
+    sessionKey: string;
+    /** Sesión SDK a resumir (uuid); null/undefined = conversación nueva. */
+    resume?: string | null;
+    /** Proyecto en foco: el agente centra el system prompt ahí. */
+    project?: string | null;
+    signal?: AbortSignal;
+    onDelta: (text: string) => void;
+    onSession?: (sdkSessionId: string) => void;
+    onTool?: (step: ChatToolStep) => void;
+  },
+): Promise<void> {
+  await ensureFreshToken();
+  const buildHeaders = (): Record<string, string> => {
+    const h: Record<string, string> = {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      "X-Hermes-Session-Id": opts.sessionKey,
+      "X-Hermes-Resume": opts.resume || "new",
+    };
+    if (opts.project) h["X-Hermes-Project"] = opts.project;
+    return h;
+  };
+  const doFetch = () =>
+    expoFetch(`${getBase()}/v1/chat/completions`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify({ messages, stream: true }),
+      signal: opts.signal,
+    });
+
+  let res = await doFetch();
+  // 401 con sesión viva: access token vencido en vuelo → refresh + retry.
+  if (res.status === 401 && getSession()) {
+    const ok = await refreshSession();
+    if (ok) res = await doFetch();
+  }
+  if (!res.ok || !res.body) {
+    throw new Error(`Hermes no responde (${res.status}).`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = makeUtf8Decoder();
+  let buffer = "";
+
+  const handleEvent = (rawEvent: string): boolean => {
+    const data = rawEvent
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /, ""))
+      .join("\n");
+    if (!data) return false;
+    if (data === "[DONE]") return true;
+    try {
+      const parsed = JSON.parse(data) as {
+        hermes?: { session_id?: string; tool?: ChatToolStep };
+        choices?: { delta?: { content?: string } }[];
+      };
+      const sid = parsed?.hermes?.session_id;
+      if (typeof sid === "string" && sid) opts.onSession?.(sid);
+      const tool = parsed?.hermes?.tool;
+      if (tool && typeof tool.name === "string") opts.onTool?.(tool);
+      const delta = parsed?.choices?.[0]?.delta?.content;
+      if (typeof delta === "string" && delta) opts.onDelta(delta);
+    } catch {
+      /* keep-alive */
+    }
+    return false;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) buffer += decoder.decode(value);
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      if (handleEvent(rawEvent)) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* stream ya cerrado */
+        }
+        return;
+      }
+    }
+  }
+  buffer += decoder.flush();
+  if (buffer.trim()) handleEvent(buffer);
+}
+
+// ── Linear (tablero Linear-first del tab TAREAS) ───────────────────────
+
+/** Tablero: issues del team + overlay de ejecución local. */
+export async function linearBoard(
+  project?: string,
+): Promise<{ available: boolean; issues: LinearBoardIssue[] }> {
+  try {
+    return await get<{ available: boolean; issues: LinearBoardIssue[] }>(
+      `/linear/board${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+    );
+  } catch {
+    return { available: false, issues: [] };
+  }
+}
+
+export async function linearIssue(identifier: string): Promise<LinearIssueFull | null> {
+  try {
+    return await get<LinearIssueFull>(`/linear/issue/${encodeURIComponent(identifier)}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Ejecuta el issue con Claude Code en la Mac; devuelve el run + fila-puente. */
+export async function executeLinearIssue(
+  identifier: string,
+): Promise<{ task_id: number; run_id: string; session_id: string; slug: string } | null> {
+  try {
+    return await post<{ task_id: number; run_id: string; session_id: string; slug: string }>(
+      `/linear/issue/${encodeURIComponent(identifier)}/execute`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Cambia el estado del issue en Linear (Done tras revisar, reabrir…). */
+export async function setLinearIssueState(
+  identifier: string,
+  type: LinearStateType,
+): Promise<boolean> {
+  try {
+    await post(`/linear/issue/${encodeURIComponent(identifier)}/state`, { type });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Nueva tarea: Hermes la crea en Linear con contexto + Copy prompt (async). */
+export async function createLinearIssue(instruction: string, project?: string): Promise<boolean> {
+  try {
+    await post("/linear/issues", { instruction, project });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Token efímero de ElevenLabs (endpoint nuevo del agente) ────────────

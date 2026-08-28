@@ -18,7 +18,7 @@ const KEY_KEY = "hermes.key";
 const KEY_REMOTE = "hermes.remoteUrl";
 
 const clean = (u: string) => u.trim().replace(/\/$/, "");
-const DEFAULT_URL = clean(process.env.EXPO_PUBLIC_HERMES_URL || "http://192.168.0.92:8650");
+const DEFAULT_URL = clean(process.env.EXPO_PUBLIC_HERMES_URL || ""); // vacío = solo manual/túnel
 const DEFAULT_KEY = process.env.EXPO_PUBLIC_HERMES_KEY || "";
 
 let baseUrl = DEFAULT_URL; // base activa (la que usan los requests)

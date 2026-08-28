@@ -177,3 +177,51 @@ export interface Wallet {
   balance: number;
   updated_at?: string | null;
 }
+
+// ── Chat de texto con Hermes (contrato /v1/chat/completions) ───────────
+
+/** Paso agéntico (tool_use) que el agente anuncia dentro del stream SSE. */
+export interface ChatToolStep {
+  /** Nombre crudo de la tool del SDK (Read, Grep, mcp__hermes__save_memory…). */
+  name: string;
+  /** Objetivo extraído del input (ruta, patrón, query…); vacío si no aplica. */
+  target?: string;
+}
+
+// ── Linear (tablero Linear-first del tab TAREAS, paridad con la web) ───
+
+export type LinearStateType = "backlog" | "unstarted" | "started" | "completed" | "canceled";
+
+export interface LinearBoardIssue {
+  identifier: string;
+  title: string;
+  url: string;
+  priority: number;
+  updatedAt: string;
+  state: { name: string; type: string };
+  labels: { nodes: { name: string }[] };
+  project: { name: string } | null;
+  hasPrompt: boolean;
+  /** Fila-puente local (si el issue ya se ejecutó alguna vez). */
+  local?: {
+    task_id: number;
+    status: TaskState;
+    run_id: string | null;
+    session_id: string | null;
+  };
+}
+
+export interface LinearIssueFull {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string;
+  url: string;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+  state: { id: string; name: string; type: string };
+  project: { name: string } | null;
+  labels: { nodes: { name: string }[] };
+  copyPrompt: string | null;
+}
