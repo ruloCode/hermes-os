@@ -1,66 +1,137 @@
 # ⚡ Hermes OS
 
-Sistema operativo de IA personal de RuloCode: un dashboard local estilo "AGENTIC OS" con **voz en tiempo real** (ElevenLabs), un **agente ejecutor local** (Claude Agent SDK) que conoce el vault de Obsidian, y **memoria persistente compartida** entre máquinas (Supabase + pgvector).
+Sistema operativo de IA personal, **local-first**: un dashboard estilo "AGENTIC OS" con voz en tiempo real, un agente ejecutor que corre en tu máquina con el **Claude Agent SDK** (sin API key: usa tu suscripción de Claude Code) y memoria persistente en Supabase. Conoce tu vault de Obsidian, tus tareas de Linear, tus reuniones, tu calendario y tu producción de contenido — y todo lo que muestra es real.
 
 ```
-Browser (localhost:3000)
- ├─ Voz: ElevenLabs Agents (WebRTC) → client tools → localhost:8642
- ├─ Consola: contrato Hermes SSE → agente local
- └─ Dashboard: grafo de conocimiento, vitals, actividad en vivo
-        ▼
-Agent server (apps/agent, :8642) — Claude Agent SDK + tools MCP "hermes"
-        ▼
-Supabase (memories + pgvector, preferences, sessions, presence)  ·  Vault Obsidian (read + write controlado)
+Browser (dashboard :31415)  ─┬─ Voz: ElevenLabs Agents (WebRTC) → client tools en el browser
+                             ├─ Consola: contrato Hermes (SSE OpenAI-compatible)
+                             └─ Paneles: actividad en vivo, conocimiento, juntas, tareas, estudio…
+                                              │
+                                              ▼
+Agent server (apps/agent, Hono :8650) ── Claude Agent SDK ── spawnea el CLI `claude` (tu login)
+        │                                   └─ tools MCP "hermes" + guardrails (canUseTool)
+        ├─ Supabase (pgvector): memoria, conocimiento unificado, tareas, juntas, presencia
+        ├─ Vault de Obsidian (opcional): verdad de proyectos, notas de ejecución
+        └─ Integraciones opcionales: Linear · Google Calendar · AssemblyAI · OpenMontage · Kasa
+```
+
+## Requisitos
+
+| Qué | Versión / nota |
+|---|---|
+| macOS (recomendado) o Linux/WSL2 | Las features de sistema (gestos, Chrome por AppleScript, luces, ventanas) son mac-only y se apagan solas en otros SO |
+| Node | 22+ (probado con 24/25 vía nvm) |
+| pnpm | 10+ |
+| **Claude Code** | ≥ 2.1.247, **logueado con tu cuenta** (Pro/Max/Team). `claude --version` · `claude` → `/login` |
+| Supabase | Un proyecto propio (plan gratis basta) |
+| `rg` (ripgrep), `ffmpeg` | ffmpeg solo para reuniones y Estudio |
+
+## Cómo consume Claude (y por qué no hay API key)
+
+```
+Hermes → @anthropic-ai/claude-agent-sdk → query() → spawnea el CLI `claude`
+       → el CLI usa el login OAuth de tu cuenta (Keychain en macOS) → Anthropic
+```
+
+El agente **nunca** recibe una key: [session.ts](apps/agent/src/agent/session.ts) llama `query()` y el CLI resuelve la credencial. Todo el consumo sale de tu suscripción. **Si `ANTHROPIC_API_KEY` existe en el entorno, el CLI la prefiere y cobra por API** — no la configures. El uso (tokens por turno) se cuenta desde el evento `result` del CLI y se muestra en el dashboard; es conteo, no factura.
+
+Verifica tu login en macOS:
+
+```bash
+security find-generic-password -s "Claude Code-credentials" -w \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['claudeAiOauth']['subscriptionType'])"
 ```
 
 ## Setup por máquina
 
-1. **Requisitos**: Node 22+, pnpm 10+, [Claude Code](https://claude.com/claude-code) logueado (el Agent SDK usa esas credenciales), `rg` (ripgrep).
-2. Clona e instala:
-   ```bash
-   git clone <repo> ~/dev/side/hermes-os && cd ~/dev/side/hermes-os
-   pnpm install
-   cp .env.example .env   # y completa los valores
-   ```
-3. **Supabase** (una sola vez por proyecto): aplica `supabase/migrations/001_init.sql` en el SQL Editor.
-4. **ElevenLabs** (una sola vez): `pnpm setup:elevenlabs` → pega el `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` que imprime en `.env`.
-5. **Memorias de clawd** (opcional, una vez): `pnpm migrate:clawd`.
-6. Arranca todo:
-   ```bash
-   pnpm dev   # web :3000 + agente :8642
-   ```
+```bash
+git clone git@github.com:ruloCode/hermes-os.git ~/dev/side/hermes-os
+cd ~/dev/side/hermes-os
+./hermes setup            # pnpm install (+ agente de voz de ElevenLabs si hay key)
+cp .env.example .env      # y completa el mínimo (abajo)
+```
+
+**1. Supabase.** Crea un proyecto y aplica **todas** las migraciones de [supabase/migrations/](supabase/migrations/) en orden numérico:
+
+```bash
+supabase login && supabase link --project-ref <ref> && supabase db push
+# o pega cada .sql en el SQL Editor del dashboard, en orden
+```
+
+**2. `.env` mínimo** (en la raíz del monorepo; el resto es opcional y degrada solo):
+
+```
+HERMES_OWNER_NAME=<tu nombre>          NEXT_PUBLIC_HERMES_OWNER_NAME=<tu nombre>
+MACHINE_NAME=<único por máquina>       HERMES_API_KEY=<openssl rand -hex 24>
+NEXT_PUBLIC_SUPABASE_URL=…             NEXT_PUBLIC_SUPABASE_ANON_KEY=…
+SUPABASE_SERVICE_ROLE_KEY=…            VAULT_PATH=<ruta del vault o vacío>
+```
+
+**3. Tu persona (opcional, recomendado).** Copia [docs/SOUL.example.md](docs/SOUL.example.md) a `~/.hermes-os/SOUL.md` y escríbelo en primera persona: Hermes lo inyecta a su system prompt y a los prompts especializados. Vive fuera del repo.
+
+**4. Arranca.**
+
+```bash
+./hermes                  # desarrollo: web :31415 + agente :8650
+./hermes doctor           # requisitos, puertos, autostart, salud
+./hermes install          # producción: build + autostart al login (launchd com.hermes-os.*)
+```
+
+Prueba desde la terminal (misma ruta que usa el dashboard):
+
+```bash
+KEY=$(grep -o "^HERMES_API_KEY=.*" .env | cut -d= -f2-)
+curl -s -N -X POST localhost:8650/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Di hola y dime en qué máquina corres"}],"stream":true}'
+```
+
+## Estructura
+
+```
+apps/web        Next.js 15 — dashboard (shell único, providers, design system en src/components/ui)
+apps/agent      Hono — agente (Agent SDK, tools MCP, guardrails, jobs, rutas /v1 /tasks /meetings /content …)
+packages/shared Tipos y lógica compartida (contrato Hermes, etapas de contenido, beats de guion)
+mobile/         App Expo (Android): chat, grabación de juntas a prueba de red, tablero Linear
+supabase/       Migraciones (001 → 024)
+docs/           Guías: multi-máquina, flujo de contenido, publicación automática, SOUL.example.md
+hermes          Lanzador: dev · install · uninstall · doctor · stop · typecheck
+```
+
+La guía de arquitectura para trabajar en el código está en [CLAUDE.md](CLAUDE.md) (la lee Claude Code al abrir el repo).
+
+## Qué hace
+
+- **Voz en tiempo real** (ElevenLabs): client tools en el browser → agente local, sin túnel. Segundo agente "tutor de inglés" con reportes y vocabulario.
+- **Consola**: chat con memoria de sesión (`X-Hermes-Session-Id`), runs de Claude Code por proyecto con stop y continuación.
+- **Conocimiento unificado**: `match_knowledge` busca en memorias, reuniones, ejecuciones, conversaciones y vault (pgvector).
+- **Reuniones**: ingest de grabaciones (resumen + accionables → Linear) y **junta EN VIVO** con transcripción diarizada, copiloto rápido (~2 s) y coach.
+- **Tareas Linear-first**: tablero, detalle, "Copy prompt" por issue y ejecución headless con métricas.
+- **Estudio de contenido**: pipeline por etapas con criterios reales, teleprompter, checklist de captura contra el disco, voz en off, edición automática (OpenMontage) y métricas de YouTube.
+- **Vida**: finanzas (COP/USD) y hábitos por voz; agenda de Google Calendar con escritura por voz.
+- **Sistema (macOS)**: control por gestos con MediaPipe, navegación web agéntica en un Chrome dedicado, luces Kasa, multi-monitor.
+- **Multi-máquina y móvil**: un dashboard, un agente por PC (descubrimiento por heartbeat); túnel cloudflared + login Supabase para la app.
 
 ## Comandos
 
 | Comando | Qué hace |
 |---|---|
-| `pnpm dev` | Web + agente en paralelo |
-| `pnpm dev:agent` | Solo el agent server (:8642) |
-| `pnpm setup:elevenlabs` | Crea/actualiza el agente de voz y sus client tools |
-| `pnpm migrate:clawd` | Importa las ~180 memorias de `~/dev/side/clawd` |
-| `pnpm typecheck` | Typecheck de todos los paquetes |
+| `./hermes` | Web + agente en desarrollo |
+| `./hermes install` / `uninstall` | Build de producción + autostart (launchd) / quitarlo |
+| `./hermes doctor` | Diagnóstico: requisitos, puertos, servicios, salud |
+| `pnpm typecheck` | Typecheck de todo el monorepo (obligatorio antes de commitear) |
+| `pnpm setup:elevenlabs` | Crea/actualiza los agentes de voz y sus client tools |
+| `pnpm backfill:knowledge` | Indexa el conocimiento existente (idempotente) |
+| `launchctl kickstart -k gui/$UID/com.hermes-os.agent` | Reinicia el agente de producción (`.web` para el dashboard) |
 
-## Cómo funciona la voz sin túnel
-
-Los *client tools* de ElevenLabs se ejecutan **en el browser**, así que pueden llamar a `localhost:8642` directo. El LLM de voz solo conversa y rutea; todo lo que toca la máquina pasa por `run_task` → el Claude Agent SDK trabaja async y la voz reporta con `check_task`. Guardrail `canUseTool` bloquea comandos destructivos (`rm -rf`, `sudo`, force-push, etc.).
-
-## Multi-Mac (Tailscale)
-
-Para ver y controlar el Hermes de otra Mac (p.ej. la portátil manejando los proyectos de la mini):
-
-1. Instala [Tailscale](https://tailscale.com) en ambas Macs con la misma cuenta y anota la IP `100.x.y.z` de la Mac "servidor" (`tailscale ip -4`).
-2. En el `.env` de la Mac servidor define `HERMES_API_KEY=<key fuerte>` — con key el agente pasa de escuchar solo en 127.0.0.1 a 0.0.0.0 **exigiendo Bearer** (o `?key=` en los SSE).
-3. En la Mac cliente: clona el repo, `pnpm install`, `.env` con el MISMO Supabase, su propio `MACHINE_NAME`, y:
-   ```bash
-   NEXT_PUBLIC_HERMES_API_KEY=<la misma key>
-   NEXT_PUBLIC_HERMES_AGENTS=mini=http://100.x.y.z:8650|portatil=http://localhost:8650
-   ```
-4. `pnpm --filter @hermes/web dev` en la cliente basta (usa el agente remoto); el selector de máquina aparece en el header del dashboard. Si además corre su propio agente, puede alternar entre ambos.
-
-Memorias, presencia y `projects_cache` ya se comparten vía Supabase entre todas las máquinas.
+Logs de producción: `~/.hermes-os/logs/`.
 
 ## Seguridad
 
-- Sin `HERMES_API_KEY` el agent server escucha SOLO en 127.0.0.1 (y CORS de localhost). Con key escucha en 0.0.0.0 exigiendo Bearer/`?key=` — pensado para Tailscale, no para exponerlo a internet.
-- Al terminar o fallar un run/tarea hay notificación nativa de macOS (`HERMES_NOTIFY=0` la apaga).
-- Escrituras del agente limitadas al vault, `~/dev` y `~/Documents`.
+- El agente escucha solo en `127.0.0.1` sin `HERMES_API_KEY`; con key se abre a la red y exige Bearer (o JWT de Supabase Auth para el móvil).
+- Bash/Write/Edit pasan por `canUseTool` ([guardrails.ts](apps/agent/src/agent/guardrails.ts)); el navegador y las luces reciben solo acciones semánticas de una allowlist.
+- `.env`, `SOUL.md`, `.data/` y los binarios generados están fuera de git. Nunca commitees credenciales.
+
+## Convenciones
+
+Español en UI, comentarios y mensajes; código en inglés. **Todo dato visible es real**: sin métricas inventadas ni placeholders. Ningún nombre propio en el código — la identidad del dueño vive en `.env` + `SOUL.md`.

@@ -27,3 +27,23 @@ dist/
 supabase/.temp/
 .playwright-mcp/
 hermes-dashboard.png
+
+# graphify — grafo de código local (lo refresca el job code-graph-update)
+graphify-out/
+
+# Assets binarios de MediaPipe (se regeneran con apps/web/scripts/setup-mediapipe.mjs)
+apps/web/public/mediapipe/
+
+# Binario del helper nativo de ventanas (se compila con build-window-helper.sh)
+apps/agent/native/window-helper
+
+# Archivos sueltos en la raíz (fotos/videos de prueba) — nunca al repo
+/*.jpeg
+/*.jpg
+/*.png
+/*.mp4
+/*.mov
+
+# Persona del dueño: vive en ~/.hermes-os/SOUL.md, nunca en el repo
+SOUL.md
+!docs/SOUL.example.md
