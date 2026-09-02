@@ -33,6 +33,7 @@ import { HabitosView } from "@/components/views/HabitosView";
 import { InglesView } from "@/components/views/InglesView";
 import { AgendaView } from "@/components/views/AgendaView";
 import { EstudioView } from "@/components/views/EstudioView";
+import { ComposicionView } from "@/components/views/ComposicionView";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -51,6 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/ingles": "ingles",
     "/agenda": "agenda",
     "/estudio": "estudio",
+    "/composicion": "composicion",
   };
   const view = WORKSPACE_VIEWS[pathname];
   if (!view) return <>{children}</>;
@@ -99,6 +101,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className={`min-h-0 flex-1 ${view === "estudio" ? "flex flex-col" : "hidden"}`}>
               <EstudioView />
+            </div>
+            <div className={`min-h-0 flex-1 ${view === "composicion" ? "flex flex-col" : "hidden"}`}>
+              <ComposicionView />
             </div>
           </div>
         </main>

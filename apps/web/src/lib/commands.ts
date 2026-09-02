@@ -164,6 +164,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/estudio"),
   },
   {
+    id: "ver-composicion",
+    label: "Composición",
+    slash: "/componer",
+    hint: "Escribir canciones: letra, tonalidad, acordes y referencias",
+    run: (ctx) => ctx.navigate("/composicion"),
+  },
+  {
     id: "modo-grabacion",
     label: "Modo grabación",
     slash: "/grabar",

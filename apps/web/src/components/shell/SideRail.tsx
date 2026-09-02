@@ -100,6 +100,19 @@ const DESTS: Dest[] = [
       <path d="M7.5 8.9 9.3 5.6M12.4 8.1l1.8-3.3M17.2 7.3 19 4.1" opacity=".5" />,
     ),
   },
+  // Composición: escribir canciones (letra + tonalidad + acordes). Clave de sol.
+  {
+    kind: "route",
+    href: "/composicion",
+    label: "Composición",
+    icon: (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M9 18V6.5l10-2V16" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="6.8" cy="18" r="2.2" />
+        <circle cx="16.8" cy="16" r="2.2" />
+      </svg>
+    ),
+  },
 ];
 
 export function SideRail() {
