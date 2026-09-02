@@ -11,6 +11,8 @@ import { chordSymbol, parseChord, transposeChord, type Key } from "@/lib/music-t
 import { MOCK_NOTEBOOK, MOCK_REFS, MOCK_SONGS } from "./mock";
 import type { NotebookEntry, Reference, Song, SongSection, SongStage } from "./types";
 
+export type Section = "canciones" | "referencias" | "cuaderno";
+
 let seq = 100;
 const uid = (p: string) => `${p}-${++seq}`;
 
@@ -20,6 +22,10 @@ export function useComposicionState() {
   const [notebook, setNotebook] = useState<NotebookEntry[]>(MOCK_NOTEBOOK);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notation, setNotation] = useState<"en" | "latin">("en");
+  // La sección vive aquí (y no en la vista) porque crear una canción desde el
+  // Cuaderno tiene que dejarte en Canciones: si no, al cerrar el takeover
+  // vuelves al Cuaderno y la canción nueva parece no existir.
+  const [section, setSection] = useState<Section>("canciones");
 
   const selected = useMemo(() => songs.find((s) => s.id === selectedId) ?? null, [songs, selectedId]);
 
@@ -115,7 +121,9 @@ export function useComposicionState() {
       const now = new Date().toISOString();
       const song: Song = {
         id,
-        title: title.trim() || "Sin título",
+        // Una canción sin título nace con su semilla como nombre provisional:
+        // "Sin título" en la lista no dice nada de qué canción es.
+        title: title.trim() || seed.trim().slice(0, 40) || "Sin título",
         stage: "idea",
         key: { tonic: 0, mode: "major" },
         tempo: 90,
@@ -133,6 +141,7 @@ export function useComposicionState() {
       };
       setSongs((prev) => [song, ...prev]);
       if (fromNotebookId) setNotebook((prev) => prev.map((n) => (n.id === fromNotebookId ? { ...n, songId: id } : n)));
+      setSection("canciones");
       setSelectedId(id);
       return id;
     },
@@ -174,6 +183,8 @@ export function useComposicionState() {
     selected,
     selectedId,
     setSelectedId,
+    section,
+    setSection,
     notation,
     setNotation,
     patchSong,

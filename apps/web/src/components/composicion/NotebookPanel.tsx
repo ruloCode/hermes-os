@@ -81,7 +81,7 @@ export function NotebookPanel() {
                   {song && <span className="text-violet">→ {song.title}</span>}
                 </div>
               </div>
-              <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                 {!song && (
                   <button onClick={() => createSong(n.kind === "titulo" ? n.text : "", n.text, n.id)} className={btnCls} title="Convertir en canción con esta semilla">→ canción</button>
                 )}

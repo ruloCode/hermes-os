@@ -189,7 +189,7 @@ export function ChordBuilder({ song }: { song: Song }) {
                   <span className={`font-mono text-2xs ${a?.status === "prestado" ? "text-amber" : a?.status === "fuera" ? "text-red" : "text-text-dim"}`}>
                     {a?.roman ?? "?"}
                   </span>
-                  <div className="absolute -top-2 right-1 hidden gap-0.5 group-hover:flex">
+                  <div className="absolute -top-2 right-1 hidden gap-0.5 group-hover:flex group-focus-within:flex">
                     <button onClick={() => move(i, -1)} className="rounded-xs bg-panel-2 px-1 text-2xs text-text-dim hover:text-text" title="mover antes">◀</button>
                     <button onClick={() => move(i, 1)} className="rounded-xs bg-panel-2 px-1 text-2xs text-text-dim hover:text-text" title="mover después">▶</button>
                     <button onClick={() => remove(i)} className="rounded-xs bg-panel-2 px-1 text-2xs text-red" title="quitar">✕</button>

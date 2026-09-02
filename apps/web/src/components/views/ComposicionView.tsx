@@ -19,8 +19,7 @@ import { CoWriterPanel } from "@/components/composicion/CoWriterPanel";
 import { ReferencesBoard } from "@/components/composicion/ReferencesBoard";
 import { NotebookPanel } from "@/components/composicion/NotebookPanel";
 import { ComposicionRail } from "@/components/composicion/ComposicionRail";
-
-type Section = "canciones" | "referencias" | "cuaderno";
+import type { Section } from "@/components/composicion/useComposicionState";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "canciones", label: "Canciones", hint: "Las canciones y la que estás escribiendo" },
@@ -37,8 +36,7 @@ export function ComposicionView() {
 }
 
 function Inner() {
-  const { selected, setSelectedId, songs, refs, notebook } = useComposicion();
-  const [section, setSection] = useState<Section>("canciones");
+  const { selected, setSelectedId, songs, refs, notebook, section, setSection } = useComposicion();
   const [chatOpen, setChatOpen] = useState(true);
   const [focusSection, setFocusSection] = useState<string | null>(null);
 
@@ -88,7 +86,7 @@ function Inner() {
 
       {/* Canción abierta: takeover con el copiloto a la derecha */}
       {selected ? (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden" style={{ gridTemplateColumns: chatOpen ? undefined : undefined }}>
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
           <div className={`grid min-h-0 gap-3 ${chatOpen ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "lg:grid-cols-1"} lg:grid-rows-[minmax(0,1fr)]`}>
             <div className="flex min-h-0 min-w-0 flex-col">
               <Panel title="Canción" variant="hero" delay={40} className="min-h-[520px] flex-1 lg:min-h-0" padding="sm">
