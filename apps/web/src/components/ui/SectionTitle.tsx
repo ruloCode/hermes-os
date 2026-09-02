@@ -22,16 +22,11 @@ export function SectionTitle({
   const color = toneVar(tone);
   return (
     <div className="flex items-center justify-between gap-2">
-      <Heading className="flex items-center gap-2 font-display text-xs tracking-title text-text-dim uppercase">
+      <Heading className="flex items-center gap-2 text-xs font-semibold text-text">
         <span
           aria-hidden
           className="inline-block shrink-0"
-          style={{
-            width: 6,
-            height: 6,
-            background: color,
-            boxShadow: `0 0 6px ${color}`,
-          }}
+          style={{ width: 6, height: 6, borderRadius: 999, background: color }}
         />
         {children}
       </Heading>

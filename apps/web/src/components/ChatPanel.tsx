@@ -673,7 +673,7 @@ export function ChatPanel({
           más importante de la vista, así que se lee como objeto. El anillo de
           foco vive aquí (focus-within), no en el textarea. */}
       <form
-        className="hud-field mt-3 flex items-end gap-3 rounded-lg border border-line-2 bg-panel-2 px-4 py-3 shadow-[0_22px_60px_-20px_rgb(0_0_0_/_0.85)] transition-colors focus-within:border-violet/60"
+        className="hud-field mt-3 flex items-end gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-[var(--shadow-pop)] transition-colors focus-within:border-line-2"
         onSubmit={(e) => {
           e.preventDefault();
           void send(active.key);

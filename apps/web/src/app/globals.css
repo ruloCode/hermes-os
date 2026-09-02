@@ -1,83 +1,136 @@
 @import "tailwindcss";
 
-/* ── Tokens del design system (Tailwind v4 @theme) ──────────────────
-   Genera utilidades (text-violet, bg-panel, border-line…) y emite las
-   mismas variables en :root, así canvas/SVG/JS las leen con
-   getComputedStyle sin duplicar valores. */
+/* ══════════════════════════════════════════════════════════════════════
+   Design system v3 (2026-09) — "limpio": referencia Claude / ChatGPT.
+
+   Qué cambió respecto al HUD cyberpunk (v2):
+   · Superficies planas y opacas: sin nébulas, sin grid, sin scanlines,
+     sin glass ni blur. Tarjetas con borde de 1px y radio suave.
+   · UN acento cálido (terracota) sobre neutros cálidos; los demás tonos
+     (cyan/blue/green/amber/red) quedan como SEMÁNTICA de estado, apagados.
+   · Tipografía sans (Inter) para todo el UI; la monoespaciada queda para
+     números, código y datos tabulares (`font-mono` explícito).
+   · Sin mayúsculas con tracking: las etiquetas van en frase normal.
+   · Dos temas de verdad: `data-theme="dark" | "light"` en <html>. Los
+     tokens conservan su NOMBRE (violet = el acento, por historia) para no
+     tocar cientos de usos: cambia el valor, no la API.
+
+   Cómo funciona el tema: @theme emite las vars en :root (oscuro por
+   defecto); `:root[data-theme="light"]` las redefine. Las utilidades de
+   Tailwind v4 referencian var(--color-x), así que TODO sigue el tema sin
+   recompilar. Canvas/three leen con readToken() (caché que se limpia al
+   cambiar de tema, ver ThemeProvider).
+   ══════════════════════════════════════════════════════════════════════ */
 @theme {
-  /* Superficies */
-  --color-bg: #05060f;
-  --color-panel: rgb(10 13 28 / 0.8);
-  --color-panel-2: rgb(16 20 40 / 0.85);
-  --color-line: rgb(122 132 255 / 0.14);
-  --color-line-2: rgb(139 148 255 / 0.35);
+  /* ── Superficies (oscuro = default) ── */
+  --color-bg: #1f1e1d;
+  --color-panel: #292826;
+  --color-panel-2: #33322f;
+  --color-line: rgb(255 255 255 / 0.09);
+  --color-line-2: rgb(255 255 255 / 0.18);
 
-  /* Acentos */
-  --color-violet: #a78bfa;
-  --color-violet-hot: #c4b5fd;
-  --color-cyan: #67e8f9;
-  --color-blue: #60a5fa;
-  --color-green: #6ee7a0;
-  --color-amber: #fbbf24;
-  --color-red: #fb7185;
+  /* ── Acento + semánticos ──
+     `violet` ES el acento (terracota). El nombre se conserva por la API. */
+  --color-violet: #d97757;
+  --color-violet-hot: #e89a7d;
+  --color-cyan: #7fc4d4;
+  --color-blue: #8ab4f8;
+  --color-green: #6ccb8f;
+  --color-amber: #e7b04e;
+  --color-red: #f07070;
 
-  /* Texto — contraste apto para uso diario (dim ≈ 6.7:1 sobre bg) */
-  --color-text: #e2e7ff;
-  --color-text-dim: #8891c5;
-  --color-text-faint: #6b74a8; /* solo decorativo/disabled, nunca información */
+  /* ── Texto ── */
+  --color-text: #edebe4;
+  --color-text-dim: #a9a59c;
+  --color-text-faint: #7e7a72; /* solo decorativo/disabled, nunca información */
 
-  /* Tipografía (las vars --font-chakra/--font-plex las inyecta next/font) */
-  --font-display: var(--font-chakra), sans-serif;
-  --font-mono: var(--font-plex), monospace;
-  --text-2xs: 10px;
-  --text-2xs--line-height: 1.5;
-  --text-xs: 11px;
+  /* ── Tipografía (las vars --font-inter/--font-plex las inyecta next/font) ── */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex), ui-monospace, "SF Mono", Menlo, monospace;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.45;
+  --text-xs: 12px;
   --text-xs--line-height: 1.5;
-  --text-sm: 12px;
-  --text-sm--line-height: 1.55;
-  --text-base: 13px;
-  --text-base--line-height: 1.6;
-  --text-md: 14px;
-  --text-md--line-height: 1.65;
-  --text-lg: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.5;
+  --text-base: 14px;
+  --text-base--line-height: 1.55;
+  --text-md: 15px;
+  --text-md--line-height: 1.55;
+  --text-lg: 17px;
   --text-xl: 20px;
   --text-2xl: 26px;
-  --text-3xl: 34px;
-  --text-4xl: 44px;
+  --text-3xl: 32px;
+  --text-4xl: 40px;
 
-  /* Radios (estética HUD: casi recto) */
-  --radius-xs: 2px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
+  /* ── Radios (suaves, como Claude) ── */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
 
-  /* Tracking semántico */
-  --tracking-label: 0.2em;
-  --tracking-title: 0.28em;
-  --tracking-hero: 0.35em;
+  /* ── Tracking: casi neutro. Las clases siguen existiendo, ya no gritan. ── */
+  --tracking-label: 0.01em;
+  --tracking-title: 0.01em;
+  --tracking-hero: 0.02em;
 
   /* Breakpoint "wide": el riel vertical de métricas aparece y la consola
      gana columnas (nombrado, no arbitrario, para que ordene bien vs lg/xl). */
   --breakpoint-wide: 1500px;
 }
 
-/* Paleta categórica de charts (donuts/series) en orden FIJO 1→5; la cola se
-   pliega en "otros" (gris text-faint). Validada contra la superficie del
-   panel: CVD adyacente ΔE ≥ 25 y contraste ≥ 3:1 (validate_palette.js);
-   vive fuera de la banda L 0.48–0.67 a propósito — banda neón de la marca.
-   amber/red quedan reservados a estado (riesgo de presupuesto), nunca series.
-   `static`: solo se consumen vía chartVar() en JS/SVG — sin utilidades que
-   las referencien, el @theme normal las tree-shakea y llegan vacías. */
+/* Tokens que SOLO consume JS (canvas/three/SVG vía readToken/chartVar).
+   `static`: sin utilidades que los referencien, el @theme normal los
+   tree-shakea y llegan vacíos al browser. Paleta categórica en orden FIJO
+   1→5; amber/red quedan reservados a estado. */
 @theme static {
-  --color-chart-1: #a78bfa; /* = violet */
-  --color-chart-2: #22d3ee; /* paso más denso del ramp cyan */
-  --color-chart-3: #fb923c;
-  --color-chart-4: #60a5fa; /* = blue */
-  --color-chart-5: #2dd4bf;
+  --color-chart-1: #d97757;
+  --color-chart-2: #7fc4d4;
+  --color-chart-3: #8ab4f8;
+  --color-chart-4: #b79cf3;
+  --color-chart-5: #6ccb8f;
+  /* Teclas del piano (Composición): en claro las negras son negras. */
+  --color-key-white: #33322f;
+  --color-key-black: #141312;
+  --color-key-ink: #1f1e1d;
+}
+
+/* ── Tema CLARO: mismos nombres, otros valores ─────────────────────────
+   Neutros cálidos (papel), acento terracota más oscuro para contraste
+   AA sobre blanco, semánticos en su versión "tinta". */
+:root[data-theme="light"] {
+  --color-bg: #f5f4ef;
+  --color-panel: #ffffff;
+  --color-panel-2: #f3f1ea;
+  --color-line: rgb(30 28 24 / 0.1);
+  --color-line-2: rgb(30 28 24 / 0.2);
+
+  --color-violet: #c2542d;
+  --color-violet-hot: #9e4325;
+  --color-cyan: #2a7b8c;
+  --color-blue: #2f6fe0;
+  --color-green: #1f8a4c;
+  --color-amber: #b7791f;
+  --color-red: #d03a2e;
+
+  --color-text: #1f1e1b;
+  --color-text-dim: #6b675f;
+  --color-text-faint: #9c978d;
+
+  --color-chart-1: #c2542d;
+  --color-chart-2: #2a7b8c;
+  --color-chart-3: #2f6fe0;
+  --color-chart-4: #7a4fd1;
+  --color-chart-5: #1f8a4c;
+  --color-key-white: #ffffff;
+  --color-key-black: #2b2926;
+  --color-key-ink: #ffffff;
 }
 
 /* Aliases legacy: el código previo al design system usa
-   style={{ color: "var(--violet)" }} y sigue resolviendo mientras dura
-   la migración. Se eliminan en la fase final del rediseño. */
+   style={{ color: "var(--violet)" }} y sigue resolviendo. */
 :root {
   --bg: var(--color-bg);
   --bg-panel: var(--color-panel);
@@ -92,11 +145,20 @@
   --red: var(--color-red);
   --text: var(--color-text);
   --text-dim: var(--color-text-dim);
+  /* Sombras por tema (en oscuro casi no se ven; en claro dan la elevación) */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
+  --shadow-pop: 0 12px 40px rgb(0 0 0 / 0.45);
   /* Capas (z-index) */
   --z-ambient: -1;
   --z-dropdown: 30;
   --z-overlay: 60;
   --z-toast: 70;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --shadow-card: 0 1px 2px rgb(30 28 24 / 0.05), 0 1px 3px rgb(30 28 24 / 0.04);
+  --shadow-pop: 0 12px 40px rgb(30 28 24 / 0.16);
+  color-scheme: light;
 }
 
 html,
@@ -108,167 +170,115 @@ body {
 }
 
 body {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  /* Atmósfera: nébulas violeta/cian + grid + scanlines */
-  background-image:
-    radial-gradient(ellipse 60% 45% at 50% 38%, rgba(109, 78, 233, 0.16), transparent 70%),
-    radial-gradient(ellipse 35% 30% at 18% 80%, rgba(56, 189, 248, 0.07), transparent 70%),
-    radial-gradient(ellipse 35% 30% at 85% 15%, rgba(167, 139, 250, 0.08), transparent 70%),
-    linear-gradient(rgba(122, 132, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(122, 132, 255, 0.035) 1px, transparent 1px);
-  background-size:
-    100% 100%,
-    100% 100%,
-    100% 100%,
-    44px 44px,
-    44px 44px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Scanlines ambientales: DETRÁS del contenido (z negativo). Encima del
-   texto castigaban la legibilidad diaria; aquí solo dan atmósfera y los
-   paneles glass las dejan traslucir con su backdrop-blur. */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: var(--z-ambient);
-  background: repeating-linear-gradient(
-    0deg,
-    transparent 0px,
-    transparent 3px,
-    rgba(0, 0, 0, 0.1) 3px,
-    rgba(0, 0, 0, 0.1) 4px
-  );
-  mix-blend-mode: multiply;
+/* Transición suave al cambiar de tema (solo colores, nada de layout). */
+html[data-theme-transition] *,
+html[data-theme-transition] *::before,
+html[data-theme-transition] *::after {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease !important;
 }
 
 .font-display {
   font-family: var(--font-display);
 }
 
-/* ── Panel HUD con esquinas bracket ─────────────────────────────── */
+/* ── Sin mayúsculas gritonas ────────────────────────────────────────
+   Más de 300 etiquetas llevan `uppercase` + `tracking-label` del HUD.
+   Reescribirlas una a una no cambia nada de lógica; este par de reglas
+   (fuera de @layer: le ganan a la utilidad) las devuelve a frase normal
+   en toda la app. Si algún texto DEBE ir en mayúsculas, se escribe así
+   en el string. */
+.uppercase {
+  text-transform: none;
+}
+.tracking-label,
+.tracking-title,
+.tracking-hero,
+.tracking-widest,
+.tracking-wider,
+[class*="tracking-["] {
+  letter-spacing: 0.01em;
+}
+
+/* ── Panel (antes "HUD con esquinas bracket") ─────────────────────── */
 .hud-panel {
   position: relative;
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(6px);
-}
-.hud-panel::before,
-.hud-panel::after {
-  content: "";
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  pointer-events: none;
-}
-.hud-panel::before {
-  top: -1px;
-  left: -1px;
-  border-top: 1px solid var(--line-bright);
-  border-left: 1px solid var(--line-bright);
-}
-.hud-panel::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 1px solid var(--line-bright);
-  border-right: 1px solid var(--line-bright);
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
 }
 
 .hud-title {
-  font-family: var(--font-display);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--text-dim);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text);
   display: flex;
   align-items: center;
   gap: 8px;
 }
+/* El dot de tono se conserva como señal semántica discreta (sin glow). */
 .hud-title::before {
   content: "";
   width: 6px;
   height: 6px;
-  background: var(--violet);
-  box-shadow: 0 0 8px var(--violet);
+  border-radius: 999px;
+  background: var(--color-violet);
 }
+.hud-title-cyan::before { background: var(--color-cyan); }
+.hud-title-green::before { background: var(--color-green); }
+.hud-title-amber::before { background: var(--color-amber); }
+.hud-title-red::before { background: var(--color-red); }
+.hud-title-blue::before { background: var(--color-blue); }
+.hud-title-neutral::before { background: var(--color-text-faint); }
 
-/* Tonos del dot del título (Panel v2 / SectionTitle) */
-.hud-title-cyan::before {
-  background: var(--color-cyan);
-  box-shadow: 0 0 8px var(--color-cyan);
-}
-.hud-title-green::before {
-  background: var(--color-green);
-  box-shadow: 0 0 8px var(--color-green);
-}
-.hud-title-amber::before {
-  background: var(--color-amber);
-  box-shadow: 0 0 8px var(--color-amber);
-}
-.hud-title-red::before {
-  background: var(--color-red);
-  box-shadow: 0 0 8px var(--color-red);
-}
-.hud-title-neutral::before {
-  background: var(--color-text-dim);
-  box-shadow: none;
-}
-
-/* Variante hero del panel: brackets grandes + línea de acento superior */
-.hud-panel-hero::before,
-.hud-panel-hero::after {
-  width: 18px;
-  height: 18px;
-}
-.hud-accent {
-  position: absolute;
-  top: -1px;
-  left: 12%;
-  width: 42%;
-  height: 2px;
-  pointer-events: none;
-  background: linear-gradient(90deg, var(--color-violet), transparent);
-  box-shadow: 0 0 12px rgb(167 139 250 / 0.5);
-}
+/* Variante hero: mismo panel, sin línea de neón. */
+.hud-panel-hero { background: var(--color-panel); }
+.hud-accent { display: none; }
 
 /* Variante alert: borde teñido por tono */
-.hud-alert-amber {
-  border-color: rgb(251 191 36 / 0.4);
-}
-.hud-alert-red {
-  border-color: rgb(251 113 133 / 0.4);
-}
+.hud-alert-amber { border-color: color-mix(in srgb, var(--color-amber) 45%, transparent); }
+.hud-alert-red { border-color: color-mix(in srgb, var(--color-red) 45%, transparent); }
 
-.glow-violet {
-  text-shadow: 0 0 18px rgba(167, 139, 250, 0.55);
+/* Glows: apagados (las clases quedan por compatibilidad). */
+.glow-violet,
+.glow-cyan,
+.glow-text-violet,
+.glow-text-cyan,
+.glow-text-green,
+.glow-text-amber,
+.glow-text-red {
+  text-shadow: none;
 }
-.glow-cyan {
-  text-shadow: 0 0 18px rgba(103, 232, 249, 0.45);
-}
+.glow-box-violet { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-violet) 35%, transparent); }
+.glow-box-cyan { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-cyan) 35%, transparent); }
+.glow-box-green { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-green) 35%, transparent); }
+.glow-box-amber { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-amber) 35%, transparent); }
+.glow-box-red { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-red) 35%, transparent); }
 
-/* ── Reveal en cascada al cargar ────────────────────────────────── */
+/* ── Reveal al cargar: sutil ─────────────────────────────────────── */
 @keyframes hud-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-    filter: none;
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }
 .hud-in {
-  animation: hud-in 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: hud-in 0.3s ease-out both;
 }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  50% { opacity: 0.35; }
 }
 .pulse-dot {
   animation: pulse-dot 1.6s ease-in-out infinite;
@@ -279,7 +289,7 @@ body::after {
   50% { opacity: 0; }
 }
 .cursor-blink::after {
-  content: "▮";
+  content: "▍";
   animation: blink 1s steps(1) infinite;
   color: var(--violet);
 }
@@ -292,10 +302,9 @@ body::after {
 .wave-bar {
   width: 3px;
   border-radius: 2px;
-  background: linear-gradient(180deg, var(--cyan), var(--violet));
+  background: var(--violet);
   transform-origin: center;
   animation: wave 0.9s ease-in-out infinite;
-  box-shadow: 0 0 6px rgba(167, 139, 250, 0.6);
 }
 .wave-idle .wave-bar {
   animation-play-state: paused;
@@ -315,7 +324,6 @@ body::after {
   opacity: 0.55;
 }
 .voice-orb {
-  /* --v = volumen real 0..1 (lo actualiza el rAF de VoiceOrb) */
   --v: 0;
   --orb: var(--violet);
   display: block;
@@ -323,7 +331,7 @@ body::after {
   height: 18px;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, var(--violet-hot), transparent 60%), var(--orb);
-  box-shadow: 0 0 calc(5px + var(--v) * 24px) var(--orb);
+  box-shadow: 0 0 calc(2px + var(--v) * 16px) color-mix(in srgb, var(--orb) 60%, transparent);
   transform: scale(calc(1 + var(--v) * 0.4));
   transition:
     box-shadow 0.09s linear,
@@ -334,51 +342,42 @@ body::after {
   animation: orb-breathe 2.6s ease-in-out infinite;
 }
 @keyframes orb-breathe {
-  0%,
-  100% {
-    filter: brightness(0.9);
-  }
-  50% {
-    filter: brightness(1.15);
-  }
+  0%, 100% { filter: brightness(0.95); }
+  50% { filter: brightness(1.1); }
 }
 
-/* ── Markdown (preview de la vista Voz) ─────────────────────────── */
+/* ── Markdown (respuestas, previews) ───────────────────────────── */
 .md {
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.65;
 }
 .md > *:first-child {
   margin-top: 0;
 }
 .md-h {
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.3;
-  color: var(--violet-hot);
+  color: var(--text);
 }
 .md-h1 {
-  font-size: 18px;
+  font-size: 20px;
   margin: 0.2em 0 0.5em;
   padding-bottom: 0.3em;
   border-bottom: 1px solid var(--line);
 }
 .md-h2 {
-  font-size: 15px;
+  font-size: 16px;
   margin: 1.1em 0 0.45em;
-  color: var(--violet);
 }
 .md-h3 {
-  font-size: 13px;
+  font-size: 14px;
   margin: 1em 0 0.35em;
-  color: var(--cyan);
 }
 .md-h4 {
-  font-size: 12px;
+  font-size: 13px;
   margin: 0.9em 0 0.3em;
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  color: var(--text-dim);
 }
 .md-p {
   margin: 0.55em 0;
@@ -389,16 +388,7 @@ body::after {
   padding-left: 1.35em;
 }
 .md-ul {
-  list-style: none;
-}
-.md-ul .md-li {
-  position: relative;
-}
-.md-ul .md-li::before {
-  content: "▸";
-  position: absolute;
-  left: -1.1em;
-  color: var(--violet);
+  list-style: disc;
 }
 .md-ol {
   list-style: decimal;
@@ -407,36 +397,39 @@ body::after {
   margin: 0.22em 0;
 }
 .md-li::marker {
-  color: var(--violet);
+  color: var(--text-dim);
 }
 .md-pre {
   margin: 0.7em 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 4px;
-  background: rgba(122, 132, 255, 0.05);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-2);
   overflow-x: auto;
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
   line-height: 1.5;
 }
 .md-code {
   padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(103, 232, 249, 0.1);
-  color: var(--cyan);
-  font-size: 0.92em;
+  border-radius: 4px;
+  background: var(--color-panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
 .md-pre code {
   background: transparent;
+  border: 0;
   color: var(--text);
   padding: 0;
 }
 .md-quote {
   margin: 0.6em 0;
   padding: 4px 12px;
-  border-left: 2px solid var(--violet);
+  border-left: 3px solid var(--line-bright);
   color: var(--text-dim);
-  background: rgba(167, 139, 250, 0.05);
 }
 .md-hr {
   margin: 1.1em 0;
@@ -444,34 +437,34 @@ body::after {
   border-top: 1px solid var(--line);
 }
 .md-link {
-  color: var(--cyan);
+  color: var(--violet);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-/* Referencia clickable a un doc del vault (wikilink / *.md) dentro de la HUD. */
+/* Referencia clickable a un doc del vault (wikilink / *.md). */
 .md-ref {
   appearance: none;
   border: 0;
   background: none;
   padding: 0;
   font: inherit;
-  color: var(--cyan);
+  color: var(--violet);
   cursor: pointer;
-  border-bottom: 1px dashed rgba(103, 232, 249, 0.5);
+  border-bottom: 1px dashed color-mix(in srgb, var(--violet) 50%, transparent);
   transition: border-color 0.15s;
 }
 .md-ref::before {
-  content: "◈";
-  margin-right: 0.28em;
-  opacity: 0.65;
+  content: "↗";
+  margin-right: 0.25em;
+  opacity: 0.6;
   font-size: 0.85em;
 }
 .md-ref:hover {
-  border-bottom-color: var(--cyan);
+  border-bottom-color: var(--violet);
 }
 
-/* ── Visor de documentos del vault: modal tipo Notion ───────────────── */
+/* ── Visor de documentos del vault: modal tipo Notion (papel siempre claro) ── */
 .doc-overlay {
   position: fixed;
   inset: 0;
@@ -480,14 +473,12 @@ body::after {
   align-items: flex-start;
   justify-content: center;
   padding: 5vh 16px;
-  background: rgba(3, 6, 14, 0.72);
-  backdrop-filter: blur(4px);
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(2px);
   animation: docFade 0.16s ease-out;
 }
 @keyframes docFade {
-  from {
-    opacity: 0;
-  }
+  from { opacity: 0; }
 }
 .doc-paper {
   display: flex;
@@ -495,17 +486,14 @@ body::after {
   width: 100%;
   max-width: 760px;
   max-height: 90vh;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #ffffff;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
   overflow: hidden;
   animation: docRise 0.18s ease-out;
 }
 @keyframes docRise {
-  from {
-    transform: translateY(8px);
-    opacity: 0;
-  }
+  from { transform: translateY(8px); opacity: 0; }
 }
 .doc-toolbar {
   display: flex;
@@ -522,8 +510,7 @@ body::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 12px;
   color: #9b9a97;
 }
 .doc-actions {
@@ -542,9 +529,7 @@ body::after {
   color: #37352f;
   font-size: 12px;
   cursor: pointer;
-  transition:
-    background 0.15s,
-    border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
 .doc-btn:hover {
   background: #f1f1ef;
@@ -570,119 +555,50 @@ body::after {
   font-size: 12px;
   color: #9b9a97;
 }
-
-/* El markdown, revestido para lectura humana (paleta y tipografía Notion). */
 .doc-paper .md {
   color: #37352f;
-  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.7;
 }
-.doc-paper .md-h {
-  color: #1f1e1b;
-  font-weight: 700;
-}
-.doc-paper .md-h1 {
-  font-size: 32px;
-  line-height: 1.2;
-  margin: 0 0 0.35em;
-  padding: 0;
-  border: none;
-}
-.doc-paper .md-h2 {
-  font-size: 23px;
-  color: #1f1e1b;
-  margin: 1.4em 0 0.4em;
-}
-.doc-paper .md-h3 {
-  font-size: 18px;
-  color: #1f1e1b;
-  margin: 1.2em 0 0.3em;
-}
-.doc-paper .md-h4 {
-  font-size: 15px;
-  color: #37352f;
-}
-.doc-paper .md-p {
-  margin: 0.7em 0;
-}
-.doc-paper .md-ul .md-li::before {
-  color: #9b9a97;
-}
-.doc-paper .md-li::marker {
-  color: #9b9a97;
-}
-.doc-paper .md-code {
-  background: rgba(135, 131, 120, 0.15);
-  color: #eb5757;
-}
-.doc-paper .md-pre {
-  background: #f7f6f3;
-  border-color: #ededec;
-}
-.doc-paper .md-pre code {
-  color: #37352f;
-}
-.doc-paper .md-quote {
-  border-left: 3px solid #37352f;
-  background: transparent;
-  color: #37352f;
-}
-.doc-paper .md-hr {
-  border-top-color: #ededec;
-}
-.doc-paper .md-link {
-  color: #2563eb;
-}
-.doc-paper .md-ref {
-  color: #2563eb;
-  border-bottom-color: rgba(37, 99, 235, 0.35);
-}
-.doc-paper .md-ref::before {
-  content: "◈";
-  opacity: 0.55;
-}
-.doc-paper .md-ref:hover {
-  border-bottom-color: #2563eb;
-}
+.doc-paper .md-h { color: #1f1e1b; font-weight: 700; }
+.doc-paper .md-h1 { font-size: 32px; line-height: 1.2; margin: 0 0 0.35em; padding: 0; border: none; }
+.doc-paper .md-h2 { font-size: 23px; color: #1f1e1b; margin: 1.4em 0 0.4em; }
+.doc-paper .md-h3 { font-size: 18px; color: #1f1e1b; margin: 1.2em 0 0.3em; }
+.doc-paper .md-h4 { font-size: 15px; color: #37352f; }
+.doc-paper .md-p { margin: 0.7em 0; }
+.doc-paper .md-li::marker { color: #9b9a97; }
+.doc-paper .md-code { background: rgba(135, 131, 120, 0.15); border: 0; color: #eb5757; }
+.doc-paper .md-pre { background: #f7f6f3; border-color: #ededec; }
+.doc-paper .md-pre code { color: #37352f; }
+.doc-paper .md-quote { border-left: 3px solid #37352f; background: transparent; color: #37352f; }
+.doc-paper .md-hr { border-top-color: #ededec; }
+.doc-paper .md-link { color: #2563eb; }
+.doc-paper .md-ref { color: #2563eb; border-bottom-color: rgba(37, 99, 235, 0.35); }
+.doc-paper .md-ref:hover { border-bottom-color: #2563eb; }
 
-/* Exportar PDF = imprimir solo el documento, sin la HUD ni el chrome del modal. */
+/* Exportar PDF = imprimir solo el documento. */
 @media print {
-  body * {
-    visibility: hidden !important;
-  }
-  #doc-print-root,
-  #doc-print-root * {
-    visibility: visible !important;
-  }
-  #doc-print-root {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 0 8mm;
-  }
-  .no-print {
-    display: none !important;
-  }
+  body * { visibility: hidden !important; }
+  #doc-print-root, #doc-print-root * { visibility: visible !important; }
+  #doc-print-root { position: absolute; left: 0; top: 0; width: 100%; padding: 0 8mm; }
+  .no-print { display: none !important; }
 }
 
-/* ── Scrollbars finas ───────────────────────────────────────────── */
+/* ── Scrollbars finas y neutras ─────────────────────────────────── */
 *::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(122, 132, 255, 0.25);
+  background: var(--color-line-2);
+  border-radius: 999px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* ── Riel de scroll propio (<ScrollArea rail />) ─────────────────────
-   Ojo Chrome 121+: la propiedad estándar `scrollbar-width` ANULA los
-   ::-webkit-scrollbar. Por eso aquí se OCULTA el nativo del todo y el riel se
-   dibuja a mano — es la única forma de tener glow, auto-hide y drag. */
+/* ── Riel de scroll propio (<ScrollArea rail />) ───────────────── */
 .hud-scroll-hide {
   scrollbar-width: none;
 }
@@ -691,18 +607,16 @@ body::after {
   height: 0;
   display: none;
 }
-
-/* Hairline permanente: dice "aquí se scrollea" sin gritar */
 .hud-rail {
   position: absolute;
-  width: 3px;
-  border-radius: 3px;
-  background: rgba(122, 132, 255, 0.07);
+  width: 4px;
+  border-radius: 4px;
+  background: transparent;
   opacity: 0;
   transition: opacity 0.35s ease;
   z-index: 5;
 }
-.hud-rail.is-live, /* mientras scrolleas */
+.hud-rail.is-live,
 .hud-rail:hover {
   opacity: 1;
 }
@@ -712,147 +626,94 @@ body::after {
 .hud-rail-thumb {
   position: absolute;
   left: 0;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--violet);
-  opacity: 0.3;
-  box-shadow: 0 0 7px rgba(167, 139, 250, 0.55);
+  width: 4px;
+  border-radius: 4px;
+  background: var(--color-line-2);
+  opacity: 0.8;
   transition: opacity 0.25s ease, background 0.2s ease;
   cursor: grab;
 }
-.hud-rail:hover .hud-rail-thumb {
-  opacity: 0.7;
-}
+.hud-rail:hover .hud-rail-thumb,
 .hud-rail.is-live .hud-rail-thumb {
-  opacity: 0.55;
+  opacity: 1;
 }
 .hud-rail-thumb:active {
   cursor: grabbing;
-  opacity: 1;
-  background: var(--violet-hot);
+  background: var(--text-dim);
 }
 
-/* ── Botón de comando ───────────────────────────────────────────── */
+/* ── Botón de comando (deck / chips) ───────────────────────────── */
 .cmd-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--line);
-  background: rgba(122, 132, 255, 0.04);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel);
   color: var(--text);
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   text-align: left;
 }
 .cmd-btn:hover {
-  border-color: var(--violet);
-  background: rgba(167, 139, 250, 0.1);
-  box-shadow: 0 0 18px rgba(167, 139, 250, 0.18), inset 0 0 12px rgba(167, 139, 250, 0.06);
-  color: var(--violet-hot);
+  border-color: var(--line-bright);
+  background: var(--color-panel-2);
+  color: var(--text);
 }
 .cmd-btn:active {
   transform: translateY(1px);
 }
-.cmd-btn::before {
-  content: ">";
-  color: var(--violet);
-}
 
-/* ── Design system: utilidades nuevas ───────────────────────────── */
-
-/* Foco visible global (navegación por teclado) */
+/* ── Foco visible global (teclado) ─────────────────────────────── */
 :focus-visible {
-  outline: 1px solid var(--color-cyan);
+  outline: 2px solid color-mix(in srgb, var(--color-violet) 55%, transparent);
   outline-offset: 2px;
+  border-radius: 4px;
 }
-
-/* Campos dentro de un contenedor que YA señala el foco (composer: el borde
-   pasa a violeta con focus-within). Sin esto se ve una caja dentro de otra.
-   Ojo, dos cosas se juntan aquí:
-   1. Por spec los campos de texto SIEMPRE matchean :focus-visible, también al
-      hacer clic con ratón — no solo navegando por teclado.
-   2. Esta regla va sin @layer, así que le gana a `outline-none` de Tailwind
-      (las utilidades viven en una capa, y lo no-capado siempre gana).
-   No se pierde accesibilidad: el foco sigue siendo visible en el contenedor. */
+/* Campos dentro de un contenedor que YA señala el foco (composer). */
 .hud-field :focus-visible {
   outline: none;
 }
 
-/* Glow de texto por tono. Regla social: máx. 1–2 glows por panel para
-   que el estado anómalo salte de verdad. */
-.glow-text-violet {
-  text-shadow: 0 0 18px rgb(167 139 250 / 0.55);
-}
-.glow-text-cyan {
-  text-shadow: 0 0 18px rgb(103 232 249 / 0.45);
-}
-.glow-text-green {
-  text-shadow: 0 0 16px rgb(110 231 160 / 0.45);
-}
-.glow-text-amber {
-  text-shadow: 0 0 16px rgb(251 191 36 / 0.45);
-}
-.glow-text-red {
-  text-shadow: 0 0 16px rgb(251 113 133 / 0.5);
-}
-
-/* Glow de caja por tono (bordes/controles "vivos") */
-.glow-box-violet {
-  box-shadow: 0 0 14px rgb(167 139 250 / 0.25), inset 0 0 10px rgb(167 139 250 / 0.05);
-}
-.glow-box-cyan {
-  box-shadow: 0 0 14px rgb(103 232 249 / 0.22), inset 0 0 10px rgb(103 232 249 / 0.05);
-}
-.glow-box-green {
-  box-shadow: 0 0 14px rgb(110 231 160 / 0.22), inset 0 0 10px rgb(110 231 160 / 0.05);
-}
-.glow-box-amber {
-  box-shadow: 0 0 14px rgb(251 191 36 / 0.22), inset 0 0 10px rgb(251 191 36 / 0.05);
-}
-.glow-box-red {
-  box-shadow: 0 0 14px rgb(251 113 133 / 0.25), inset 0 0 10px rgb(251 113 133 / 0.06);
-}
-
-/* Elevaciones: 0 = .hud-panel base · 1 = superficie elevada (dropdowns,
-   cards internas) · 2 = overlay flotante */
+/* Elevaciones */
 .elev-1 {
   background: var(--color-panel-2);
   border-color: var(--color-line-2);
 }
 .elev-2 {
-  box-shadow: 0 24px 70px rgb(0 0 0 / 0.5);
+  box-shadow: var(--shadow-pop);
 }
 
 /* Skeleton de carga (PanelState) */
 @keyframes skeleton-shimmer {
-  0% {
-    background-position: -160px 0;
-  }
-  100% {
-    background-position: 160px 0;
-  }
+  0% { background-position: -160px 0; }
+  100% { background-position: 160px 0; }
 }
 .skeleton {
   border-radius: var(--radius-xs);
   background:
-    linear-gradient(90deg, transparent, rgb(139 148 255 / 0.1), transparent) no-repeat,
-    rgb(122 132 255 / 0.07);
+    linear-gradient(90deg, transparent, var(--color-line-2), transparent) no-repeat,
+    var(--color-line);
   background-size: 160px 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
-/* ── Reduced motion: loops y reveals se apagan, los cambios de estado
-   quedan instantáneos ─────────────────────────────────────────────── */
+/* Selects nativos: que hereden el tema (el popup lo pinta el SO) */
+select,
+option {
+  color: var(--text);
+  background-color: var(--color-panel);
+}
+
+/* ── Reduced motion ────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .hud-in {
-    animation: none;
-  }
+  .hud-in { animation: none; }
   .pulse-dot,
   .wave-bar,
   .voice-orb-live,

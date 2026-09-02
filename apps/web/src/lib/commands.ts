@@ -12,6 +12,7 @@ import { useLiveMeeting } from "@/state/LiveMeetingProvider";
 import { useGestureControl } from "@/state/GestureControlProvider";
 import { useUiHands } from "@/state/UiHandsProvider";
 import { useEstudioContext } from "@/state/EstudioProvider";
+import { useTheme } from "@/state/ThemeProvider";
 
 export interface CommandContext {
   selectedProject: string | null;
@@ -44,6 +45,10 @@ export interface CommandContext {
   navigate: (path: string) => void;
   /** Abre el teleprompter de la pieza que toca grabar (o la seleccionada). */
   startRecording: () => void;
+  /** Apariencia actual (sistema/claro/oscuro), para el label del comando. */
+  themeLabel: string;
+  /** Sistema → claro → oscuro → sistema. */
+  cycleTheme: () => void;
 }
 
 export interface HermesCommand {
@@ -171,6 +176,12 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/composicion"),
   },
   {
+    id: "apariencia",
+    label: "Cambiar apariencia",
+    hint: "Sistema → claro → oscuro (también en el header)",
+    run: (ctx) => ctx.cycleTheme(),
+  },
+  {
     id: "modo-grabacion",
     label: "Modo grabación",
     slash: "/grabar",
@@ -277,9 +288,12 @@ export function useCommandContext(): CommandContext {
   const gestures = useGestureControl();
   const uiHands = useUiHands();
   const estudio = useEstudioContext();
+  const theme = useTheme();
   const router = useRouter();
   return {
     navigate: (path) => router.push(path),
+    themeLabel: theme.pref,
+    cycleTheme: theme.cycle,
     startRecording: () => {
       // La etapa `grabacion` significa "esto es lo que toca grabar": esa pieza
       // manda sobre la seleccionada. Sin ninguna, solo navega al Estudio.

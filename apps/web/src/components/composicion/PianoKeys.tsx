@@ -63,11 +63,11 @@ export function PianoKeys({
                 width={W - 1}
                 height={height - 1}
                 rx={2}
-                fill={isActive ? hot : inScale ? `color-mix(in srgb, ${color} 22%, rgb(16 20 40))` : "rgb(20 24 46)"}
-                stroke={isActive ? hot : "rgb(122 132 255 / 0.25)"}
+                fill={isActive ? hot : inScale ? `color-mix(in srgb, ${color} 18%, var(--color-key-white))` : "var(--color-key-white)"}
+                stroke={isActive ? hot : "var(--color-line-2)"}
               />
               {(inScale || isActive) && (
-                <text x={k.x + W / 2} y={height - 6} textAnchor="middle" fontSize={notation === "latin" ? 6 : 7} fill={isActive ? "#05060f" : color} fontFamily="var(--font-mono)">
+                <text x={k.x + W / 2} y={height - 6} textAnchor="middle" fontSize={notation === "latin" ? 6 : 7} fill={isActive ? "var(--color-key-ink)" : color} fontFamily="var(--font-mono)">
                   {name(k.pc)}
                 </text>
               )}
@@ -87,11 +87,11 @@ export function PianoKeys({
                 width={W * 0.7}
                 height={height * 0.6}
                 rx={1.5}
-                fill={isActive ? hot : inScale ? `color-mix(in srgb, ${color} 55%, #05060f)` : "#0a0d1c"}
-                stroke={isActive ? hot : "rgb(122 132 255 / 0.35)"}
+                fill={isActive ? hot : inScale ? `color-mix(in srgb, ${color} 55%, var(--color-key-black))` : "var(--color-key-black)"}
+                stroke={isActive ? hot : "var(--color-line-2)"}
               />
               {(inScale || isActive) && (
-                <text x={k.x + (W * 0.7) / 2} y={height * 0.6 - 5} textAnchor="middle" fontSize={5.5} fill={isActive ? "#05060f" : "#e2e7ff"} fontFamily="var(--font-mono)">
+                <text x={k.x + (W * 0.7) / 2} y={height * 0.6 - 5} textAnchor="middle" fontSize={5.5} fill={isActive ? "var(--color-key-ink)" : "#ffffff"} fontFamily="var(--font-mono)">
                   {name(k.pc)}
                 </text>
               )}

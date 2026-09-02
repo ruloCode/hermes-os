@@ -121,10 +121,10 @@ export function SideRail() {
   const inHome = pathname === "/";
 
   return (
-    <nav aria-label="Navegación" className="flex w-[60px] shrink-0 flex-col items-center gap-1 border-r border-line py-4">
-      <span aria-hidden className="mb-5 grid h-6.5 w-6.5 place-items-center drop-shadow-[0_0_7px_rgb(167_139_250_/_0.55)]">
+    <nav aria-label="Navegación" className="flex w-[60px] shrink-0 flex-col items-center gap-1 border-r border-line bg-bg py-4">
+      <span aria-hidden className="mb-5 grid h-6.5 w-6.5 place-items-center">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2 21.5 7v10L12 22 2.5 17V7z" stroke="currentColor" strokeWidth="1.2" className="text-violet" fill="rgb(167 139 250 / 0.09)" />
+          <path d="M12 2 21.5 7v10L12 22 2.5 17V7z" stroke="currentColor" strokeWidth="1.4" className="text-violet" fill="color-mix(in srgb, var(--color-violet) 12%, transparent)" />
           <circle cx="12" cy="12" r="3.1" className="fill-violet-hot" />
         </svg>
       </span>
@@ -137,7 +137,7 @@ export function SideRail() {
               : inHome && ws.tab === d.tab;
 
           const cls = `group relative grid h-9.5 w-9.5 cursor-pointer place-items-center rounded-sm transition-colors ${
-            active ? "bg-violet/9 text-violet" : "text-text-faint hover:bg-violet/5 hover:text-text-dim"
+            active ? "bg-panel-2 text-text" : "text-text-dim hover:bg-panel-2/70 hover:text-text"
           }`;
 
           const inner = (
@@ -145,9 +145,9 @@ export function SideRail() {
               {d.icon}
               {/* El activo se marca con luz, no con una caja */}
               {active && (
-                <span aria-hidden className="absolute -left-2.5 h-4 w-0.5 rounded-xs bg-violet shadow-[0_0_10px_var(--color-violet)]" />
+                <span aria-hidden className="absolute -left-2.5 h-4 w-0.5 rounded-full bg-violet" />
               )}
-              <span className="pointer-events-none absolute left-11 z-40 -translate-x-1 rounded-sm border border-line bg-panel-2 px-2 py-1 text-2xs tracking-label whitespace-nowrap text-text-dim uppercase opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100">
+              <span className="pointer-events-none absolute left-11 z-40 -translate-x-1 rounded-sm border border-line bg-panel px-2 py-1 text-xs whitespace-nowrap text-text shadow-[var(--shadow-pop)] opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100">
                 {d.label}
               </span>
             </>

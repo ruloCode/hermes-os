@@ -41,11 +41,11 @@ function Row({
 }) {
   const bar =
     tone === "violet"
-      ? "bg-violet shadow-[0_0_8px_rgb(167_139_250_/_0.6)]"
+      ? "bg-violet"
       : tone === "cyan"
-        ? "bg-cyan shadow-[0_0_8px_rgb(103_232_249_/_0.5)]"
+        ? "bg-cyan"
         : tone === "green"
-          ? "bg-green shadow-[0_0_8px_rgb(110_231_160_/_0.5)]"
+          ? "bg-green"
           : "bg-line-2";
   return (
     <button

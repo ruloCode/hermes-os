@@ -83,7 +83,7 @@ export function BootGate({ children }: { children: React.ReactNode }) {
   // Labels de los nodos: nombres de proyecto si ya están en el cliente; si no,
   // el BootLoader cae a los hardcodeados del asset.
   const labels = projects.length
-    ? projects.map((p) => p.name.toUpperCase()).slice(0, 11)
+    ? projects.map((p) => p.name).slice(0, 11)
     : undefined;
 
   return (

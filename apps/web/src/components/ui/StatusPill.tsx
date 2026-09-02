@@ -49,7 +49,6 @@ export function StatusPill({
           width: dot,
           height: dot,
           background: color,
-          boxShadow: `0 0 6px ${color}`,
         }}
       />
       <span

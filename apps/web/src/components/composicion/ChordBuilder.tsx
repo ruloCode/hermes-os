@@ -179,7 +179,7 @@ export function ChordBuilder({ song }: { song: Song }) {
                 <div
                   key={`${s}-${i}`}
                   className={`group relative flex min-w-[84px] flex-col items-center gap-0.5 rounded-sm border bg-panel-2 px-3 py-2 transition-all ${
-                    on ? "border-cyan shadow-[0_0_14px_rgb(103_232_249_/_0.35)]" : a ? STATUS_CLS[a.status] : "border-red/50"
+                    on ? "border-cyan ring-2 ring-cyan/30" : a ? STATUS_CLS[a.status] : "border-red/50"
                   }`}
                   title={a?.hint ?? (a ? a.status : "no reconocido")}
                 >

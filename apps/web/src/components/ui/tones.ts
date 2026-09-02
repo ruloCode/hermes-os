@@ -26,6 +26,11 @@ export const CHART_OTHER = "var(--color-text-faint)";
 // con caché por sesión (los tokens no cambian en runtime — no hay themes).
 let tokenCache: Map<string, string> | null = null;
 
+/** Vacía la caché: la llama ThemeProvider al cambiar de tema (los tokens SÍ cambian). */
+export function resetTokenCache(): void {
+  tokenCache = null;
+}
+
 /** Valor computado de un token CSS (p. ej. "--color-violet") para canvas. */
 export function readToken(name: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;

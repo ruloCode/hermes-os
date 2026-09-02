@@ -1,6 +1,7 @@
 "use client";
 
 import { ConversationProvider } from "@elevenlabs/react";
+import { ThemeProvider } from "@/state/ThemeProvider";
 import { VoiceBusyProvider } from "@/components/VoiceBusyContext";
 import { HermesDataProvider } from "@/state/HermesDataProvider";
 import { AgentEventsProvider } from "@/state/AgentEventsProvider";
@@ -19,6 +20,7 @@ import { BootGate } from "@/components/boot/BootGate";
 /**
  * Árbol ÚNICO de providers de toda la app (vive en el layout, persiste entre
  * navegaciones):
+ *  - ThemeProvider         → apariencia (sistema/claro/oscuro) en <html data-theme>
  *  - ConversationProvider  → la llamada de voz sobrevive al cambiar de vista
  *  - VoiceBusyProvider     → transcript/artefactos/scope compartidos
  *  - HermesDataProvider    → poll único de stats+proyectos+memorias (10s)
@@ -37,6 +39,7 @@ import { BootGate } from "@/components/boot/BootGate";
  */
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
+    <ThemeProvider>
     <ConversationProvider>
       <VoiceBusyProvider>
         <HermesDataProvider>
@@ -66,5 +69,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
         </HermesDataProvider>
       </VoiceBusyProvider>
     </ConversationProvider>
+    </ThemeProvider>
   );
 }

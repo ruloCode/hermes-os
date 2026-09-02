@@ -1,7 +1,6 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { toneVar } from "./tones";
 
 /**
  * TabBar — tabs HUD con acento animado bajo el tab activo.
@@ -91,7 +90,7 @@ export function TabBar({
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={`${sizing} tracking-label whitespace-nowrap uppercase transition-colors ${
-              selected ? "text-violet" : "text-text-dim hover:text-text"
+              selected ? "text-text font-medium" : "text-text-dim hover:text-text"
             }`}
           >
             {t.label}
@@ -104,12 +103,11 @@ export function TabBar({
       {/* Acento animado: translateX + width siguen al tab activo */}
       <span
         aria-hidden
-        className="pointer-events-none absolute -bottom-px left-0 h-0.5 bg-violet"
+        className="pointer-events-none absolute -bottom-px left-0 h-0.5 rounded-full bg-text"
         style={{
           width: indicator ? `${indicator.w}px` : 0,
           transform: `translateX(${indicator ? indicator.x : 0}px)`,
           opacity: indicator ? 1 : 0,
-          boxShadow: `0 0 8px ${toneVar("violet")}`,
           transition:
             "transform 180ms cubic-bezier(.2,.7,.2,1), width 180ms cubic-bezier(.2,.7,.2,1)",
         }}

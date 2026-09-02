@@ -12,6 +12,7 @@
 // El modo demo y el loop de reinicio se eliminaron: el progreso es real.
 
 import { useEffect, useRef } from "react";
+import { readToken } from "@/components/ui/tones";
 
 // Labels por defecto del asset (se usan si aún no hay proyectos en el cliente).
 const DEFAULT_LABELS = [
@@ -198,6 +199,40 @@ const CSS = `
   .hermes-boot .cells i.head { animation: none; }
   .hermes-boot .stage { transition: none; }
 }
+
+/* ===== Design system v3: arranque limpio, sigue el tema ===== */
+.hermes-boot.hermes-boot {
+  --bg: var(--color-bg);
+  --bg-panel: var(--color-panel);
+  --violet: var(--color-violet);
+  --violet-hot: var(--color-violet-hot);
+  --violet-dim: var(--color-line-2);
+  --node-blue: var(--color-blue);
+  --alert: var(--color-red);
+  --ok: var(--color-green);
+  --ink: var(--color-text);
+  --ink-dim: var(--color-text-dim);
+  --mono: var(--font-mono);
+  font-family: var(--font-sans);
+  background: var(--bg);
+}
+.hermes-boot .grid-bg, .hermes-boot .vignette, .hermes-boot .scanlines, .hermes-boot .frame { display: none; }
+.hermes-boot .hud-top { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
+.hermes-boot .hud-top b { font-weight: 600; font-size: 15px; letter-spacing: 0; color: var(--ink); text-shadow: none; }
+.hermes-boot .hud-top b span { color: var(--violet); }
+.hermes-boot .log { font-size: 13px; letter-spacing: 0; }
+.hermes-boot .log .line .txt { color: var(--ink-dim); }
+.hermes-boot .log .line .dots { border-bottom-color: var(--color-line); }
+.hermes-boot .log .line .st { color: var(--ink-dim); }
+.hermes-boot .log .line.ok .st { color: var(--ok); text-shadow: none; }
+.hermes-boot .cells i { background: var(--color-line); border: 0; border-radius: 3px; height: 6px; }
+.hermes-boot .cells i.on { background: var(--violet); border: 0; box-shadow: none; }
+.hermes-boot .pct { color: var(--ink); text-shadow: none; font-family: var(--mono); font-weight: 600; font-size: 22px; letter-spacing: 0; }
+.hermes-boot .pct small { color: var(--ink-dim); font-size: 12px; }
+.hermes-boot .status { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
+.hermes-boot .status .state { color: var(--ink); }
+.hermes-boot .stage.online .pct { color: var(--ok); text-shadow: none; }
+.hermes-boot .stage.online .status .state { color: var(--ok); text-shadow: none; }
 `;
 
 export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps) {
@@ -225,7 +260,19 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     /* ---------- palette ---------- */
-    const VIOLET = "139,124,248", BLUE = "95,180,249", HOT = "183,168,255", OK = "62,240,138";
+    // Paleta desde los tokens del tema (readToken devuelve hex; el canvas quiere "r,g,b").
+    const triplet = (name: string, fb: string) => {
+      const hex = readToken(name, fb).trim();
+      const m = hex.match(/^#([0-9a-f]{6})$/i);
+      if (!m) return fb.replace("#", "");
+      const n = parseInt(m[1], 16);
+      return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+    };
+    const VIOLET = triplet("--color-violet", "217,119,87"),
+      BLUE = triplet("--color-blue", "138,180,248"),
+      HOT = triplet("--color-violet-hot", "232,154,125"),
+      OK = triplet("--color-green", "108,203,143"),
+      INK = triplet("--color-text", "237,235,228");
 
     /* ---------- graph data ---------- */
     const N = 15;
@@ -255,12 +302,12 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
 
     /* ---------- boot log ---------- */
     const BOOT = [
-      { at: 4,   txt: "INICIANDO NÚCLEO HERMES",            st: "OK", ok: false },
-      { at: 22,  txt: "MONTANDO RED DE AGENTES",            st: "OK", ok: false },
-      { at: 45,  txt: "SINCRONIZANDO MEMORIA · 609 NODOS",  st: "OK", ok: false },
-      { at: 62,  txt: "ENLAZANDO PROYECTOS · 12 ACTIVOS",   st: "OK", ok: false },
-      { at: 80,  txt: "CALIBRANDO CANAL DE VOZ",            st: "OK", ok: false },
-      { at: 100, txt: "SISTEMA ONLINE",                     st: "●",  ok: true },
+      { at: 4,   txt: "Iniciando el núcleo",                st: "ok", ok: false },
+      { at: 22,  txt: "Conectando la red de agentes",       st: "ok", ok: false },
+      { at: 45,  txt: "Sincronizando la memoria",           st: "ok", ok: false },
+      { at: 62,  txt: "Enlazando proyectos",                st: "ok", ok: false },
+      { at: 80,  txt: "Calibrando el canal de voz",         st: "ok", ok: false },
+      { at: 100, txt: "Todo listo",                         st: "●",  ok: true },
     ];
 
     /* ---------- dom ---------- */
@@ -377,7 +424,7 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
         const label = labelsRef.current[n.idx];
         if (label && depth > .62 && g > .9 && shown > 30) {
           ctx!.font = "600 8px " + fontFamily;
-          ctx!.fillStyle = `rgba(207,201,234,${(.5 * depth).toFixed(3)})`;
+          ctx!.fillStyle = `rgba(${INK},${(.6 * depth).toFixed(3)})`;
           ctx!.fillText(label, p.x + rad + 4, p.y + 2.5);
         }
       }
@@ -420,9 +467,9 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
       if (shown >= 100 && phase === "boot") {
         phase = "hold"; doneAt = clock;
         stage.classList.add("online");
-        stateEl.textContent = "SISTEMA ONLINE";
+        stateEl.textContent = "Listo";
       } else if (phase === "boot") {
-        stateEl.textContent = shown < 40 ? "INICIANDO…" : shown < 80 ? "SINCRONIZANDO…" : "CASI LISTO…";
+        stateEl.textContent = shown < 40 ? "Iniciando…" : shown < 80 ? "Sincronizando…" : "Casi listo…";
       }
     }
 
@@ -490,8 +537,8 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
 
       <div className="stage" data-boot="stage">
         <div className="hud-top">
-          <b>HERMES <span>OS</span></b>
-          <span>BOOT SEQ · v5.0</span>
+          <b>Hermes</b>
+          <span>Arrancando</span>
         </div>
 
         <canvas className="net" ref={canvasRef} aria-hidden="true" />
@@ -514,8 +561,8 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
           </div>
           <div className="pct" data-boot="pct">0<small>%</small></div>
           <div className="status">
-            <span>RED DE AGENTES</span>
-            <span className="state" data-boot="state">INICIANDO…</span>
+            <span>Red de agentes</span>
+            <span className="state" data-boot="state">Iniciando…</span>
           </div>
         </div>
       </div>

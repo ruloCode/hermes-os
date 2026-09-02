@@ -9,22 +9,18 @@ export function Clock() {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  if (!now) return <div className="h-12 w-40" />;
+  if (!now) return <div className="h-9 w-28" />;
 
   const hh = String(now.getHours()).padStart(2, "0");
   const mm = String(now.getMinutes()).padStart(2, "0");
-  const ss = String(now.getSeconds()).padStart(2, "0");
-  const date = now
-    .toLocaleDateString("es-MX", { weekday: "short", day: "2-digit", month: "short" })
-    .toUpperCase();
+  const date = now.toLocaleDateString("es-CO", { weekday: "short", day: "numeric", month: "short" }).replace(/\.$/, "");
 
   return (
     <div className="text-right leading-none">
-      <div className="font-display text-xl font-bold tracking-widest glow-text-violet">
+      <div className="font-mono text-md font-medium text-text tabular-nums">
         {hh}:{mm}
-        <span className="text-base align-top text-text-dim">:{ss}</span>
       </div>
-      <div className="mt-1 text-2xs tracking-label text-text-dim">{date}</div>
+      <div className="mt-1 text-2xs text-text-dim">{date}</div>
     </div>
   );
 }

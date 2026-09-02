@@ -45,7 +45,6 @@ function EventRow({
         className="h-1.5 w-1.5 shrink-0 rounded-full"
         style={{
           background: toneVar(tone),
-          boxShadow: state === "en-curso" ? `0 0 6px ${toneVar(tone)}` : undefined,
           opacity: past ? 0.5 : 1,
         }}
       />

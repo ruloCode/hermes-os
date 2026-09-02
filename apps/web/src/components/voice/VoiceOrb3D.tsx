@@ -159,6 +159,9 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
     camera.position.set(0, 0, 4.2);
 
+    // Tema claro: el aditivo sobre fondo claro satura a blanco y el bloom
+    // pinta un halo sucio. Se compone en modo normal y con bloom mínimo.
+    const lightTheme = document.documentElement.getAttribute("data-theme") === "light";
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     // Tope 1.75: el bloom corre a pantalla completa, no en una caja pequeña.
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -184,6 +187,9 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
       uAccent: { value: color(ORB_COLORS.off.accent) },
       uRim: { value: color(ORB_COLORS.off.rim) },
       uHot: { value: color(["--color-violet-hot", "#c4b5fd"]) },
+      // Base del núcleo: negro en oscuro (la luz lo esculpe), porcelana cálida
+      // en claro (un orbe negro sobre papel se veía sucio).
+      uBase: { value: new THREE.Color(lightTheme ? "#efe9df" : "#000000") },
     };
 
     const orbGeo = new THREE.IcosahedronGeometry(1, 48);
@@ -214,7 +220,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
         }
       `,
       fragmentShader: `
-        uniform vec3 uAccent, uRim, uHot;
+        uniform vec3 uAccent, uRim, uHot, uBase;
         uniform float uAudio, uDim, uAux;
         varying vec3 vNormal; varying vec3 vWorld; varying float vDisp; varying float vM;
         void main(){
@@ -225,7 +231,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
           // CUERPO OSCURO + BORDE VIVO: así se lee esfera. Si el interior brilla
           // tanto como el borde, se aplana a disco.
           float crest = smoothstep(-0.10, 0.16, vDisp);
-          vec3 col = uAccent * (0.03 + crest * 0.14);
+          vec3 col = uBase + uAccent * (0.03 + crest * 0.14);
 
           // Luz de estudio falsa: volumen sin meter un light real
           float key = max(dot(N, normalize(vec3(0.6, 0.7, 0.5))), 0.0);
@@ -253,7 +259,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
     const atmoMat = new THREE.ShaderMaterial({
       uniforms,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: lightTheme ? THREE.NormalBlending : THREE.AdditiveBlending,
       side: THREE.BackSide,
       depthWrite: false,
       vertexShader: `
@@ -331,7 +337,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
     const dustMat = new THREE.ShaderMaterial({
       uniforms,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: lightTheme ? THREE.NormalBlending : THREE.AdditiveBlending,
       depthWrite: false,
       vertexShader: `
         uniform float uTime, uAudio, uDpr; attribute float aSeed; varying float vA;
@@ -498,7 +504,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
       shellMat.opacity = (0.06 + uniforms.uAudio.value * 0.16) * place.dim * place.aux;
       ringAMat.opacity = 0.34 * place.dim * place.aux;
       ringBMat.opacity = 0.24 * place.dim * place.aux;
-      bloom.strength = (0.38 + uniforms.uAudio.value * 0.22) * place.dim;
+      bloom.strength = (0.38 + uniforms.uAudio.value * 0.22) * place.dim * (lightTheme ? 0.12 : 1);
 
       composer.render();
       raf = requestAnimationFrame(step);

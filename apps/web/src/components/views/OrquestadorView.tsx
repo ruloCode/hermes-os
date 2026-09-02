@@ -1,5 +1,7 @@
 "use client";
 
+import { useTheme } from "@/state/ThemeProvider";
+
 // Vista ORQUESTADOR (home). Rediseño minimalista 2026-07.
 //
 // Por qué cambió: el home anterior repartía los píxeles al revés del uso real.
@@ -51,6 +53,7 @@ const ETIQUETA: Record<string, string> = {
 };
 
 export function OrquestadorView() {
+  const theme = useTheme();
   const { projects, memories, online } = useHermesData();
   const { events } = useAgentEvents();
   const ws = useWorkspace();
@@ -92,7 +95,7 @@ export function OrquestadorView() {
     <>
       {/* Canvas fijo a toda la ventana, detrás de la UI (pointer-events:none).
           En una caja del tamaño del orbe, anillos y partículas se recortan. */}
-      <VoiceOrb3D getAnchor={getAnchor} simplified={!hero} state={state} getVolume={getVolume} />
+      <VoiceOrb3D key={theme.resolved} getAnchor={getAnchor} simplified={!hero} state={state} getVolume={getVolume} />
 
       <div className="flex min-h-0 flex-1 gap-3">
         {/* ── Centro ───────────────────────────────────────────── */}

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTheme } from "@/state/ThemeProvider";
+
 // Tab MEMORIA: búsqueda unificada sobre TODO lo que Hermes sabe (memorias,
 // reuniones, ejecuciones, chats de texto/voz y vault) + conteos reales +
 // memorias recientes. Los resultados del vault abren en el DocViewer.
@@ -25,6 +27,7 @@ const SOURCE_META: Record<KnowledgeSource, { label: string; tone: Tone }> = {
 };
 
 export function MemoryView({ memories, online }: { memories: Memory[]; online: boolean }) {
+  const theme = useTheme();
   const openDoc = useDocViewer();
   const [mode, setMode] = useState<"buscar" | "grafo">("buscar");
   const [query, setQuery] = useState("");
@@ -95,7 +98,7 @@ export function MemoryView({ memories, online }: { memories: Memory[]; online: b
       {mode === "grafo" ? (
         <div className="min-h-0 flex-1 border border-line">
           {online ? (
-            <CodeGraph3D />
+            <CodeGraph3D key={theme.resolved} />
           ) : (
             <PanelState kind="offline" hint="El agente local no responde" />
           )}
