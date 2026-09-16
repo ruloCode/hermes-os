@@ -14,7 +14,8 @@
     "backfill:conversations": "pnpm --filter @hermes/agent exec tsx scripts/backfill-conversations.ts",
     "backfill:embeddings": "pnpm --filter @hermes/agent exec tsx scripts/backfill-embeddings.ts",
     "backfill:knowledge": "pnpm --filter @hermes/agent exec tsx scripts/backfill-knowledge.ts",
-    "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts"
+    "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "concurrently": "^9.2.4"

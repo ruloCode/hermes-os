@@ -40,6 +40,10 @@ import { createPiece, listPieces } from "../content/store.js";
 import { lightsCommand, LIGHT_ACTIONS } from "../lights.js";
 import { STAGES, daysInStage, isStuck, stageGates } from "@hermes/shared";
 import { OWNER } from "../owner.js";
+import { addProfileEntry, profileEntries, removeProfileEntry, replaceProfileEntry, PROFILE_MAX_CHARS } from "../profile.js";
+import { createSkill, getSkill, listSkills, patchSkill } from "../learning/skills.js";
+import { createScheduledTask, listScheduledTasks, updateScheduledTask } from "../scheduled/store.js";
+import { describeCron } from "../scheduled/cron.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -699,6 +703,152 @@ const controlLightsTool = tool(
   },
 );
 
+// ── Perfil del dueño (USER.md) ─────────────────────────────────────────
+
+const updateProfileTool = tool(
+  "update_profile",
+  `Mantiene el perfil de ${OWNER} (USER.md): lo que aprendes sobre quién es y cómo le gusta trabajar. Va en TODOS tus prompts, así que tiene un tope duro — si se llena, consolida en vez de insistir.`,
+  {
+    action: z.enum(["add", "replace", "remove", "list"]).describe("add=nueva entrada, replace=actualiza una, remove=borra, list=ver el perfil"),
+    entry: z.string().max(200).optional().describe("La entrada, en una línea (add/replace)"),
+    find: z.string().optional().describe("Fragmento de la entrada existente (replace/remove)"),
+  },
+  async ({ action, entry, find }) => {
+    if (action === "list") {
+      const entries = await profileEntries();
+      return text(
+        entries.length
+          ? `Perfil de ${OWNER} (${entries.reduce((n, e) => n + e.length + 3, 0)}/${PROFILE_MAX_CHARS} chars):\n${entries.map((e) => `- ${e}`).join("\n")}`
+          : "El perfil está vacío todavía.",
+      );
+    }
+    if (action === "add") {
+      if (!entry) return text("Falta `entry`.");
+      const r = await addProfileEntry(entry);
+      return text(`${r.message}\n\nPerfil vivo:\n${r.entries.map((e) => `- ${e}`).join("\n")}`);
+    }
+    if (action === "replace") {
+      if (!find || !entry) return text("replace necesita `find` (la vieja) y `entry` (la nueva).");
+      const r = await replaceProfileEntry(find, entry);
+      return text(`${r.message}\n\nPerfil vivo:\n${r.entries.map((e) => `- ${e}`).join("\n")}`);
+    }
+    if (!find) return text("remove necesita `find`.");
+    const r = await removeProfileEntry(find);
+    return text(r.message);
+  },
+);
+
+// ── Skills (memoria procedimental) ─────────────────────────────────────
+
+const manageSkillTool = tool(
+  "manage_skill",
+  "Guarda un procedimiento repetible como skill, o mejora una existente. Úsala cuando resuelvas algo multi-paso que se va a repetir — la próxima vez se carga sola en vez de deducirla de nuevo.",
+  {
+    action: z.enum(["create", "patch", "view", "list"]),
+    name: z.string().optional().describe("minúsculas-con-guiones, ej: publicar-pieza-estudio"),
+    description: z.string().max(120).optional().describe("CUÁNDO usarla, máx 120 chars. Es lo único que decide si se activa."),
+    body: z.string().optional().describe("Markdown: ## Cuándo usarla, los pasos concretos y ## Verificación"),
+    find: z.string().optional().describe("patch: fragmento EXACTO a reemplazar"),
+    replace: z.string().optional().describe("patch: el texto nuevo"),
+  },
+  async ({ action, name, description, body, find, replace }) => {
+    if (action === "list") {
+      const skills = await listSkills();
+      return text(
+        skills.length
+          ? skills
+              .map((s) => `- ${s.name} (v${s.version}, ${s.useCount} usos${s.pinned ? ", fijada" : ""}): ${s.description}`)
+              .join("\n")
+          : "Todavía no hay skills aprendidas.",
+      );
+    }
+    if (action === "view") {
+      if (!name) return text("Falta `name`.");
+      const doc = await getSkill(name);
+      return text(doc ? `# ${doc.name}\n${doc.description}\n\n${doc.body}` : `No existe la skill "${name}".`);
+    }
+    if (action === "create") {
+      if (!name || !description || !body) return text("create necesita `name`, `description` y `body`.");
+      const r = await createSkill({ name, description, body });
+      return text(r.message);
+    }
+    if (!name || !find || replace === undefined) return text("patch necesita `name`, `find` y `replace`.");
+    const r = await patchSkill({ name, find, replace });
+    return text(r.message);
+  },
+);
+
+// ── Tareas programadas ─────────────────────────────────────────────────
+
+const scheduleTaskTool = tool(
+  "schedule_task",
+  `Programa trabajo que debe repetirse solo, sin que ${OWNER} lo dispare ("cada lunes a las 8 dime qué está atascado"). Confirma SIEMPRE el horario que te devuelve la tool: si interpretaste mal el cron, ahí se ve.`,
+  {
+    title: z.string().describe("Nombre corto de la tarea"),
+    prompt: z.string().describe("Qué debe hacer, autocontenido — nadie estará mirando cuando corra"),
+    cron: z.string().describe("Cron de 5 campos en hora local: 'min hora dom mes dow'. Ej: '0 8 * * 1' = lunes 8am. También @daily/@hourly/@weekly."),
+    project: z.string().optional().describe("Slug del proyecto: la tarea corre en su repo"),
+    skills: z.array(z.string()).optional().describe("Skills a cargar antes de empezar"),
+    remember: z.boolean().optional().describe("Guardar el resultado de cada corrida como memoria"),
+  },
+  async ({ title, prompt, cron, project, skills, remember }) => {
+    const r = await createScheduledTask({
+      title,
+      prompt,
+      cron,
+      project: project ?? null,
+      skills: skills ?? [],
+      deliver: { notify: true, memory: Boolean(remember) },
+    });
+    return text(r.message);
+  },
+);
+
+const listScheduledTasksTool = tool(
+  "list_scheduled_tasks",
+  "Lista las tareas programadas con su horario, su próxima corrida y si alguna se bloqueó por fallar.",
+  { include_disabled: z.boolean().optional() },
+  async ({ include_disabled }) => {
+    const tasks = await listScheduledTasks(include_disabled ?? false);
+    if (!tasks.length) return text("No hay tareas programadas.");
+    return text(
+      tasks
+        .map((t) => {
+          const when = describeCron(t.cron, t.tz);
+          const next = t.next_run_at
+            ? new Date(t.next_run_at).toLocaleString("es-CO", { timeZone: t.tz })
+            : "—";
+          const state = t.blocked_reason
+            ? `BLOQUEADA: ${t.blocked_reason}`
+            : t.enabled
+              ? `próxima: ${next}`
+              : "pausada";
+          return `- [${t.id.slice(0, 8)}] ${t.title} — ${when} · ${state}${t.last_status === "error" ? " · última corrida falló" : ""}`;
+        })
+        .join("\n"),
+    );
+  },
+);
+
+const manageScheduledTaskTool = tool(
+  "manage_scheduled_task",
+  "Pausa, reactiva o desbloquea una tarea programada (usa list_scheduled_tasks para el id).",
+  {
+    id: z.string().describe("id de la tarea (los 8 primeros chars bastan si son únicos)"),
+    action: z.enum(["pause", "resume", "unblock"]),
+  },
+  async ({ id, action }) => {
+    const tasks = await listScheduledTasks(true);
+    const match = tasks.find((t) => t.id === id || t.id.startsWith(id));
+    if (!match) return text(`No encontré una tarea con id "${id}".`);
+    const r = await updateScheduledTask(match.id, {
+      enabled: action !== "pause",
+      unblock: action === "unblock",
+    });
+    return text(r.message);
+  },
+);
+
 export const hermesMcpServer = createSdkMcpServer({
   name: "hermes",
   version: "0.1.0",
@@ -730,6 +880,11 @@ export const hermesMcpServer = createSdkMcpServer({
     createContentIdeaTool,
     listContentPiecesTool,
     controlLightsTool,
+    updateProfileTool,
+    manageSkillTool,
+    scheduleTaskTool,
+    listScheduledTasksTool,
+    manageScheduledTaskTool,
   ],
 });
 
@@ -762,4 +917,9 @@ export const HERMES_TOOL_NAMES = [
   "mcp__hermes__create_content_idea",
   "mcp__hermes__list_content_pieces",
   "mcp__hermes__control_lights",
+  "mcp__hermes__update_profile",
+  "mcp__hermes__manage_skill",
+  "mcp__hermes__schedule_task",
+  "mcp__hermes__list_scheduled_tasks",
+  "mcp__hermes__manage_scheduled_task",
 ];

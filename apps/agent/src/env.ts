@@ -87,6 +87,21 @@ export const env = {
   GRAPHIFY_BIN: process.env.GRAPHIFY_BIN || resolve(homedir(), ".local/bin/graphify"),
   // Repo indexado que responde query_code_graph (piloto: este monorepo).
   CODE_GRAPH_ROOT: process.env.CODE_GRAPH_ROOT || root,
+  // STT local (whisper.cpp) — la red de seguridad cuando los proveedores de
+  // nube fallan (sin créditos, sin internet) o el audio pasa de 25 MB. Rutas
+  // absolutas por la misma razón que graphify: launchd corre con PATH mínimo.
+  WHISPER_BIN: process.env.WHISPER_BIN || "/opt/homebrew/bin/whisper-cli",
+  WHISPER_MODEL:
+    process.env.WHISPER_MODEL || resolve(homedir(), ".cache/whisper-models/ggml-large-v3-turbo.bin"),
+  FFMPEG_BIN: process.env.FFMPEG_BIN || "/opt/homebrew/bin/ffmpeg",
+  // Aprendizaje (revisión en background tras cada turno → propuestas de
+  // skill/perfil/memoria). "" = activo con aprobación · "auto" = aplica sin
+  // preguntar · "off" = no revisa. El modelo de la revisión es barato a
+  // propósito: corre después de CADA turno con señal.
+  LEARNING: (process.env.HERMES_LEARNING || "").toLowerCase(),
+  LEARNING_MODEL: process.env.HERMES_LEARNING_MODEL || "claude-haiku-4-5",
+  // Zona horaria por defecto de las tareas programadas (cron en hora local).
+  SCHEDULED_TZ: process.env.HERMES_SCHEDULED_TZ || process.env.GOOGLE_CALENDAR_TZ || "America/Bogota",
 };
 
 export const REPO_ROOT = root;

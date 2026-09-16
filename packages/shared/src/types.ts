@@ -263,7 +263,9 @@ export interface AgentActivityEvent {
     | "meeting_live"
     | "gestures"
     | "browser"
-    | "lights";
+    | "lights"
+    | "scheduled"
+    | "learning";
   taskId?: string;
   sessionId?: string;
   toolName?: string;
@@ -1428,4 +1430,95 @@ export interface HookPerformanceRow {
   engaged_views: number | null;
   avg_view_pct: number | null;
   subs_gained: number | null;
+}
+
+// ── Aprendizaje (skills + perfil + propuestas) ─────────────────────────
+
+/** Skill del plugin local de Hermes (~/.hermes-os/plugin/skills/<name>/SKILL.md). */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  version: string;
+  /** "agent" = la creó Hermes (el curador puede archivarla); "human" = intocable por el curador. */
+  createdBy: "agent" | "human";
+  createdAt: string | null;
+  pinned: boolean;
+  useCount: number;
+  lastUsedAt: string | null;
+  state: "active" | "stale" | "archived";
+  /** Líneas del cuerpo (sin frontmatter). */
+  lines: number;
+}
+
+export type LearningProposalKind = "skill_create" | "skill_patch" | "profile" | "memory";
+export type LearningProposalStatus = "pending" | "applied" | "rejected" | "failed";
+
+/** Propuesta de la revisión en background: nada entra al perfil ni a las skills sin decisión (salvo HERMES_LEARNING=auto). */
+export interface LearningProposal {
+  id: string;
+  kind: LearningProposalKind;
+  title: string;
+  /** Argumentos de la acción (los mismos que recibiría la tool correspondiente). */
+  payload: Record<string, unknown>;
+  rationale: string;
+  source: "chat" | "task" | "run" | "scheduled";
+  source_ref: string | null;
+  status: LearningProposalStatus;
+  error: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+// ── Tareas programadas ─────────────────────────────────────────────────
+
+export type ScheduledRunStatus = "ok" | "error";
+
+export interface ScheduledTaskDelivery {
+  /** Notificación nativa al terminar (default true). */
+  notify?: boolean;
+  /** Guardar el resultado como memoria tipo daily (default false). */
+  memory?: boolean;
+}
+
+export interface ScheduledTask {
+  id: string;
+  title: string;
+  prompt: string;
+  /** Expresión cron de 5 campos (min hora dom mes dow) o alias @daily/@hourly/@weekly. */
+  cron: string;
+  tz: string;
+  /** Skills a aplicar (nombres del plugin hermes). */
+  skills: string[];
+  /** Modelo CONGELADO al crear la tarea: cambiar HERMES_MODEL no la mueve. */
+  model: string | null;
+  project: string | null;
+  deliver: ScheduledTaskDelivery;
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_status: ScheduledRunStatus | null;
+  last_output: string | null;
+  consecutive_failures: number;
+  /** Reintento rápido (5/15/30 min) cuando la corrida falló SIN hacer trabajo. */
+  retry_at: string | null;
+  /** Motivo por el que dejó de correr sola (3 fallos seguidos). null = sana. */
+  blocked_reason: string | null;
+  incident_signature: string | null;
+  incident_acked: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduledTaskRun {
+  id: string;
+  task_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: ScheduledRunStatus;
+  output: string | null;
+  error: string | null;
+  tool_calls: number;
+  duration_ms: number | null;
+  attempt: number;
 }

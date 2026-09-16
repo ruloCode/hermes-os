@@ -9,6 +9,8 @@ import { balancesToText } from "../finance/wallets.js";
 import { habitsToday } from "../habits/store.js";
 import { listGoals } from "../habits/goals.js";
 import { OWNER, soulPromptBlock } from "../owner.js";
+import { profilePromptBlock } from "../profile.js";
+import { listSkills } from "../learning/skills.js";
 
 /**
  * Contexto de ASESOR FINANCIERO para el chat de la página /vida (scope
@@ -83,6 +85,9 @@ Reglas:
   - query_code_graph: preguntas sobre la estructura del código de hermes-os (qué depende de qué, dónde vive un módulo, cómo se conectan dos partes). Prefiérela sobre leer archivos a ciegas.
   - get_project_status / update_project_note: leer y persistir estado de proyectos.
   - capture_idea: ideas sueltas van al Inbox del vault.
+  - update_profile: el perfil de ${OWNER} (USER.md) — algo duradero sobre él o sobre cómo trabajar con él. Tiene un tope duro de caracteres: si se llena, consolida entradas parecidas en vez de insistir. NO es para hechos de un proyecto (eso es save_memory).
+  - schedule_task / list_scheduled_tasks: trabajo que debe repetirse sin que nadie lo dispare ("cada lunes a las 8…", "todos los días al final del día…"). Confirma SIEMPRE la interpretación del horario que te devuelve la tool.
+  - manage_skill: cuando acabes de resolver un procedimiento multi-paso que se va a repetir, guárdalo como skill (action='create'); si usaste una y se quedó corta, mejórala (action='patch'). No dupliques las que ya están listadas abajo.
   - create_linear_issue / list_linear_issues: manejo de tareas en Linear. Al crear un issue, PRIMERO junta contexto real (get_project_status, search_knowledge, query_code_graph) y luego redacta: título imperativo específico; description en markdown con qué/por qué, archivos o rutas relevantes y criterios de aceptación; y prompt = un prompt AUTOCONTENIDO listo para copiar-pegar en Claude Code (ruta local del repo, instrucciones concretas, criterios de aceptación y cómo verificar) — se publica al final del issue como bloque "Copy prompt". Lista antes de crear si sospechas duplicado; pasa project (slug del vault) para que quede etiquetado.
   - mcp__linear__* (MCP oficial de Linear, si está conectado): para TODO lo demás de Linear — actualizar estado/prioridad/asignación, comentar, buscar issues o proyectos, ciclos. Para CREAR issues usa SIEMPRE create_linear_issue (garantiza el bloque Copy prompt); nunca crees issues con el MCP.
   - mcp__chrome-devtools__* (si están disponibles): NAVEGAR la web de verdad en un Chrome dedicado VISIBLE (perfil "Hermes", con sesiones persistidas). Flujo: navega a la página → toma un snapshot para ver los elementos y sus uids → interactúa (click/llenar) con esos uids → verifica con otro snapshot. ${OWNER} está VIENDO esa ventana: no cierres pestañas que no abriste. Si un sitio pide login, no intentes credenciales — reporta que ${OWNER} inicie sesión una vez en ese perfil.
@@ -92,6 +97,12 @@ Reglas:
   // Persona y preferencias del dueño (SOUL.md, fuera del repo)
   const soul = soulPromptBlock();
   if (soul) parts.push(soul);
+
+  // Perfil que Hermes mantiene solo (USER.md). Snapshot al abrir la sesión:
+  // lo que se escriba durante la conversación manda desde la SIGUIENTE, para
+  // no reconstruir el prompt a mitad y tirar el prefijo cacheado.
+  const profile = await profilePromptBlock();
+  if (profile) parts.push(profile);
 
   // Perfil del usuario (si existe)
   try {
@@ -187,6 +198,22 @@ Si necesitas más detalle, usa get_project_status('${fp.slug}') o lee su nota en
         lines.join("\n") +
         `\n\nSi necesitas más contexto sobre algo mencionado aquí, amplía con search_knowledge.`,
     );
+  }
+
+  // Índice de skills: solo nombre y descripción. El cuerpo lo carga el CLI
+  // cuando hace falta (progressive disclosure) — por eso la descripción es
+  // lo único que decide si una skill se activa o se queda dormida.
+  try {
+    const skills = (await listSkills()).filter((s) => s.state !== "archived");
+    if (skills.length) {
+      parts.push(
+        `# Procedimientos aprendidos (skills)\n` +
+          `Hermes ya resolvió estos flujos antes. Si el pedido encaja con uno, cárgalo con /hermes:<nombre> ANTES de improvisar:\n` +
+          skills.map((s) => `- **${s.name}**: ${s.description}`).join("\n"),
+      );
+    }
+  } catch (err) {
+    console.error("[system-prompt] skills:", err);
   }
 
   return parts.join("\n\n---\n\n");

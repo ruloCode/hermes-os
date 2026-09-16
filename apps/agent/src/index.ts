@@ -202,6 +202,20 @@ import {
 import { generatePartVariants } from "./content/variants.js";
 import { pieceChatTurn } from "./content/chat.js";
 import { buildDailyBrief } from "./brief.js";
+import { ensurePlugin, listSkills, setPinned, deleteSkill, getSkill, archiveSkill } from "./learning/skills.js";
+import { curateSkills, decideProposal, listProposals, countPendingProposals } from "./learning/curator.js";
+import { reviewTurnInBackground, learningEnabled } from "./learning/review.js";
+import { profileEntries, addProfileEntry, removeProfileEntry, PROFILE_MAX_CHARS } from "./profile.js";
+import {
+  createScheduledTask,
+  deleteScheduledTask,
+  getScheduledTask,
+  listScheduledTasks,
+  listTaskRuns,
+  updateScheduledTask,
+} from "./scheduled/store.js";
+import { runScheduledTask, scheduledSweep } from "./scheduled/runner.js";
+import { describeCron } from "./scheduled/cron.js";
 import { openInCursor } from "./agent/editor.js";
 import {
   listClaudeSessions,
@@ -354,6 +368,7 @@ app.post("/v1/chat/completions", async (c) => {
     };
 
     let assistantText = "";
+    const toolsUsed: string[] = [];
     const result = await runAgentTurn({
       prompt: lastUser,
       resumeSessionId: resume,
@@ -365,7 +380,10 @@ app.post("/v1/chat/completions", async (c) => {
       // Pasos agénticos del turno: la consola los pinta en el hilo en vez de
       // un "pensando…" opaco. Van por el stream (no por el bus global) para
       // que cada paso quede atado al tab que lo disparó.
-      onTool: (step) => void send({ hermes: { tool: step } }),
+      onTool: (step) => {
+        toolsUsed.push(step.name);
+        void send({ hermes: { tool: step } });
+      },
       onDelta: (t) => {
         assistantText += t;
         void send(chunk(t));
@@ -382,6 +400,15 @@ app.post("/v1/chat/completions", async (c) => {
       assistantText || result.finalText,
       clientSession,
     );
+    // Aprendizaje: una revisión barata mira el turno y propone skills/perfil.
+    // Va después de responder y en otro proceso: no toca este turno ni su caché.
+    reviewTurnInBackground({
+      userText: lastUser,
+      assistantText: assistantText || result.finalText,
+      tools: toolsUsed,
+      source: "chat",
+      sourceRef: result.sdkSessionId,
+    });
     await send(chunk(null, "stop"));
     await send("[DONE]");
     await queue;
@@ -2456,6 +2483,109 @@ app.get("/calendar/upcoming", async (c) => {
 // Estado de los jobs periódicos (panel AUTOMATIZACIONES).
 app.get("/jobs", (c) => c.json(listJobs()));
 
+// ── Aprendizaje: skills, propuestas y perfil ──────────────────────────
+
+app.get("/learning/skills", async (c) => c.json(await listSkills()));
+
+app.get("/learning/skills/:name", async (c) => {
+  const doc = await getSkill(c.req.param("name"));
+  return doc ? c.json(doc) : c.json({ error: "no existe" }, 404);
+});
+
+app.post("/learning/skills/:name/pin", async (c) => {
+  const { pinned } = await c.req.json<{ pinned?: boolean }>().catch(() => ({ pinned: true }));
+  return c.json(await setPinned(c.req.param("name"), pinned !== false));
+});
+
+app.post("/learning/skills/:name/archive", async (c) =>
+  c.json(await archiveSkill(c.req.param("name"))),
+);
+
+app.delete("/learning/skills/:name", async (c) => c.json(await deleteSkill(c.req.param("name"))));
+
+app.get("/learning/proposals", async (c) =>
+  c.json(await listProposals(c.req.query("status") || "pending")),
+);
+
+app.post("/learning/proposals/:id/:decision", async (c) => {
+  const decision = c.req.param("decision");
+  if (decision !== "apply" && decision !== "reject") {
+    return c.json({ ok: false, message: "decision debe ser apply o reject" }, 400);
+  }
+  return c.json(await decideProposal(c.req.param("id"), decision));
+});
+
+app.get("/learning/profile", async (c) => {
+  const entries = await profileEntries();
+  return c.json({
+    entries,
+    usedChars: entries.reduce((n, e) => n + e.length + 3, 0),
+    maxChars: PROFILE_MAX_CHARS,
+    enabled: learningEnabled(),
+    pending: await countPendingProposals(),
+  });
+});
+
+app.post("/learning/profile", async (c) => {
+  const { entry } = await c.req.json<{ entry?: string }>();
+  if (!entry) return c.json({ ok: false, message: "falta entry" }, 400);
+  return c.json(await addProfileEntry(entry));
+});
+
+app.delete("/learning/profile", async (c) => {
+  const find = c.req.query("find");
+  if (!find) return c.json({ ok: false, message: "falta ?find=" }, 400);
+  return c.json(await removeProfileEntry(find));
+});
+
+// ── Tareas programadas ────────────────────────────────────────────────
+
+app.get("/scheduled", async (c) => {
+  const tasks = await listScheduledTasks(true);
+  return c.json(
+    tasks.map((t) => ({ ...t, when: describeCron(t.cron, t.tz) })),
+  );
+});
+
+app.post("/scheduled", async (c) => {
+  const body = await c.req.json<Record<string, any>>();
+  if (!body.title || !body.prompt || !body.cron) {
+    return c.json({ ok: false, message: "title, prompt y cron son obligatorios" }, 400);
+  }
+  const res = await createScheduledTask({
+    title: String(body.title),
+    prompt: String(body.prompt),
+    cron: String(body.cron),
+    tz: body.tz ? String(body.tz) : undefined,
+    skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
+    project: body.project ? String(body.project) : null,
+    deliver: body.deliver ?? { notify: true },
+    createdBy: "dashboard",
+  });
+  return c.json(res, res.ok ? 200 : 400);
+});
+
+app.patch("/scheduled/:id", async (c) => {
+  const body = await c.req.json<Record<string, any>>();
+  const res = await updateScheduledTask(c.req.param("id"), body);
+  return c.json(res, res.ok ? 200 : 400);
+});
+
+app.delete("/scheduled/:id", async (c) => c.json(await deleteScheduledTask(c.req.param("id"))));
+
+app.get("/scheduled/:id/runs", async (c) => c.json(await listTaskRuns(c.req.param("id"))));
+
+// Correr una tarea AHORA (botón "▶" del panel). Async: responde de una y el
+// resultado se ve en la actividad y en el historial de corridas.
+app.post("/scheduled/:id/run", async (c) => {
+  const task = await getScheduledTask(c.req.param("id"));
+  if (!task) return c.json({ ok: false, message: "no existe" }, 404);
+  void runScheduledTask(task).catch((err) =>
+    console.error("[hermes] run manual:", String(err).slice(0, 200)),
+  );
+  return c.json({ ok: true, message: `"${task.title}" lanzada.` });
+});
+
 // Serie horaria de actividad (área chart 24h).
 app.get("/activity/hourly", async (c) =>
   c.json(await activityHourly(Math.min(Number(c.req.query("hours")) || 24, 168))),
@@ -2522,6 +2652,7 @@ app.get("/dashboard", async (c) => {
 
 // ── Boot ───────────────────────────────────────────────────────────────
 startSystemSampler(); // sampler de CPU (5s) para GET /system
+void ensurePlugin(); // plugin local de skills (~/.hermes-os/plugin) listo antes del primer turno
 void readProjects(); // primer parse + sync a projects_cache
 void reconcileRunningTasks(); // arregla tareas 'running' huérfanas de un reinicio
 void recoverOrphanLiveMeetings(); // ingesta juntas en vivo que un reinicio dejó a medias
@@ -2554,6 +2685,19 @@ registerJob("content-metrics-sync", 6 * 60 * 60_000, metricsSweep, (r) =>
   r
     ? `${r.videos} video(s): ${r.rows} fila(s) de métricas, ${r.retentionPoints} puntos de retención${r.dataError ? ` · Data API: ${r.dataError}` : ""}${r.analyticsSkipped ? ` · Analytics: ${r.analyticsSkipped}` : ""}`
     : null,
+);
+// Tareas programadas: barrido cada minuto. El estado vive en Postgres (no en
+// este registry), así que es escanea-y-actúa: si el agente estuvo caído, al
+// volver corre lo que quedó vencido en vez de perderlo.
+registerJob("scheduled-tasks", 60_000, scheduledSweep, (r) =>
+  r
+    ? `${r.ran} tarea(s) ejecutada(s)${r.failed ? `, ${r.failed} con error` : ""}${r.blocked.length ? ` · BLOQUEADAS: ${r.blocked.join(", ")}` : ""}`
+    : null,
+);
+// Curador de skills: archiva (nunca borra) las que llevan 45 días sin usarse.
+// Una vez al día basta — es higiene, no una carrera.
+registerJob("skill-curator", 24 * 60 * 60_000, curateSkills, (r) =>
+  r && r.archived.length ? `${r.archived.length} skill(s) archivada(s): ${r.archived.join(", ")}` : null,
 );
 // Grafo de código (graphify): refresca hermes-os + proyectos activos con repo git.
 registerJob("code-graph-update", 6 * 60 * 60_000, updateCodeGraph, (r) =>

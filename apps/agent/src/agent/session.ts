@@ -10,6 +10,9 @@ import { setPresence } from "../presence.js";
 import { supabase } from "../supabase.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { checkTool } from "./guardrails.js";
+import { childEnv } from "./child-env.js";
+import { PLUGIN_DIR } from "../learning/skills.js";
+import { reviewTurnInBackground } from "../learning/review.js";
 import { hermesMcpServer, HERMES_TOOL_NAMES } from "./tools.js";
 import { linearEnabled } from "../linear.js";
 import { ensureCdpChrome, CDP_URL } from "../browser.js";
@@ -82,6 +85,12 @@ export interface RunTurnOptions {
    * `claude` abierto en ese repo (Cursor) ve la MISMA conversación.
    */
   cwd?: string;
+  /**
+   * Modelo de ESTE turno. Lo usan las tareas programadas, que congelan su
+   * modelo al crearse: cambiar HERMES_MODEL después no debe mover en silencio
+   * el destino de una tarea vieja. Sin él, el default global.
+   */
+  model?: string;
   onDelta?: (text: string) => void;
   /** Avisa el session id del SDK apenas llega el init (para tabs/resume). */
   onSession?: (sdkSessionId: string) => void;
@@ -137,10 +146,17 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
       options: {
         cwd: opts.cwd || env.VAULT_PATH || process.cwd(),
         systemPrompt,
-        model: process.env.HERMES_MODEL || undefined,
+        model: opts.model || process.env.HERMES_MODEL || undefined,
         maxTurns: 40,
         includePartialMessages: true,
         settingSources: [],
+        // Entorno saneado: el hijo NO hereda las llaves del .env (ver
+        // child-env.ts). Las tools de Hermes corren en ESTE proceso.
+        env: childEnv(),
+        // Skills aprendidas (~/.hermes-os/plugin): el CLI las descubre del
+        // disco y solo carga el cuerpo cuando la description matchea, así
+        // el costo en contexto es el índice y no todos los procedimientos.
+        plugins: [{ type: "local" as const, path: PLUGIN_DIR }],
         resume: opts.resumeSessionId,
         mcpServers: {
           hermes: hermesMcpServer,
@@ -350,6 +366,16 @@ export function startTask(prompt: string): HermesTask {
         ? `❌ falló: ${prompt.slice(0, 80)}`
         : `✅ terminó: ${prompt.slice(0, 80)}`,
     );
+    // Las tareas por voz son la mejor fuente de procedimientos: se disparan
+    // solas y suelen ser multi-paso. La revisión mira el resultado, no el turno.
+    if (!result.isError) {
+      reviewTurnInBackground({
+        userText: prompt,
+        assistantText: result.finalText,
+        source: "task",
+        sourceRef: task.id,
+      });
+    }
   })();
 
   return task;
