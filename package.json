@@ -1,7 +1,8 @@
 {
   "name": "hermes-os",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
   "description": "Hermes OS — AI Operating System personal de RuloCode: voz en tiempo real, agente ejecutor local y memoria compartida",
   "scripts": {
     "dev": "concurrently -n web,agent -c cyan,magenta \"pnpm --filter @hermes/web dev\" \"pnpm --filter @hermes/agent dev\"",

@@ -1,10 +1,19 @@
 # ⚡ Hermes OS
 
 <p align="center">
+  <a href="https://code.claude.com/docs/en/agent-sdk"><img alt="Claude Agent SDK" src="https://img.shields.io/badge/Claude%20Agent%20SDK-local--first-D97757?logo=anthropic&logoColor=white"></a>
+  <a href="https://github.com/ruloCode/hermes-os/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/ruloCode/hermes-os?style=flat&color=D97757"></a>
+  <a href="LICENSE"><img alt="Licencia MIT" src="https://img.shields.io/badge/licencia-MIT-555"></a>
+  <img alt="macOS · Node 22 · pnpm" src="https://img.shields.io/badge/macOS%20%C2%B7%20Node%2022%20%C2%B7%20pnpm-informational?color=555">
+</p>
+
+<p align="center">
   <img src="docs/img/dashboard.png" alt="Dashboard de Hermes OS: orbe de voz, saludo y consola de Claude Code" width="900">
 </p>
 
 Sistema operativo de IA personal, **local-first** y en español: un dashboard estilo "AGENTIC OS" con voz en tiempo real, un agente ejecutor que corre en tu máquina con el **Claude Agent SDK** (sin API key: usa tu suscripción de Claude Code) y memoria persistente en Supabase. Conoce tu vault de Obsidian, tus tareas de Linear, tus reuniones, tu calendario y tu producción de contenido — y todo lo que muestra es real.
+
+> **English** — Hermes OS is a local-first personal AI operating system (UI and docs in Spanish, code in English): real-time voice, an executor agent that runs on your machine with the **Claude Agent SDK** (no API key — it uses your Claude Code subscription), persistent memory in Supabase/pgvector, a live meeting copilot, Linear-first tasks, a content studio and hand-gesture control. Everything on screen is real data.
 
 ```
 Browser (dashboard :31415)  ─┬─ Voz: ElevenLabs Agents (WebRTC) → client tools en el browser

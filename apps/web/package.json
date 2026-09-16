@@ -2,6 +2,7 @@
   "name": "@hermes/web",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "predev": "node scripts/setup-mediapipe.mjs",
     "dev": "next dev -p ${NEXT_PUBLIC_WEB_PORT:-31415}",
