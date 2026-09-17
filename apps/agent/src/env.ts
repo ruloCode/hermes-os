@@ -68,6 +68,8 @@ export const env = {
   // Navegación profunda por voz (chrome-devtools-mcp sobre un Chrome CDP
   // dedicado). "off" no registra el MCP ni expone /browser/navigate.
   BROWSER_AGENT_ENABLED: (process.env.HERMES_BROWSER_AGENT || "").toLowerCase() !== "off",
+  // Sala de agentes 3D (/sala): "off" apaga /sala/* y el token por clave.
+  SALA_ENABLED: (process.env.HERMES_SALA || "").toLowerCase() !== "off",
   // Linear (manejo de tareas). Personal API key (Settings → API en Linear).
   // Sin key, las tools de Linear responden con el CTA de configuración.
   LINEAR_API_KEY: process.env.LINEAR_API_KEY || "",

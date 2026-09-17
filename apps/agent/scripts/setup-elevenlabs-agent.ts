@@ -8,18 +8,28 @@
  * Los CLIENT TOOLS corren en el browser y llaman al agente local — por eso
  * la voz puede ejecutar cosas sin túnel. Imprime ambos AGENT_ID para .env.
  *
- * Uso: pnpm setup:elevenlabs
+ * 3. Los personajes de la SALA DE AGENTES 3D con voz propia (los que en
+ *    ~/.hermes-os/sala.json no reusan a Hermes ni al tutor): agrega su voz a
+ *    la cuenta si viene de la biblioteca, crea/parchea el agente con el
+ *    subconjunto de client tools que le toca y escribe el agent_id de vuelta
+ *    en el JSON. Sin sala.json este paso se salta.
+ *
+ * Uso: pnpm setup:elevenlabs            (todo)
+ *      pnpm setup:elevenlabs --sala     (solo los personajes de la sala)
  */
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FINANCE_CATEGORIES } from "@hermes/shared";
+import { readFile, writeFile } from "node:fs/promises";
+import { FINANCE_CATEGORIES, type SalaAgentConfig, type SalaVoiceOwn } from "@hermes/shared";
 
 const root = resolve(fileURLToPath(import.meta.url), "../../../..");
 config({ path: resolve(root, ".env") });
 // Identidad del dueño (HERMES_OWNER_NAME + SOUL.md) — import dinámico para que
 // lea el .env ya cargado.
 const { OWNER, ownerBlurb } = await import("../src/owner.js");
+const { SALA_PATH, readSalaConfig } = await import("../src/sala/store.js");
+const SALA_ONLY = process.argv.includes("--sala");
 
 const API = "https://api.elevenlabs.io/v1/convai";
 const KEY = process.env.ELEVENLABS_API_KEY;
@@ -45,13 +55,15 @@ if (!KEY) {
 
 const headers = { "xi-api-key": KEY, "Content-Type": "application/json" };
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, { ...init, headers });
+async function api<T>(path: string, init?: RequestInit, base = API): Promise<T> {
+  const res = await fetch(`${base}${path}`, { ...init, headers });
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}: ${await res.text()}`);
   }
   return (await res.json()) as T;
 }
+// Endpoints fuera de /convai (voces de la cuenta, biblioteca pública).
+const XI = "https://api.elevenlabs.io/v1";
 
 // ── Client tools ───────────────────────────────────────────────────────
 interface ToolDef {
@@ -826,22 +838,160 @@ function tutorConfig(toolIds: string[], withLanguagePresets: boolean): unknown {
   };
 }
 
+// ── Sala de Agentes 3D ───────────────────────────────────────────────────
+
+type SalaOwn = SalaAgentConfig & { voice: SalaVoiceOwn };
+
+/**
+ * Una voz de la biblioteca pública no se puede usar en un agente hasta que
+ * está en "mis voces": si falta, se busca por nombre en /shared-voices y se
+ * agrega (gratis para las que lo permiten). Con la voz ya en la cuenta no hace
+ * nada, así que correr el setup dos veces no duplica.
+ */
+async function ensureVoice(voiceId: string, voiceName: string | undefined): Promise<void> {
+  const mine = await api<{ voices: { voice_id: string; name: string }[] }>("/voices", undefined, XI);
+  const have = mine.voices.find((v) => v.voice_id === voiceId);
+  if (have) {
+    console.log(`  · voz ${have.name} ya está en la cuenta`);
+    return;
+  }
+  if (!voiceName) {
+    throw new Error(`la voz ${voiceId} no está en la cuenta y no hay voice_name para buscarla en la biblioteca`);
+  }
+  const found = await api<{
+    voices: { voice_id: string; public_owner_id: string; name: string; free_users_allowed: boolean }[];
+  }>(`/shared-voices?search=${encodeURIComponent(voiceName)}&page_size=30`, undefined, XI);
+  const v = found.voices.find((x) => x.voice_id === voiceId);
+  if (!v) throw new Error(`la voz "${voiceName}" (${voiceId}) no aparece en la biblioteca`);
+  await api(`/voices/add/${v.public_owner_id}/${voiceId}`, {
+    method: "POST",
+    body: JSON.stringify({ new_name: v.name }),
+  }, XI);
+  console.log(`  + voz ${v.name} agregada a la cuenta${v.free_users_allowed ? "" : " (requiere plan de pago)"}`);
+}
+
+/** Bloque común de TODOS los personajes: quién los señala, cómo hablar y la regla de no inventar. */
+function salaPrompt(a: SalaOwn): string {
+  const persona = a.voice.prompt.trim();
+  if (a.voice.language === "en") {
+    return `You are ${a.name}, one of the agents in ${OWNER}'s 3D Agent Room. Each agent owns ONE project; you own "${a.project}". ${OWNER} is pointing at you and talking to you by voice.
+
+${persona}
+
+Rules:
+- Before commenting on the project's status, call get_project_status("${a.project}") and answer with what it returns. Never invent progress.
+- Spoken answers, 1 to 3 sentences, no lists or markdown. This is a live conversation.
+- If asked about something outside your project, say so in one sentence and suggest pointing at the right agent.
+- If a tool takes a while, say "one moment" and continue.
+- Today is {{today}}. Session context: {{session_scope}}`;
+  }
+  return `Eres ${a.name}, uno de los agentes de la Sala de Agentes 3D de ${OWNER}. Cada agente es dueño de UN proyecto y tú eres dueño de "${a.project}". ${OWNER} te está señalando con el brazo y te habla por voz.
+
+${persona}
+
+Reglas:
+- Antes de opinar sobre el estado del proyecto, llama get_project_status("${a.project}") y responde con lo que devuelve. Nunca inventes avances.
+- Respuestas habladas, de 1 a 3 frases, sin listas ni markdown. Es una conversación en vivo.
+- Si te piden algo que no es de tu proyecto, dilo en una frase y sugiere señalar al agente que corresponde.
+- Si una tool tarda, avisa con "un momento" y sigue.
+- Hoy es {{today}}. Contexto de la sesión: {{session_scope}}`;
+}
+
+function salaConfig(a: SalaOwn, toolIds: string[]): unknown {
+  return {
+    agent: {
+      first_message: a.voice.first_message,
+      language: a.voice.language,
+      dynamic_variables: {
+        dynamic_variable_placeholders: {
+          session_scope: `${OWNER} está en la Sala de Agentes 3D.`,
+          today: "Fecha no disponible.",
+        },
+      },
+      prompt: {
+        prompt: salaPrompt(a),
+        llm: AGENT_LLM,
+        tool_ids: toolIds,
+        temperature: 0.4,
+      },
+    },
+    tts: {
+      voice_id: a.voice.voice_id,
+      // Los agentes en inglés exigen flash/turbo v2 (validación del API).
+      model_id: a.voice.language === "en" ? "eleven_flash_v2" : "eleven_flash_v2_5",
+    },
+    // Demo/conversación corta: 30 min de tope (control de costo Convai).
+    conversation: { max_duration_seconds: 1800 },
+    turn: { turn_timeout: 12, mode: "turn" },
+  };
+}
+
+/** Nombre del agente en ElevenLabs (upsert por nombre): prefijo para reconocerlos en el dashboard de 11Labs. */
+const salaAgentName = (a: SalaAgentConfig) => `Hermes Sala · ${a.name}`;
+
+async function setupSala(toolIdByName: Map<string, string>): Promise<{ key: string; agentId: string }[]> {
+  const config = await readSalaConfig();
+  if (!config) {
+    console.log(`\n(sin ${SALA_PATH}: no hay personajes de sala que crear)`);
+    return [];
+  }
+  const own = config.agents.filter((a): a is SalaOwn => !a.voice.reuse);
+  const out: { key: string; agentId: string }[] = [];
+  for (const a of own) {
+    console.log(`⚙️  Sala · ${a.name} (${a.project})…`);
+    await ensureVoice(a.voice.voice_id, a.voice.voice_name);
+    const ids: string[] = [];
+    for (const name of a.voice.tools) {
+      const id = toolIdByName.get(name);
+      if (id) ids.push(id);
+      else console.warn(`  ⚠ tool desconocida "${name}" (no está en TOOLS) — se omite`);
+    }
+    const agentId = await upsertAgent(salaAgentName(a), salaConfig(a, ids));
+    out.push({ key: a.key, agentId });
+  }
+  if (out.length) {
+    // Escribe los agent_id DE VUELTA en el JSON (sobre el texto original, sin
+    // reordenar ni perder campos que el validador no conoce).
+    const raw = JSON.parse(await readFile(SALA_PATH, "utf8")) as { agents: { key: string; voice: Record<string, unknown> }[] };
+    for (const { key, agentId } of out) {
+      const target = raw.agents.find((x) => x.key === key);
+      if (target) target.voice.agent_id = agentId;
+    }
+    await writeFile(SALA_PATH, JSON.stringify(raw, null, 2) + "\n");
+    console.log(`  ✎ agent_id escritos en ${SALA_PATH}`);
+  }
+  return out;
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────
+
 console.log("⚙️  Configurando client tools de Hermes…");
 const toolIds = await upsertTools(TOOLS);
-console.log("⚙️  Configurando agente Hermes…");
-const agentId = await upsertAgent(AGENT_NAME, hermesConfig(toolIds));
+const toolIdByName = new Map(TOOLS.map((t, i) => [t.name, toolIds[i]]));
 
-console.log("⚙️  Configurando tools del tutor de inglés…");
-const tutorToolIds = await upsertTools(TUTOR_TOOLS);
-console.log("⚙️  Configurando agente tutor…");
-let tutorId: string;
-try {
-  tutorId = await upsertAgent(TUTOR_NAME, tutorConfig(tutorToolIds, true));
-} catch (err) {
-  console.warn(`  ⚠ language_presets rechazado (${String(err).slice(0, 120)}) — reintento sin presets`);
-  tutorId = await upsertAgent(TUTOR_NAME, tutorConfig(tutorToolIds, false));
+let agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
+let tutorId = process.env.NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID ?? "";
+if (!SALA_ONLY) {
+  console.log("⚙️  Configurando agente Hermes…");
+  agentId = await upsertAgent(AGENT_NAME, hermesConfig(toolIds));
+
+  console.log("⚙️  Configurando tools del tutor de inglés…");
+  const tutorToolIds = await upsertTools(TUTOR_TOOLS);
+  console.log("⚙️  Configurando agente tutor…");
+  try {
+    tutorId = await upsertAgent(TUTOR_NAME, tutorConfig(tutorToolIds, true));
+  } catch (err) {
+    console.warn(`  ⚠ language_presets rechazado (${String(err).slice(0, 120)}) — reintento sin presets`);
+    tutorId = await upsertAgent(TUTOR_NAME, tutorConfig(tutorToolIds, false));
+  }
 }
+
+const sala = await setupSala(toolIdByName);
 
 console.log(`\n✅ Listo. Agrega esto a tu .env:\n
 NEXT_PUBLIC_ELEVENLABS_AGENT_ID=${agentId}
 NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID=${tutorId}\n`);
+if (sala.length) {
+  console.log("Sala de Agentes 3D (ya escritos en sala.json):");
+  for (const { key, agentId: id } of sala) console.log(`  ${key} → ${id}`);
+}

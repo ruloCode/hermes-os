@@ -2,6 +2,8 @@
 // gitignorada: son ~40MB de binarios). Idempotente: si ya están, no hace nada.
 //  - wasm: se copia de node_modules (misma versión que el package instalado).
 //  - hand_landmarker.task: se baja UNA vez del bucket oficial de Google.
+//  - pose_landmarker_lite.task: el modelo de CUERPO (33 puntos) de la Sala de
+//    Agentes 3D (/sala), mismo bucket, ~5.5MB.
 // Corre en predev/prebuild para que un clone fresco funcione sin pasos manuales.
 
 import { cpSync, existsSync, mkdirSync } from "node:fs";
@@ -16,6 +18,9 @@ const wasmDst = resolve(outDir, "wasm");
 const modelDst = resolve(outDir, "hand_landmarker.task");
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const POSE_DST = resolve(outDir, "pose_landmarker_lite.task");
+const POSE_URL =
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
 mkdirSync(wasmDst, { recursive: true });
 
@@ -33,5 +38,16 @@ if (!existsSync(modelDst)) {
   } else {
     await writeFile(modelDst, Buffer.from(await res.arrayBuffer()));
     console.log("[mediapipe] modelo listo en public/mediapipe/hand_landmarker.task");
+  }
+}
+
+if (!existsSync(POSE_DST)) {
+  console.log("[mediapipe] bajando pose_landmarker_lite.task (~5.5MB)…");
+  const res = await fetch(POSE_URL);
+  if (!res.ok) {
+    console.warn(`[mediapipe] no se pudo bajar el modelo de pose (${res.status}) — se usará el CDN`);
+  } else {
+    await writeFile(POSE_DST, Buffer.from(await res.arrayBuffer()));
+    console.log("[mediapipe] modelo listo en public/mediapipe/pose_landmarker_lite.task");
   }
 }

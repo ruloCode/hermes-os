@@ -17,6 +17,8 @@ import { verifySupabaseToken } from "./auth.js";
 import { activityHourly, emit, recentEvents, subscribe } from "./events.js";
 import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence.js";
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
+import { listSalaAgents, portraitPath, resolveSalaAgentId, SALA_PATH } from "./sala/store.js";
+import { SalaValidationError } from "@hermes/shared";
 import { readProjectContext } from "./vault/project-context.js";
 import { resolveVaultDoc } from "./vault/doc.js";
 import { memoriesCount, recentMemories, saveMemory, hasSupabase } from "./memory.js";
@@ -224,7 +226,7 @@ import {
 } from "./agent/claude-sessions.js";
 import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join as joinPath } from "node:path";
 import { Readable } from "node:stream";
@@ -2306,22 +2308,33 @@ app.post("/tools/find_events", async (c) => {
 // token efímero (WebRTC preferido, WebSocket de fallback) — igual que la ruta
 // /api/elevenlabs/token del dashboard, pero servida por el agente para que el
 // celular hable con los MISMOS agentes de voz sin exponer secretos.
-// `?agent=tutor` = tutor de inglés; sin query = Hermes.
+// `?agent=tutor` = tutor de inglés; sin query = Hermes; cualquier otra clave
+// = un personaje de la Sala de Agentes 3D (~/.hermes-os/sala.json).
 app.get("/elevenlabs/token", async (c) => {
   const apiKey = env.ELEVENLABS_API_KEY;
-  const which = c.req.query("agent");
-  const agentId = which === "tutor" ? env.ELEVENLABS_TUTOR_AGENT_ID : env.ELEVENLABS_AGENT_ID;
+  const which = c.req.query("agent") || "";
+  let agentId = "";
+  let hint = "";
+  if (!which) {
+    agentId = env.ELEVENLABS_AGENT_ID;
+    hint = "Configura ELEVENLABS_API_KEY y NEXT_PUBLIC_ELEVENLABS_AGENT_ID en .env";
+  } else if (which === "tutor") {
+    agentId = env.ELEVENLABS_TUTOR_AGENT_ID;
+    hint = "Configura NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID en .env (pnpm setup:elevenlabs lo crea)";
+  } else if (env.SALA_ENABLED) {
+    try {
+      const r = await resolveSalaAgentId(which);
+      agentId = r.agentId ?? "";
+      hint = r.hint;
+    } catch (err) {
+      if (err instanceof SalaValidationError) return c.json({ error: err.message }, 500);
+      throw err;
+    }
+  } else {
+    hint = "La sala está apagada (HERMES_SALA=off)";
+  }
   if (!apiKey || !agentId) {
-    return c.json(
-      {
-        notConfigured: true,
-        error:
-          which === "tutor"
-            ? "Configura NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID en .env (pnpm setup:elevenlabs lo crea)"
-            : "Configura ELEVENLABS_API_KEY y NEXT_PUBLIC_ELEVENLABS_AGENT_ID en .env",
-      },
-      503,
-    );
+    return c.json({ notConfigured: true, error: apiKey ? hint : "Falta ELEVENLABS_API_KEY en .env" }, 503);
   }
   const headers = { "xi-api-key": apiKey };
 
@@ -2396,6 +2409,37 @@ app.get("/stats", async (c) => {
 });
 
 app.get("/projects", async (c) => c.json(await readProjects()));
+
+// ── Sala de Agentes 3D (/sala del dashboard) ───────────────────────────
+// Los personajes viven en ~/.hermes-os/sala.json (ningún nombre propio en el
+// código). La lista pública trae el estado REAL del proyecto de cada uno.
+app.get("/sala/agents", async (c) => {
+  if (!env.SALA_ENABLED) return c.json({ error: "sala desactivada (HERMES_SALA=off)" }, 404);
+  try {
+    const agents = await listSalaAgents(await readProjects());
+    return c.json({ agents, path: SALA_PATH });
+  } catch (err) {
+    if (err instanceof SalaValidationError) return c.json({ error: err.message, path: SALA_PATH }, 500);
+    throw err;
+  }
+});
+
+// Retrato del personaje (PNG generado por `pnpm sala:portraits`). Un <img>
+// no manda el Bearer: la web lo pide con ?key= como los streams SSE.
+app.get("/sala/portrait/:key", async (c) => {
+  if (!env.SALA_ENABLED) return c.json({ error: "sala desactivada" }, 404);
+  const key = c.req.param("key");
+  if (!/^[a-z0-9][a-z0-9-]{0,23}$/.test(key)) return c.json({ error: "key inválida" }, 400);
+  try {
+    const png = await readFile(portraitPath(key));
+    return c.body(new Uint8Array(png), 200, {
+      "Content-Type": "image/png",
+      "Cache-Control": "private, max-age=300",
+    });
+  } catch {
+    return c.json({ error: "sin retrato" }, 404);
+  }
+});
 
 // Resuelve un .md del vault desde una referencia (wikilink `[[x]]` o ruta `x.md`)
 // para el visor tipo Notion del dashboard. `project` desambigua nombres repetidos.
