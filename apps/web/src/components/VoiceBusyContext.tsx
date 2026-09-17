@@ -12,12 +12,21 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
  *    (p.ej. un reporte pedido por voz).
  */
 export interface VoiceLine {
-  who: "TÚ" | "HERMES" | "TUTOR";
+  /** Quién habla: TÚ, HERMES, TUTOR o la clave en mayúsculas de un agente de la Sala. */
+  who: "TÚ" | "HERMES" | "TUTOR" | (string & {});
   text: string;
 }
 
-/** Agente activo de la llamada: Hermes (default) o el tutor de inglés. */
-export type VoiceMode = "hermes" | "tutor";
+/**
+ * Agente activo de la llamada: Hermes (default), el tutor de inglés, o un
+ * personaje de la Sala de Agentes 3D con voz propia (`agent:<clave de sala.json>`).
+ */
+export type VoiceMode = "hermes" | "tutor" | `agent:${string}`;
+
+/** Clave de sala.json de un modo `agent:<clave>`, o null para hermes/tutor. */
+export function salaAgentKey(mode: VoiceMode): string | null {
+  return mode.startsWith("agent:") ? mode.slice("agent:".length) : null;
+}
 
 export interface VoiceArtifact {
   /** Título (el prompt/pedido que lo originó). */

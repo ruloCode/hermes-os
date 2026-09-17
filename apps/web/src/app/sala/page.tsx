@@ -23,8 +23,18 @@ import {
 import { hermesGet } from "@/lib/hermes";
 import { useTheme } from "@/state/ThemeProvider";
 import { usePose, type PoseSample } from "@/hooks/usePose";
+import { useVoiceConnect } from "@/hooks/useVoiceConnect";
+import { useVoice, type VoiceMode } from "@/components/VoiceBusyContext";
 import { AVATAR_ORIGIN } from "@/lib/sala/world";
 import { SalaScene, type SalaSceneHandle } from "@/components/sala/SalaScene";
+import { SalaVoice } from "@/components/sala/SalaVoice";
+
+/** Modo de voz de un personaje: reusa Hermes/tutor o su agente propio. */
+function voiceModeFor(agent: SalaAgentPublic): VoiceMode {
+  if (agent.reuse === "hermes") return "hermes";
+  if (agent.reuse === "tutor") return "tutor";
+  return `agent:${agent.key}`;
+}
 
 declare global {
   interface Window {
@@ -32,6 +42,8 @@ declare global {
     __hermesSalaDebug?: () => unknown;
   }
 }
+
+const NO_AGENTS: SalaAgentPublic[] = [];
 
 type Load =
   | { kind: "loading" }
@@ -181,6 +193,41 @@ export default function SalaPage() {
     };
   }, []);
 
+  // Identidad estable cuando no hay sala: un [] nuevo por render re-dispararía los efectos.
+  const agents = load.kind === "ready" ? load.agents : NO_AGENTS;
+
+  // ── Voz: seleccionar = hablar con ESE agente; soltar = colgar ─────────
+  const voice = useVoiceConnect();
+  const { setMode } = useVoice();
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  useEffect(() => {
+    const v = voiceRef.current;
+    if (!selectedKey) {
+      // Soltar: colgar si había llamada y volver al modo por defecto.
+      if (v.connected || v.connecting) void v.disconnect();
+      setMode("hermes");
+      setVoiceNote(null);
+      return;
+    }
+    const agent = agents.find((a) => a.key === selectedKey);
+    if (!agent) return;
+    if (!agent.ready) {
+      // Sin agente de voz: se cuelga la llamada anterior (seguir oyendo al
+      // otro mientras señalas a este confunde) y se dice qué falta.
+      if (v.connected || v.connecting) void v.disconnect();
+      setMode("hermes");
+      setVoiceNote(`${agent.name} aún no tiene voz (pnpm setup:elevenlabs --sala)`);
+      return;
+    }
+    setVoiceNote(null);
+    const scopePrompt = `El usuario está en la Sala de Agentes 3D y te está señalando a ti, ${agent.name} (proyecto "${agent.project}"). Habla en primera persona como ${agent.name}.`;
+    void v.switchTo(voiceModeFor(agent), { scopePrompt });
+    // Solo al cambiar la selección: `voice` cambia de identidad en cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, agents, setMode]);
+
   // Cámara: arranca sola al tener la sala (el demo no debe pedir un clic).
   const startedRef = useRef(false);
   useEffect(() => {
@@ -202,7 +249,6 @@ export default function SalaPage() {
     };
   }, [pose.video]);
 
-  const agents = load.kind === "ready" ? load.agents : [];
   const ready = agents.filter((a) => a.ready).length;
 
   const cameraLabel =
@@ -220,13 +266,20 @@ export default function SalaPage() {
     <main className="fixed inset-0 overflow-hidden bg-bg text-text">
       {load.kind === "ready" && (
         // key=tema: el mundo lee los tokens al montar (bg, piso, grilla).
-        <SalaScene
-          key={theme.resolved}
-          ref={sceneRef}
-          agents={agents}
-          selectedKey={selectedKey}
-          aimingKey={aimingKey}
-        />
+        <>
+          <SalaScene
+            key={theme.resolved}
+            ref={sceneRef}
+            agents={agents}
+            selectedKey={selectedKey}
+            aimingKey={aimingKey}
+          />
+          <SalaVoice
+            figure={() =>
+              selectedRef.current ? sceneRef.current?.world()?.figure(selectedRef.current) : undefined
+            }
+          />
+        </>
       )}
 
       {/* HUD: contexto arriba a la izquierda, sin tarjeta (lo que se lee va sin marco). */}
@@ -247,7 +300,18 @@ export default function SalaPage() {
                 <span className="font-medium text-text">
                   {agents.find((a) => a.key === selectedKey)?.name ?? selectedKey}
                 </span>
-                <span className="text-text-faint"> · baja el brazo o Esc para soltar</span>
+                <span className="text-text-faint">
+                  {" · "}
+                  {voiceNote
+                    ? voiceNote
+                    : voice.error
+                      ? voice.error
+                      : voice.connecting
+                        ? "conectando…"
+                        : voice.connected
+                          ? "en llamada · baja el brazo o Esc para colgar"
+                          : "baja el brazo o Esc para soltar"}
+                </span>
               </>
             ) : aimingKey ? (
               <>

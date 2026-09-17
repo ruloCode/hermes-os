@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import type { AgentActivityEvent } from "@hermes/shared";
 import { useConversation, useConversationControls, useConversationStatus } from "@elevenlabs/react";
 import { hermesGet } from "@/lib/hermes";
-import { useVoice } from "./VoiceBusyContext";
+import { salaAgentKey, useVoice } from "./VoiceBusyContext";
 
 /**
  * Puente de sesión de voz (no renderiza nada). Tres trabajos:
@@ -42,7 +42,12 @@ export function VoiceSessionBridge({
   useConversation({
     onMessage: (p) =>
       pushLine({
-        who: p.role === "user" ? "TÚ" : modeRef.current === "tutor" ? "TUTOR" : "HERMES",
+        who:
+          p.role === "user"
+            ? "TÚ"
+            : modeRef.current === "tutor"
+              ? "TUTOR"
+              : (salaAgentKey(modeRef.current)?.toUpperCase() ?? "HERMES"),
         text: p.message,
       }),
     onConnect: () => {

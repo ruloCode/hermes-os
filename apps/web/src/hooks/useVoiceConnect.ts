@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useConversationControls, useConversationStatus } from "@elevenlabs/react";
-import { useVoice, type VoiceMode } from "@/components/VoiceBusyContext";
+import { salaAgentKey, useVoice, type VoiceMode } from "@/components/VoiceBusyContext";
 import { hermesGet } from "@/lib/hermes";
 import { useLiveMeeting } from "@/state/LiveMeetingProvider";
 
@@ -15,9 +15,12 @@ import { useLiveMeeting } from "@/state/LiveMeetingProvider";
  * El estado real (status) sale del ConversationProvider, así que ambos consumidores
  * ven lo mismo aunque uno haya iniciado la llamada.
  *
- * DOS AGENTES sobre el mismo ConversationProvider (startSession recibe el token
- * del agente elegido): "hermes" (default, Jarvis del dashboard) y "tutor"
- * (práctica de inglés — token con ?agent=tutor y dynamic vars propias).
+ * VARIOS AGENTES sobre el mismo ConversationProvider (startSession recibe el
+ * token del agente elegido): "hermes" (default, Jarvis del dashboard), "tutor"
+ * (práctica de inglés — token con ?agent=tutor y dynamic vars propias) y
+ * "agent:<clave>" (un personaje de la Sala de Agentes 3D — token con
+ * ?agent=<clave>, resuelto contra ~/.hermes-os/sala.json; su scope dice a
+ * quién está señalando el humano).
  *
  * SCOPE DE PROYECTO (solo Hermes): si hay un proyecto enfocado al conectar, se
  * inyecta como la dynamic variable `session_scope` → el system prompt del agente
@@ -36,8 +39,13 @@ export function useVoiceConnect() {
   const tutorConfigured = Boolean(process.env.NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID);
 
   const connect = useCallback(
-    async (opts?: { mode?: VoiceMode }) => {
+    async (opts?: {
+      mode?: VoiceMode;
+      /** Texto libre para {{session_scope}} (la Sala lo usa para decir a quién señalas). */
+      scopePrompt?: string;
+    }) => {
       const targetMode: VoiceMode = opts?.mode ?? "hermes";
+      const salaKey = salaAgentKey(targetMode);
       setError("");
       // Guard de mic compartido (bidireccional con LiveMeetingProvider.start):
       // mensaje explícito, sin auto-cortar la junta.
@@ -48,7 +56,11 @@ export function useVoiceConnect() {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         const res = await fetch(
-          targetMode === "tutor" ? "/api/elevenlabs/token?agent=tutor" : "/api/elevenlabs/token",
+          targetMode === "tutor"
+            ? "/api/elevenlabs/token?agent=tutor"
+            : salaKey
+              ? `/api/elevenlabs/token?agent=${encodeURIComponent(salaKey)}`
+              : "/api/elevenlabs/token",
         );
         const creds = (await res.json()) as {
           conversationToken?: string;
@@ -80,9 +92,11 @@ export function useVoiceConnect() {
           // Se pasa SIEMPRE (default cuando no hay proyecto) → nunca queda sin valor.
           // scope.prompt (si viene) es un contexto libre que reemplaza al default:
           // /vida lo usa para inyectar el estado financiero real como asesor.
-          const sessionScope = scope?.prompt
-            ? scope.prompt
-            : scope
+          const sessionScope = opts?.scopePrompt
+            ? opts.scopePrompt
+            : scope?.prompt
+              ? scope.prompt
+              : scope
               ? `El usuario está DENTRO del proyecto "${scope.name}" (slug: ${scope.slug}). Todas sus peticiones son sobre este proyecto salvo que nombre otro. Usa get_project_status con "${scope.slug}" para su estado y work_on_project con "${scope.slug}" para su repo.`
               : "El usuario está en la vista general, sin proyecto enfocado.";
           dynamicVariables = { session_scope: sessionScope, today };
@@ -109,15 +123,15 @@ export function useVoiceConnect() {
     [startSession, scope, liveMeetingActive, setMode],
   );
 
-  /** Corta la sesión actual (si la hay) y conecta con el otro agente. */
+  /** Corta la sesión actual (si la hay) y conecta con otro agente. */
   const switchTo = useCallback(
-    async (m: VoiceMode) => {
+    async (m: VoiceMode, opts?: { scopePrompt?: string }) => {
       if (status === "connected" || status === "connecting") {
         await endSession();
         // Respiro corto: deja que el SDK suelte el room WebRTC anterior.
         await new Promise((r) => setTimeout(r, 400));
       }
-      await connect({ mode: m });
+      await connect({ mode: m, scopePrompt: opts?.scopePrompt });
     },
     [status, endSession, connect],
   );
@@ -125,6 +139,7 @@ export function useVoiceConnect() {
   return {
     connect,
     disconnect: endSession,
+    switchTo,
     switchToTutor: () => switchTo("tutor"),
     switchToHermes: () => switchTo("hermes"),
     status,
