@@ -176,6 +176,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/composicion"),
   },
   {
+    id: "ver-sala",
+    label: "Sala de agentes",
+    slash: "/sala",
+    hint: "Sala 3D: tu cuerpo por webcam, señala a un agente con el brazo y hablas con él",
+    run: (ctx) => ctx.navigate("/sala"),
+  },
+  {
     id: "apariencia",
     label: "Cambiar apariencia",
     hint: "Sistema → claro → oscuro (también en el header)",

@@ -20,7 +20,7 @@ import {
   type PointTarget,
   type SalaAgentPublic,
 } from "@hermes/shared";
-import { hermesGet } from "@/lib/hermes";
+import { hermesFetch } from "@/lib/hermes";
 import { useTheme } from "@/state/ThemeProvider";
 import { usePose, type PoseSample } from "@/hooks/usePose";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
@@ -48,6 +48,7 @@ const NO_AGENTS: SalaAgentPublic[] = [];
 type Load =
   | { kind: "loading" }
   | { kind: "offline"; error: string }
+  | { kind: "off" }
   | { kind: "invalid"; error: string; path: string }
   | { kind: "empty"; path: string }
   | { kind: "ready"; agents: SalaAgentPublic[] };
@@ -62,12 +63,16 @@ export default function SalaPage() {
 
   useEffect(() => {
     let alive = true;
-    hermesGet<{ agents?: SalaAgentPublic[]; path: string; error?: string }>("/sala/agents")
-      .then((r) => {
+    hermesFetch("/sala/agents")
+      .then(async (res) => {
         if (!alive) return;
-        if (r.error) setLoad({ kind: "invalid", error: r.error, path: r.path });
-        else if (!r.agents?.length) setLoad({ kind: "empty", path: r.path });
-        else setLoad({ kind: "ready", agents: r.agents });
+        // 404 = HERMES_SALA=off en el agente · 500 = sala.json no valida (el
+        // cuerpo trae el motivo exacto) · 200 = lista (vacía si no hay archivo).
+        if (res.status === 404) return setLoad({ kind: "off" });
+        const r = (await res.json()) as { agents?: SalaAgentPublic[]; path: string; error?: string };
+        if (!res.ok || r.error) return setLoad({ kind: "invalid", error: r.error ?? `HTTP ${res.status}`, path: r.path });
+        if (!r.agents?.length) return setLoad({ kind: "empty", path: r.path });
+        setLoad({ kind: "ready", agents: r.agents });
       })
       .catch((err: unknown) => {
         if (alive) setLoad({ kind: "offline", error: err instanceof Error ? err.message : String(err) });
@@ -365,16 +370,20 @@ export default function SalaPage() {
             <p className="text-base font-medium">
               {load.kind === "offline"
                 ? "El agente no responde"
-                : load.kind === "invalid"
-                  ? "sala.json no pasa la validación"
-                  : "La sala está vacía"}
+                : load.kind === "off"
+                  ? "La sala está apagada"
+                  : load.kind === "invalid"
+                    ? "sala.json no pasa la validación"
+                    : "La sala está vacía"}
             </p>
             <p className="mt-2 text-sm text-text-dim">
               {load.kind === "offline"
                 ? load.error
-                : load.kind === "invalid"
-                  ? load.error
-                  : `Crea ${load.path} con tus agentes (plantilla en docs/sala.example.json) y recarga.`}
+                : load.kind === "off"
+                  ? "El agente corre con HERMES_SALA=off. Quita esa variable del .env y reinícialo."
+                  : load.kind === "invalid"
+                    ? load.error
+                    : `Crea ${load.path} con tus agentes (plantilla en docs/sala.example.json) y recarga.`}
             </p>
           </div>
         </section>
