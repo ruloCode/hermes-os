@@ -61,7 +61,7 @@ export class SalaWorld {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft está deprecado en r185 (avisa por consola)
     renderer.domElement.className = "absolute inset-0 h-full w-full";
     container.prepend(renderer.domElement);
     this.renderer = renderer;
