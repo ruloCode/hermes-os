@@ -17,7 +17,7 @@ import { verifySupabaseToken } from "./auth.js";
 import { activityHourly, emit, recentEvents, subscribe } from "./events.js";
 import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence.js";
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
-import { listSalaAgents, portraitPath, resolveSalaAgentId, SALA_PATH } from "./sala/store.js";
+import { listSalaAgents, portraitPath, resolveSalaAgentId, salaTopic, SALA_PATH } from "./sala/store.js";
 import { SalaValidationError } from "@hermes/shared";
 import { readProjectContext } from "./vault/project-context.js";
 import { resolveVaultDoc } from "./vault/doc.js";
@@ -2417,7 +2417,7 @@ app.get("/sala/agents", async (c) => {
   if (!env.SALA_ENABLED) return c.json({ error: "sala desactivada (HERMES_SALA=off)" }, 404);
   try {
     const agents = await listSalaAgents(await readProjects());
-    return c.json({ agents, path: SALA_PATH });
+    return c.json({ agents, topic: await salaTopic(), path: SALA_PATH });
   } catch (err) {
     if (err instanceof SalaValidationError) return c.json({ error: err.message, path: SALA_PATH }, 500);
     throw err;

@@ -148,8 +148,13 @@ export function pickTarget(ray: PointingRay | null, targets: PointTarget[], maxZ
   return best.ang <= zone ? targets[best.i].key : null;
 }
 
-/** Cuánto debe subir la muñeca sobre el hombro para contar como "mano levantada" (m). */
-export const HAND_RAISE_MIN = 0.05;
+/**
+ * Altura de la muñeca respecto al hombro para contar como "mano levantada"
+ * (m). NEGATIVO a propósito: basta con la mano a la altura del pecho — subirla
+ * por encima de la cabeza se siente forzado. El brazo colgando queda ~0,5 m
+ * por debajo, así que no hay falsos positivos.
+ */
+export const HAND_RAISE_MIN = -0.12;
 
 /** ¿Está esta mano levantada (muñeca claramente por encima del hombro)? Sin exigir codo recto. */
 export function handRaised(frame: PuppetFrame, side: Side): boolean {

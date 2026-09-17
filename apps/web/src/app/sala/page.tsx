@@ -1,44 +1,42 @@
 "use client";
 
 // SALA DE AGENTES 3D — página suelta a pantalla completa (fuera del shell,
-// hermana de /dev/terminator): cinco agentes de pie, cada uno dueño de un
-// proyecto REAL del vault, con su color, su nombre y su estado; y tu cuerpo,
-// capturado por la webcam con MediaPipe Pose, como marioneta de espaldas al
-// frente de la sala. Los personajes salen de ~/.hermes-os/sala.json vía
-// GET /sala/agents; nada aquí está escrito a mano. Plan y decisiones:
-// docs/sala-de-agentes-3d.md.
+// hermana de /dev/terminator): agentes de pie en arco, cada uno dueño de un
+// proyecto REAL del vault, y tu cuerpo por webcam (MediaPipe Pose) como
+// marioneta de espaldas al frente de la sala. Levantar la mano izquierda o la
+// derecha ENFOCA a ese agente: se conecta si hace falta y el micrófono le
+// habla a él; los demás siguen en la llamada con el mic en silencio (bajar la
+// mano no cuelga a nadie). Con TERTULIA activa, los agentes se escuchan entre
+// sí y por cada turno tuyo el compañero comenta. Los personajes salen de
+// ~/.hermes-os/sala.json vía GET /sala/agents. Plan: docs/sala-de-agentes-3d.md.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   emptyPuppetFrame,
   PointingMachine,
-  raisedHandTarget,
   puppetFrame,
   PuppetSmoother,
+  raisedHandTarget,
   type PointTarget,
   type SalaAgentPublic,
 } from "@hermes/shared";
 import { hermesFetch } from "@/lib/hermes";
+import { OWNER } from "@/lib/owner";
 import { useTheme } from "@/state/ThemeProvider";
 import { usePose, type PoseSample } from "@/hooks/usePose";
-import { useVoiceConnect } from "@/hooks/useVoiceConnect";
-import { useVoice, type VoiceMode } from "@/components/VoiceBusyContext";
 import { AVATAR_ORIGIN } from "@/lib/sala/world";
+import { SalaCalls, type SalaCallEvent, type SalaCallStatus } from "@/lib/sala/calls";
+import { salaClientTools } from "@/lib/sala/client-tools";
 import { SalaScene, type SalaSceneHandle } from "@/components/sala/SalaScene";
 import { SalaVoice } from "@/components/sala/SalaVoice";
 
-/** Modo de voz de un personaje: reusa Hermes/tutor o su agente propio. */
-function voiceModeFor(agent: SalaAgentPublic): VoiceMode {
-  if (agent.reuse === "hermes") return "hermes";
-  if (agent.reuse === "tutor") return "tutor";
-  return `agent:${agent.key}`;
-}
-
 declare global {
   interface Window {
-    /** QA: estado de la marioneta y del mundo (Playwright). */
+    /** QA: estado de la marioneta, el mundo y las llamadas (Playwright). */
     __hermesSalaDebug?: () => unknown;
+    /** QA: texto del humano al agente enfocado, sin micrófono. */
+    __hermesSalaSay?: (text: string) => boolean;
   }
 }
 
@@ -50,13 +48,28 @@ type Load =
   | { kind: "off" }
   | { kind: "invalid"; error: string; path: string }
   | { kind: "empty"; path: string }
-  | { kind: "ready"; agents: SalaAgentPublic[] };
+  | { kind: "ready"; agents: SalaAgentPublic[]; topic: string | null };
+
+interface AgentLive {
+  status: SalaCallStatus;
+  speaking: boolean;
+  last: string;
+  error: string | null;
+}
+
+const LIVE0: AgentLive = { status: "idle", speaking: false, last: "", error: null };
+
+/** Token por clave: hermes/tutor reusados o `agent:<clave>`; misma ruta Next que el shell. */
+async function fetchToken(agent: SalaAgentPublic) {
+  const which = agent.reuse === "hermes" ? "" : agent.reuse === "tutor" ? "tutor" : agent.key;
+  const res = await fetch(which ? `/api/elevenlabs/token?agent=${encodeURIComponent(which)}` : "/api/elevenlabs/token");
+  return (await res.json()) as { conversationToken?: string; signedUrl?: string; error?: string };
+}
 
 export default function SalaPage() {
   const theme = useTheme();
   const sceneRef = useRef<SalaSceneHandle>(null);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
-  // ¿Hay alguien en cuadro? Estado solo cuando CAMBIA (el callback corre a 30 fps).
   const [bodyInFrame, setBodyInFrame] = useState(false);
   const bodyRef = useRef(false);
 
@@ -65,13 +78,12 @@ export default function SalaPage() {
     hermesFetch("/sala/agents")
       .then(async (res) => {
         if (!alive) return;
-        // 404 = HERMES_SALA=off en el agente · 500 = sala.json no valida (el
-        // cuerpo trae el motivo exacto) · 200 = lista (vacía si no hay archivo).
+        // 404 = HERMES_SALA=off en el agente · 500 = sala.json no valida · 200 = lista.
         if (res.status === 404) return setLoad({ kind: "off" });
-        const r = (await res.json()) as { agents?: SalaAgentPublic[]; path: string; error?: string };
+        const r = (await res.json()) as { agents?: SalaAgentPublic[]; topic?: string | null; path: string; error?: string };
         if (!res.ok || r.error) return setLoad({ kind: "invalid", error: r.error ?? `HTTP ${res.status}`, path: r.path });
         if (!r.agents?.length) return setLoad({ kind: "empty", path: r.path });
-        setLoad({ kind: "ready", agents: r.agents });
+        setLoad({ kind: "ready", agents: r.agents, topic: r.topic ?? null });
       })
       .catch((err: unknown) => {
         if (alive) setLoad({ kind: "offline", error: err instanceof Error ? err.message : String(err) });
@@ -81,36 +93,121 @@ export default function SalaPage() {
     };
   }, []);
 
-  // ── Marioneta + señalar ──────────────────────────────────────────────
-  // La malla es de la escena (vive con el canvas); aquí solo se le mandan
-  // frames: cuerpo crudo → escena (puro) → One Euro → malla → rayo → dwell.
+  const agents = load.kind === "ready" ? load.agents : NO_AGENTS;
+  const topic = load.kind === "ready" ? load.topic : null;
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+
+  // ── Llamadas (una sesión por agente, todas vivas) ──────────────────────
+  const callsRef = useRef<SalaCalls | null>(null);
+  const [live, setLive] = useState<Record<string, AgentLive>>({});
+  const [tertulia, setTertulia] = useState(false);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+
+  // Bitácora de eventos de las llamadas (QA: window.__hermesSalaDebug().log).
+  const logRef = useRef<{ t: number; ev: SalaCallEvent }[]>([]);
+
+  useEffect(() => {
+    const onEvent = (ev: SalaCallEvent) => {
+      logRef.current.push({ t: Math.round(performance.now()), ev });
+      if (logRef.current.length > 200) logRef.current.shift();
+      setLive((prev) => {
+        const cur = prev[ev.key] ?? LIVE0;
+        const next: AgentLive =
+          ev.kind === "status"
+            ? { ...cur, status: ev.status ?? cur.status, error: ev.status === "error" ? cur.error : null }
+            : ev.kind === "mode"
+              ? { ...cur, speaking: ev.mode === "speaking" }
+              : ev.kind === "message"
+                ? ev.role === "agent"
+                  ? { ...cur, last: ev.text ?? "" }
+                  : cur
+                : { ...cur, error: ev.text ?? "error" };
+        return { ...prev, [ev.key]: next };
+      });
+      if (ev.kind === "status") setFocusKey(callsRef.current?.focusedKey() ?? null);
+    };
+    const calls = new SalaCalls({ fetchToken, clientTools: salaClientTools(), owner: OWNER || "el usuario", onEvent });
+    callsRef.current = calls;
+    window.__hermesSalaSay = (text) => calls.say(text);
+    return () => {
+      delete window.__hermesSalaSay;
+      void calls.hangupAll();
+      callsRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (callsRef.current) callsRef.current.topic = topic;
+  }, [topic]);
+  useEffect(() => {
+    if (callsRef.current) callsRef.current.tertulia = tertulia;
+  }, [tertulia]);
+
+  /** Enfoca a un agente: lo conecta si hace falta y le da el micrófono. */
+  const focusAgent = useCallback(async (key: string) => {
+    const calls = callsRef.current;
+    const agent = agentsRef.current.find((a) => a.key === key);
+    if (!calls || !agent) return;
+    if (!agent.ready) {
+      setLive((prev) => ({
+        ...prev,
+        [key]: { ...(prev[key] ?? LIVE0), error: `${agent.name} aún no tiene voz (pnpm setup:elevenlabs --sala)` },
+      }));
+      return;
+    }
+    if (!calls.isConnected(key)) await calls.connect(agent);
+    calls.focus(key);
+    setFocusKey(calls.focusedKey());
+  }, []);
+
+  /** Tertulia: conecta a TODOS los que tienen voz y enciende el relevo de turnos. */
+  const startTertulia = useCallback(async () => {
+    const calls = callsRef.current;
+    if (!calls) return;
+    setTertulia(true);
+    calls.tertulia = true;
+    await calls.connectAll(agentsRef.current.filter((a) => a.ready));
+    setFocusKey(calls.focusedKey());
+  }, []);
+
+  const hangupAll = useCallback(() => {
+    void callsRef.current?.hangupAll();
+    setTertulia(false);
+    setFocusKey(null);
+    setLive({});
+  }, []);
+
+  // ── Marioneta + mano levantada ─────────────────────────────────────────
   const smootherRef = useRef(new PuppetSmoother());
-  const machineRef = useRef(new PointingMachine());
-  // Selección/apuntado como estado de React SOLO cuando cambian (para las
-  // tarjetas y, en la fase 4, la voz); el progreso del anillo va directo a la figura.
+  // Sin release por bajar la mano: la selección solo cambia al levantar la
+  // otra mano (o con Esc / Colgar). Infinity = nunca suelta por tiempo.
+  const machineRef = useRef(new PointingMachine(undefined, Number.POSITIVE_INFINITY));
   const [aimingKey, setAimingKey] = useState<string | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const aimingRef = useRef<string | null>(null);
   const selectedRef = useRef<string | null>(null);
 
-  const applyPointing = useCallback((target: string | null, armUp: boolean, tMs: number) => {
-    const world = sceneRef.current?.world();
-    const st = machineRef.current.update(target, armUp, tMs);
-    if (world) {
-      for (const f of world.figures) {
-        if (f.key === st.selected) f.setProgress(1);
-        else f.setProgress(f.key === st.aiming ? st.progress : 0);
+  const applyPointing = useCallback(
+    (target: string | null, handUp: boolean, tMs: number) => {
+      const world = sceneRef.current?.world();
+      const st = machineRef.current.update(target, handUp, tMs);
+      if (world) {
+        for (const f of world.figures) {
+          if (f.key === st.selected) f.setProgress(1);
+          else f.setProgress(f.key === st.aiming ? st.progress : 0);
+        }
       }
-    }
-    if (st.aiming !== aimingRef.current) {
-      aimingRef.current = st.aiming;
-      setAimingKey(st.aiming);
-    }
-    if (st.selected !== selectedRef.current) {
-      selectedRef.current = st.selected;
-      setSelectedKey(st.selected);
-    }
-  }, []);
+      if (st.aiming !== aimingRef.current) {
+        aimingRef.current = st.aiming;
+        setAimingKey(st.aiming);
+      }
+      if (st.event?.kind === "select" && st.event.key !== selectedRef.current) {
+        selectedRef.current = st.event.key;
+        void focusAgent(st.event.key);
+      }
+    },
+    [focusAgent],
+  );
 
   const onSample = useCallback(
     (s: PoseSample) => {
@@ -131,9 +228,6 @@ export default function SalaPage() {
       }
       const frame = smootherRef.current.update(puppetFrame(s.world, { origin: AVATAR_ORIGIN }), s.tMs);
       puppet.update(frame);
-      // Selección por MANO: izquierda arriba = agente de la izquierda, derecha
-      // = el de la derecha. Sin rayo (apuntar a 6 m con la profundidad de la
-      // muñeca era una lotería); el dwell sigue filtrando gestos casuales.
       const targets: PointTarget[] = world.figures.map((f) => ({
         key: f.key,
         center: f.hitSphere.center,
@@ -145,32 +239,29 @@ export default function SalaPage() {
     [applyPointing],
   );
 
-  // Esc suelta la selección (y corta la llamada).
+  const pose = usePose(onSample);
+
+  // Esc = colgar todo y soltar la selección.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const st = machineRef.current.release(performance.now());
+      machineRef.current.reset();
+      selectedRef.current = null;
+      aimingRef.current = null;
+      setAimingKey(null);
       sceneRef.current?.world()?.figures.forEach((f) => f.setProgress(0));
-      if (aimingRef.current !== null) {
-        aimingRef.current = null;
-        setAimingKey(null);
-      }
-      if (st.selected !== selectedRef.current) {
-        selectedRef.current = st.selected;
-        setSelectedKey(st.selected);
-      }
+      hangupAll();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [hangupAll]);
 
-  const pose = usePose(onSample);
-
-  // Seam de QA: estado de la marioneta sin abrir el inspector.
+  // Seam de QA.
   useEffect(() => {
     window.__hermesSalaDebug = () => {
       const world = sceneRef.current?.world();
       const puppet = sceneRef.current?.puppet() ?? null;
+      const calls = callsRef.current;
       let headScreen: { x: number; y: number } | null = null;
       if (world && puppet) {
         const h = puppet.debug().head;
@@ -184,54 +275,22 @@ export default function SalaPage() {
         world: Boolean(world),
         aiming: aimingRef.current,
         selected: selectedRef.current,
+        focused: calls?.focusedKey() ?? null,
+        calls: calls
+          ? Object.fromEntries(calls.keys().map((k) => [k, { status: calls.status(k), speaking: calls.speaking(k) }]))
+          : null,
+        tertulia: calls?.tertulia ?? false,
         figures: world?.figures.map((f) => ({ key: f.key, center: f.hitSphere.center.toArray() })) ?? null,
-        stageInScene: world ? world.scene.children.includes(world.stage) : null,
-        stageChildren: world?.stage.children.length ?? null,
-        puppetParentIsStage: world && puppet ? puppet.group.parent === world.stage : null,
         renderFrame: world?.renderer.info.render.frame ?? null,
         headScreen,
         bodyInFrame: bodyRef.current,
+        log: logRef.current.slice(-40),
       };
     };
     return () => {
       delete window.__hermesSalaDebug;
     };
   }, []);
-
-  // Identidad estable cuando no hay sala: un [] nuevo por render re-dispararía los efectos.
-  const agents = load.kind === "ready" ? load.agents : NO_AGENTS;
-
-  // ── Voz: seleccionar = hablar con ESE agente; soltar = colgar ─────────
-  const voice = useVoiceConnect();
-  const { setMode } = useVoice();
-  const voiceRef = useRef(voice);
-  voiceRef.current = voice;
-  const [voiceNote, setVoiceNote] = useState<string | null>(null);
-  useEffect(() => {
-    const v = voiceRef.current;
-    if (!selectedKey) {
-      // Soltar: colgar si había llamada y volver al modo por defecto.
-      if (v.connected || v.connecting) void v.disconnect();
-      setMode("hermes");
-      setVoiceNote(null);
-      return;
-    }
-    const agent = agents.find((a) => a.key === selectedKey);
-    if (!agent) return;
-    if (!agent.ready) {
-      // Sin agente de voz: se cuelga la llamada anterior (seguir oyendo al
-      // otro mientras señalas a este confunde) y se dice qué falta.
-      if (v.connected || v.connecting) void v.disconnect();
-      setMode("hermes");
-      setVoiceNote(`${agent.name} aún no tiene voz (pnpm setup:elevenlabs --sala)`);
-      return;
-    }
-    setVoiceNote(null);
-    const scopePrompt = `El usuario está en la Sala de Agentes 3D y te está señalando a ti, ${agent.name} (proyecto "${agent.project}"). Habla en primera persona como ${agent.name}.`;
-    void v.switchTo(voiceModeFor(agent), { scopePrompt });
-    // Solo al cambiar la selección: `voice` cambia de identidad en cada render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, agents, setMode]);
 
   // Cámara: arranca sola al tener la sala (el demo no debe pedir un clic).
   const startedRef = useRef(false);
@@ -255,6 +314,8 @@ export default function SalaPage() {
   }, [pose.video]);
 
   const ready = agents.filter((a) => a.ready).length;
+  const connectedCount = agents.filter((a) => live[a.key]?.status === "connected").length;
+  const anyConnecting = agents.some((a) => live[a.key]?.status === "connecting");
 
   const cameraLabel =
     pose.phase === "tracking"
@@ -267,60 +328,57 @@ export default function SalaPage() {
           ? pose.error ?? "Cámara sin acceso"
           : "Cámara apagada";
 
+  const statusLabel = (a: SalaAgentPublic): string => {
+    const l = live[a.key] ?? LIVE0;
+    if (l.error) return l.error;
+    if (l.status === "connecting") return "conectando…";
+    if (l.status === "connected") return l.speaking ? "hablando" : focusKey === a.key ? "te escucha" : "en la llamada";
+    return a.ready ? "" : "sin voz";
+  };
+
   return (
     <main className="fixed inset-0 overflow-hidden bg-bg text-text">
       {load.kind === "ready" && (
-        // key=tema: el mundo lee los tokens al montar (bg, piso, grilla).
         <>
           <SalaScene
             key={theme.resolved}
             ref={sceneRef}
             agents={agents}
-            selectedKey={selectedKey}
+            selectedKey={focusKey}
             aimingKey={aimingKey}
           />
-          <SalaVoice
-            figure={() =>
-              selectedRef.current ? sceneRef.current?.world()?.figure(selectedRef.current) : undefined
-            }
-          />
+          <SalaVoice calls={() => callsRef.current} figures={() => sceneRef.current?.world()?.figures ?? []} />
         </>
       )}
 
       {/* HUD: contexto arriba a la izquierda, sin tarjeta (lo que se lee va sin marco). */}
-      <header className="pointer-events-none absolute top-5 left-6 z-20">
+      <header className="pointer-events-none absolute top-5 left-6 z-20 max-w-[560px]">
         <h1 className="text-lg font-medium">Sala de agentes</h1>
         <p className="mt-0.5 text-sm text-text-dim">
           {load.kind === "ready"
-            ? `${agents.length} agentes · ${ready} con voz`
+            ? `${agents.length} agentes · ${ready} con voz${connectedCount ? ` · ${connectedCount} en la llamada` : ""}`
             : load.kind === "loading"
               ? "Cargando…"
               : "Sin agentes"}
         </p>
         {load.kind === "ready" && (
           <p className="mt-3 text-sm text-text-dim">
-            {selectedKey ? (
+            {focusKey ? (
               <>
                 Hablando con{" "}
-                <span className="font-medium text-text">
-                  {agents.find((a) => a.key === selectedKey)?.name ?? selectedKey}
-                </span>
+                <span className="font-medium text-text">{agents.find((a) => a.key === focusKey)?.name ?? focusKey}</span>
                 <span className="text-text-faint">
                   {" · "}
-                  {voiceNote
-                    ? voiceNote
-                    : voice.error
-                      ? voice.error
-                      : voice.connecting
-                        ? "conectando…"
-                        : voice.connected
-                          ? "en llamada · baja la mano o Esc para colgar"
-                          : "baja la mano o Esc para soltar"}
+                  {anyConnecting
+                    ? "conectando…"
+                    : tertulia
+                      ? "tertulia a tres · levanta la otra mano para cambiar · Esc cuelga"
+                      : "levanta la otra mano para cambiar · Esc cuelga"}
                 </span>
               </>
             ) : aimingKey ? (
               <>
-                Apuntando a{" "}
+                Levantando la mano hacia{" "}
                 <span className="font-medium text-text">{agents.find((a) => a.key === aimingKey)?.name ?? aimingKey}</span>
               </>
             ) : bodyInFrame ? (
@@ -328,35 +386,76 @@ export default function SalaPage() {
             ) : null}
           </p>
         )}
+        {load.kind === "ready" && topic && <p className="mt-1 text-xs text-text-faint">Tema: {topic}</p>}
       </header>
+
+      {/* Controles: tertulia y colgar (arriba a la derecha). */}
+      {load.kind === "ready" && (
+        <nav className="absolute top-5 right-6 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => (tertulia ? setTertulia(false) : void startTertulia())}
+            className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
+              tertulia ? "border-accent bg-accent/10 text-accent" : "border-line bg-panel/80 text-text-dim hover:text-text"
+            }`}
+            title="Conecta a todos los agentes con voz y hace que se comenten entre sí"
+          >
+            {tertulia ? "● Tertulia" : "Tertulia"}
+          </button>
+          {(connectedCount > 0 || anyConnecting) && (
+            <button
+              type="button"
+              onClick={hangupAll}
+              className="cursor-pointer rounded-full border border-line bg-panel/80 px-3 py-1 text-xs text-text-dim hover:text-text"
+            >
+              Colgar
+            </button>
+          )}
+        </nav>
+      )}
+
+      {/* Estado por agente: quién está en la llamada, quién habla, su última frase. */}
+      {load.kind === "ready" && (
+        <section className="pointer-events-none absolute bottom-5 left-6 z-20 flex max-w-[60vw] flex-col gap-1.5">
+          {agents.map((a) => {
+            const l = live[a.key] ?? LIVE0;
+            const label = statusLabel(a);
+            if (!label && !l.last) return null;
+            return (
+              <div key={a.key} className="flex items-start gap-2 text-xs">
+                <span
+                  aria-hidden
+                  className={`mt-1 h-2 w-2 shrink-0 rounded-full ${l.speaking ? "animate-pulse" : ""}`}
+                  style={{ backgroundColor: l.status === "connected" ? a.color : "var(--color-text-faint)" }}
+                />
+                <div className="min-w-0">
+                  <span className="font-medium text-text">{a.name}</span>
+                  {label && <span className={l.error ? "text-red" : "text-text-dim"}> · {label}</span>}
+                  {l.last && <div className="truncate text-text-faint">«{l.last}»</div>}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
       {/* Cámara: estado + preview espejado (abajo a la derecha, chico). */}
       {load.kind === "ready" && (
         <aside className="absolute right-5 bottom-5 z-20 flex flex-col items-end gap-2">
           <div
             ref={previewRef}
-            className={`h-[120px] w-[160px] overflow-hidden rounded-md border border-line bg-panel ${
-              pose.video ? "" : "hidden"
-            }`}
+            className={`h-[120px] w-[160px] overflow-hidden rounded-md border border-line bg-panel ${pose.video ? "" : "hidden"}`}
           />
           <div className="flex items-center gap-2 rounded-full border border-line bg-panel/80 px-3 py-1 text-xs">
             <span
               aria-hidden
               className={`h-2 w-2 rounded-full ${
-                pose.phase === "tracking" && bodyInFrame
-                  ? "bg-green"
-                  : pose.phase === "error"
-                    ? "bg-red"
-                    : "bg-text-faint"
+                pose.phase === "tracking" && bodyInFrame ? "bg-green" : pose.phase === "error" ? "bg-red" : "bg-text-faint"
               }`}
             />
             <span className="text-text-dim">{cameraLabel}</span>
             {pose.phase === "error" && (
-              <button
-                type="button"
-                onClick={() => void pose.start()}
-                className="cursor-pointer text-accent hover:underline"
-              >
+              <button type="button" onClick={() => void pose.start()} className="cursor-pointer text-accent hover:underline">
                 reintentar
               </button>
             )}

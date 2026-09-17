@@ -74,6 +74,8 @@ export interface SalaAgentConfig {
 
 export interface SalaConfig {
   agents: SalaAgentConfig[];
+  /** Tema de la tertulia (demo a tres voces): lo reciben los agentes al conectar. */
+  topic?: string;
 }
 
 /** Lo que el agente sirve al dashboard: sin prompts ni ids de ElevenLabs. */
@@ -188,7 +190,11 @@ export function parseSalaConfig(raw: unknown): SalaConfig {
     if (keys.has(a.key)) fail(`sala.json: key repetida "${a.key}"`);
     keys.add(a.key);
   }
-  return { agents: parsed };
+  const topic = (raw as Record<string, unknown>).topic;
+  return {
+    agents: parsed,
+    ...(topic !== undefined ? { topic: str(topic, "sala.json.topic", 400) } : {}),
+  };
 }
 
 /** Idioma en que habla el personaje (el tutor reusado es inglés). */

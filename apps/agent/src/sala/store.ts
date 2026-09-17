@@ -83,6 +83,11 @@ async function exists(path: string): Promise<boolean> {
   );
 }
 
+/** Tema de la tertulia (sala.json.topic), o null. */
+export async function salaTopic(): Promise<string | null> {
+  return (await readSalaConfig())?.topic ?? null;
+}
+
 /** Lista pública para la escena: sin prompts ni ids, con el estado REAL del proyecto. */
 export async function listSalaAgents(projects: ProjectStatus[]): Promise<SalaAgentPublic[]> {
   const config = await readSalaConfig();
