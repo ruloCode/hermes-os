@@ -21,7 +21,7 @@ import { config } from "dotenv";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
-import { FINANCE_CATEGORIES, type SalaAgentConfig, type SalaVoiceOwn } from "@hermes/shared";
+import { castLabel, FINANCE_CATEGORIES, type SalaAgentConfig, type SalaConfig, type SalaVoiceOwn } from "@hermes/shared";
 
 const root = resolve(fileURLToPath(import.meta.url), "../../../..");
 config({ path: resolve(root, ".env") });
@@ -933,6 +933,100 @@ function salaConfig(a: SalaOwn, toolIds: string[]): unknown {
 
 /** Nombre del agente en ElevenLabs (upsert por nombre): prefijo para reconocerlos en el dashboard de 11Labs. */
 const salaAgentName = (a: SalaAgentConfig) => `Hermes Sala · ${a.name}`;
+const CAST_AGENT_NAME = "Hermes Sala · Elenco";
+// El director interpreta a varios personajes con disciplina de etiquetas: más
+// músculo que el router de voz normal (override: ELEVENLABS_CAST_LLM).
+const CAST_LLM = process.env.ELEVENLABS_CAST_LLM || "claude-sonnet-4-5";
+
+/**
+ * ELENCO: UN agente multi-voz (tts.supported_voices) que interpreta a todos
+ * los miembros. Un solo cerebro = contexto total y cero solapamiento; el
+ * humano nombra a uno y responde ese. El prompt es el "director": reglas de
+ * turno + la persona de cada miembro bajo su etiqueta <Nombre>…</Nombre>.
+ */
+function castPrompt(config: SalaConfig, members: SalaOwn[]): string {
+  const names = members.map((m) => `${m.name} (etiqueta <${castLabel(m.name)}>)`).join(", ");
+  const personas = members
+    .map((m) => `### ${m.name} — voz <${castLabel(m.name)}>…</${castLabel(m.name)}>\nProyecto: ${m.project}.\n${m.voice.prompt.trim()}`)
+    .join("\n\n");
+  return `Eres el DIRECTOR de la Sala de Agentes 3D de ${OWNER}: interpretas a ${members.length} personajes que conversan con ${OWNER} en una tertulia a varias voces: ${names}. Cada personaje tiene su propia voz y SOLO se oye lo que va dentro de su etiqueta.
+
+REGLAS DE TURNO (obligatorias):
+- TODO lo que digas va dentro de etiquetas de personaje: <Etiqueta>texto</Etiqueta>. Nunca texto fuera de etiquetas, nunca etiquetas anidadas, nunca corchetes ni acotaciones escénicas.
+- Si ${OWNER} nombra a un personaje ("Iván, …", "Hermes, ¿…?"), responde SOLO ese personaje.
+- Si pregunta a los dos o a nadie en particular, responde primero el más pertinente (2 frases) y el otro añade una réplica corta (1 frase) que aporte algo distinto: coincidir con matiz, discrepar con gracia, o rematar con un dato. Pueden interpelarse por su nombre.
+- Máximo 3 frases por personaje por turno. Habla natural, como en una charla entre amigos, sin listas.
+- Nunca un personaje habla por el otro ni resume lo que el otro "diría". Cada uno mantiene su tono, su acento y su ángulo.
+- Si ${OWNER} interrumpe, cede el turno: no repitas lo que ya se dijo.
+- Si hay una pausa larga, espera en silencio; no preguntes si siguen ahí.
+${config.topic ? `\nTEMA DE HOY: ${config.topic}.\n` : ""}
+Hoy es {{today}}. Contexto de la sesión: {{session_scope}}
+
+PERSONAJES:
+
+${personas}`;
+}
+
+function castConfig(config: SalaConfig, members: SalaOwn[], defaultMember: SalaOwn, toolIds: string[]): unknown {
+  const greeting = members
+    .map((m) => `<${castLabel(m.name)}>${m.voice.first_message.trim()}</${castLabel(m.name)}>`)
+    .join(" ");
+  return {
+    agent: {
+      first_message: greeting,
+      language: defaultMember.voice.language,
+      dynamic_variables: {
+        dynamic_variable_placeholders: {
+          session_scope: `${OWNER} está en la Sala de Agentes 3D.`,
+          today: "Fecha no disponible.",
+        },
+      },
+      prompt: { prompt: castPrompt(config, members), llm: CAST_LLM, tool_ids: toolIds, temperature: 0.6 },
+    },
+    tts: {
+      voice_id: defaultMember.voice.voice_id,
+      model_id: defaultMember.voice.language === "en" ? "eleven_flash_v2" : "eleven_flash_v2_5",
+      supported_voices: members.map((m) => ({
+        label: castLabel(m.name),
+        voice_id: m.voice.voice_id,
+        description: `${m.name}: úsala para TODO lo que diga ${m.name}.`,
+        ...(m.voice.language !== defaultMember.voice.language ? { language: m.voice.language } : {}),
+      })),
+    },
+    conversation: {
+      max_duration_seconds: 1800,
+      // agent_chat_response_part: el texto de la respuesta EN STREAMING (con las
+      // etiquetas de voz) mientras suena — sin él, el texto completo llega al
+      // final y la sala no sabe qué personaje está hablando hasta entonces.
+      client_events: [
+        "audio",
+        "interruption",
+        "agent_response",
+        "user_transcript",
+        "agent_response_correction",
+        "agent_tool_response",
+        "agent_chat_response_part",
+      ],
+    },
+    turn: { turn_timeout: 30, mode: "turn" },
+  };
+}
+
+async function setupCast(toolIdByName: Map<string, string>): Promise<string | null> {
+  const config = await readSalaConfig();
+  if (!config?.cast) return null;
+  const members = config.cast.members.map((k) => config.agents.find((a) => a.key === k)).filter((a): a is SalaOwn => Boolean(a && !a.voice.reuse));
+  const defaultMember = members.find((m) => m.key === (config.cast!.default ?? members[0].key)) ?? members[0];
+  console.log(`⚙️  Sala · Elenco (${members.map((m) => m.name).join(" + ")})…`);
+  for (const m of members) await ensureVoice(m.voice.voice_id, m.voice.voice_name);
+  const ids = [...new Set(members.flatMap((m) => m.voice.tools))].map((n) => toolIdByName.get(n)).filter((x): x is string => Boolean(x));
+  const agentId = await upsertAgent(CAST_AGENT_NAME, castConfig(config, members, defaultMember, ids));
+  const raw = JSON.parse(await readFile(SALA_PATH, "utf8")) as { cast: Record<string, unknown> };
+  raw.cast.agent_id = agentId;
+  await writeFile(SALA_PATH, JSON.stringify(raw, null, 2) + "\n");
+  console.log(`  ✎ cast.agent_id escrito en ${SALA_PATH}`);
+  return agentId;
+}
 
 async function setupSala(toolIdByName: Map<string, string>): Promise<{ key: string; agentId: string }[]> {
   const config = await readSalaConfig();
@@ -992,6 +1086,7 @@ if (!SALA_ONLY) {
 }
 
 const sala = await setupSala(toolIdByName);
+const castId = await setupCast(toolIdByName);
 
 console.log(`\n✅ Listo. Agrega esto a tu .env:\n
 NEXT_PUBLIC_ELEVENLABS_AGENT_ID=${agentId}
@@ -1000,3 +1095,4 @@ if (sala.length) {
   console.log("Sala de Agentes 3D (ya escritos en sala.json):");
   for (const { key, agentId: id } of sala) console.log(`  ${key} → ${id}`);
 }
+if (castId) console.log(`  cast (elenco multi-voz) → ${castId}`);

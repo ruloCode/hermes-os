@@ -1,4 +1,5 @@
 {
+  "topic": "Lo bonito que es Medellín",
   "agents": [
     {
       "key": "hermes",
@@ -9,7 +10,9 @@
       "height": 1.95,
       "build": "medium",
       "portrait_prompt": "Portrait bust of a calm AI orchestrator character, warm off-white ceramic sphere head, soft studio light, dark background, minimal, no text",
-      "voice": { "reuse": "hermes" }
+      "voice": {
+        "reuse": "hermes"
+      }
     },
     {
       "key": "ventas",
@@ -26,7 +29,13 @@
         "language": "es",
         "first_message": "Hola, soy Ventas. ¿Qué quieres saber del proyecto?",
         "prompt": "Eres el agente comercial del proyecto. Tono directo. Aquí van los hechos que debe saber de memoria (precios, fechas, prioridades del mes).",
-        "tools": ["get_project_status", "run_task", "check_task", "search_memory", "show_project_status"]
+        "tools": [
+          "get_project_status",
+          "run_task",
+          "check_task",
+          "search_memory",
+          "show_project_status"
+        ]
       }
     },
     {
@@ -37,7 +46,16 @@
       "head": "torus",
       "height": 1.65,
       "build": "medium",
-      "voice": { "reuse": "tutor" }
+      "voice": {
+        "reuse": "tutor"
+      }
     }
-  ]
+  ],
+  "cast": {
+    "agent_id": null,
+    "members": [
+      "ventas"
+    ],
+    "default": "ventas"
+  }
 }

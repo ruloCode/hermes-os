@@ -72,10 +72,33 @@ export interface SalaAgentConfig {
   voice: SalaVoice;
 }
 
+/**
+ * ELENCO: un solo agente ElevenLabs multi-voz que interpreta a varios
+ * personajes de la sala (uno por `members`), cada uno con su voz. Un solo
+ * cerebro = contexto total, sin solaparse, y "Iván, ¿…?" rutea solo. El
+ * setup lo crea con `tts.supported_voices` y escribe `agent_id`.
+ */
+export interface SalaCast {
+  agent_id?: string | null;
+  /** Claves de agentes con voz PROPIA (voice_id) y habilitados. */
+  members: string[];
+  /** Quién habla si el modelo olvida etiquetar (default: el primero). */
+  default?: string;
+}
+
 export interface SalaConfig {
   agents: SalaAgentConfig[];
   /** Tema de la tertulia (demo a tres voces): lo reciben los agentes al conectar. */
   topic?: string;
+  cast?: SalaCast;
+}
+
+/** Etiqueta de voz de un personaje en el elenco: nombre sin acentos ni espacios (`<Ivan>…</Ivan>`). */
+export function castLabel(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]/g, "");
 }
 
 /** Lo que el agente sirve al dashboard: sin prompts ni ids de ElevenLabs. */
@@ -96,6 +119,16 @@ export interface SalaAgentPublic {
   /** Existe `~/.hermes-os/avatars/sala/<key>.png`. */
   portrait: boolean;
   reuse: SalaReuse | null;
+}
+
+/** Elenco tal como lo ve el dashboard. */
+export interface SalaCastPublic {
+  /** Hay agent_id: se le puede pedir token con ?agent=cast. */
+  ready: boolean;
+  members: string[];
+  default: string;
+  /** clave → etiqueta de voz (<Etiqueta>…</Etiqueta>) para saber quién habla. */
+  labels: Record<string, string>;
 }
 
 export class SalaValidationError extends Error {}
@@ -191,9 +224,40 @@ export function parseSalaConfig(raw: unknown): SalaConfig {
     keys.add(a.key);
   }
   const topic = (raw as Record<string, unknown>).topic;
+  const castRaw = (raw as Record<string, unknown>).cast;
+  let cast: SalaCast | undefined;
+  if (castRaw !== undefined) {
+    if (!castRaw || typeof castRaw !== "object") fail("sala.json.cast: debe ser un objeto");
+    const c = castRaw as Record<string, unknown>;
+    if (!Array.isArray(c.members) || c.members.length < 1 || !c.members.every((m) => typeof m === "string")) {
+      fail("sala.json.cast.members: lista de claves (≥1)");
+    }
+    const members = c.members as string[];
+    const labels = new Set<string>();
+    for (const m of members) {
+      const a = parsed.find((x) => x.key === m);
+      if (!a) fail(`sala.json.cast: "${m}" no es un agente`);
+      if (a.voice.reuse) fail(`sala.json.cast: "${m}" reusa un agente; el elenco necesita voice_id propio`);
+      if (a.enabled === false) fail(`sala.json.cast: "${m}" está deshabilitado`);
+      const label = castLabel(a.name);
+      if (!label || labels.has(label)) fail(`sala.json.cast: etiqueta de voz repetida o vacía para "${m}"`);
+      labels.add(label);
+    }
+    if (c.default !== undefined && (typeof c.default !== "string" || !members.includes(c.default))) {
+      fail("sala.json.cast.default: debe ser uno de members");
+    }
+    const agentId =
+      c.agent_id === undefined || c.agent_id === null
+        ? null
+        : typeof c.agent_id === "string" && c.agent_id.trim()
+          ? c.agent_id.trim()
+          : fail("sala.json.cast.agent_id inválido");
+    cast = { agent_id: agentId, members, ...(typeof c.default === "string" ? { default: c.default } : {}) };
+  }
   return {
     agents: parsed,
     ...(topic !== undefined ? { topic: str(topic, "sala.json.topic", 400) } : {}),
+    ...(cast ? { cast } : {}),
   };
 }
 

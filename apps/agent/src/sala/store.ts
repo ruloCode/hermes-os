@@ -1,12 +1,14 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  castLabel,
   parseSalaConfig,
   salaAgentLanguage,
   SalaValidationError,
   type ProjectStatus,
   type SalaAgentConfig,
   type SalaAgentPublic,
+  type SalaCastPublic,
   type SalaConfig,
 } from "@hermes/shared";
 import { HERMES_HOME } from "../home.js";
@@ -62,6 +64,13 @@ export function salaAgentId(agent: SalaAgentConfig): string | null {
 export async function resolveSalaAgentId(key: string): Promise<{ agentId: string | null; hint: string }> {
   const config = await readSalaConfig();
   if (!config) return { agentId: null, hint: `No existe ${SALA_PATH} (plantilla en docs/sala.example.json)` };
+  if (key === "cast") {
+    if (!config.cast) return { agentId: null, hint: "sala.json no define un elenco (cast)" };
+    return {
+      agentId: config.cast.agent_id ?? null,
+      hint: config.cast.agent_id ? "" : "El elenco aún no existe en ElevenLabs — corre pnpm setup:elevenlabs --sala",
+    };
+  }
   const agent = config.agents.find((a) => a.key === key);
   if (!agent) return { agentId: null, hint: `sala.json no tiene un agente con key "${key}"` };
   const agentId = salaAgentId(agent);
@@ -81,6 +90,23 @@ async function exists(path: string): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+/** Elenco público (o null si sala.json no lo define). */
+export async function salaCast(): Promise<SalaCastPublic | null> {
+  const config = await readSalaConfig();
+  if (!config?.cast) return null;
+  const labels: Record<string, string> = {};
+  for (const m of config.cast.members) {
+    const a = config.agents.find((x) => x.key === m);
+    if (a) labels[m] = castLabel(a.name);
+  }
+  return {
+    ready: Boolean(config.cast.agent_id),
+    members: config.cast.members,
+    default: config.cast.default ?? config.cast.members[0],
+    labels,
+  };
 }
 
 /** Tema de la tertulia (sala.json.topic), o null. */

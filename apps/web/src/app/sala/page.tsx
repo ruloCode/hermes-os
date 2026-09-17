@@ -3,12 +3,17 @@
 // SALA DE AGENTES 3D — página suelta a pantalla completa (fuera del shell,
 // hermana de /dev/terminator): agentes de pie en arco, cada uno dueño de un
 // proyecto REAL del vault, y tu cuerpo por webcam (MediaPipe Pose) como
-// marioneta de espaldas al frente de la sala. Levantar la mano izquierda o la
-// derecha ENFOCA a ese agente: se conecta si hace falta y el micrófono le
-// habla a él; los demás siguen en la llamada con el mic en silencio (bajar la
-// mano no cuelga a nadie). Con TERTULIA activa, los agentes se escuchan entre
-// sí y por cada turno tuyo el compañero comenta. Los personajes salen de
-// ~/.hermes-os/sala.json vía GET /sala/agents. Plan: docs/sala-de-agentes-3d.md.
+// marioneta de espaldas al frente de la sala.
+//
+// Dos modos de voz, según sala.json:
+//  - ELENCO (`cast`, el del demo): UNA sesión con un agente multi-voz que
+//    interpreta a todos los personajes. Hablas libre, los nombras y responde
+//    ese; si preguntas a todos, responden en secuencia sin pisarse (un solo
+//    flujo de audio). La sala se conecta sola cuando la cámara te ve.
+//    Levantar la mano hacia uno es opcional: solo le avisa a quién miras.
+//  - SESIONES (sin cast): una sesión por agente; levantar la mano enfoca el
+//    micrófono; "Tertulia" hace que se comenten entre sí por relevo.
+// Plan y decisiones: docs/sala-de-agentes-3d.md.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
@@ -20,6 +25,7 @@ import {
   raisedHandTarget,
   type PointTarget,
   type SalaAgentPublic,
+  type SalaCastPublic,
 } from "@hermes/shared";
 import { hermesFetch } from "@/lib/hermes";
 import { OWNER } from "@/lib/owner";
@@ -27,6 +33,7 @@ import { useTheme } from "@/state/ThemeProvider";
 import { usePose, type PoseSample } from "@/hooks/usePose";
 import { AVATAR_ORIGIN } from "@/lib/sala/world";
 import { SalaCalls, type SalaCallEvent, type SalaCallStatus } from "@/lib/sala/calls";
+import { CastCall, type CastEvent } from "@/lib/sala/cast";
 import { salaClientTools } from "@/lib/sala/client-tools";
 import { SalaScene, type SalaSceneHandle } from "@/components/sala/SalaScene";
 import { SalaVoice } from "@/components/sala/SalaVoice";
@@ -35,7 +42,7 @@ declare global {
   interface Window {
     /** QA: estado de la marioneta, el mundo y las llamadas (Playwright). */
     __hermesSalaDebug?: () => unknown;
-    /** QA: texto del humano al agente enfocado, sin micrófono. */
+    /** QA: texto del humano a la sala (elenco) o al agente enfocado (sesiones), sin micrófono. */
     __hermesSalaSay?: (text: string) => boolean;
   }
 }
@@ -48,7 +55,7 @@ type Load =
   | { kind: "off" }
   | { kind: "invalid"; error: string; path: string }
   | { kind: "empty"; path: string }
-  | { kind: "ready"; agents: SalaAgentPublic[]; topic: string | null };
+  | { kind: "ready"; agents: SalaAgentPublic[]; topic: string | null; cast: SalaCastPublic | null };
 
 interface AgentLive {
   status: SalaCallStatus;
@@ -56,15 +63,21 @@ interface AgentLive {
   last: string;
   error: string | null;
 }
-
 const LIVE0: AgentLive = { status: "idle", speaking: false, last: "", error: null };
 
-/** Token por clave: hermes/tutor reusados o `agent:<clave>`; misma ruta Next que el shell. */
-async function fetchToken(agent: SalaAgentPublic) {
-  const which = agent.reuse === "hermes" ? "" : agent.reuse === "tutor" ? "tutor" : agent.key;
+interface Line {
+  /** Clave del personaje, o null = el humano. */
+  key: string | null;
+  text: string;
+}
+
+/** Token por clave: hermes/tutor reusados, `cast` (elenco) o `agent:<clave>`; misma ruta Next que el shell. */
+async function fetchTokenFor(which: string) {
   const res = await fetch(which ? `/api/elevenlabs/token?agent=${encodeURIComponent(which)}` : "/api/elevenlabs/token");
   return (await res.json()) as { conversationToken?: string; signedUrl?: string; error?: string };
 }
+const fetchToken = (agent: SalaAgentPublic) =>
+  fetchTokenFor(agent.reuse === "hermes" ? "" : agent.reuse === "tutor" ? "tutor" : agent.key);
 
 export default function SalaPage() {
   const theme = useTheme();
@@ -80,10 +93,16 @@ export default function SalaPage() {
         if (!alive) return;
         // 404 = HERMES_SALA=off en el agente · 500 = sala.json no valida · 200 = lista.
         if (res.status === 404) return setLoad({ kind: "off" });
-        const r = (await res.json()) as { agents?: SalaAgentPublic[]; topic?: string | null; path: string; error?: string };
+        const r = (await res.json()) as {
+          agents?: SalaAgentPublic[];
+          topic?: string | null;
+          cast?: SalaCastPublic | null;
+          path: string;
+          error?: string;
+        };
         if (!res.ok || r.error) return setLoad({ kind: "invalid", error: r.error ?? `HTTP ${res.status}`, path: r.path });
         if (!r.agents?.length) return setLoad({ kind: "empty", path: r.path });
-        setLoad({ kind: "ready", agents: r.agents, topic: r.topic ?? null });
+        setLoad({ kind: "ready", agents: r.agents, topic: r.topic ?? null, cast: r.cast?.ready ? r.cast : null });
       })
       .catch((err: unknown) => {
         if (alive) setLoad({ kind: "offline", error: err instanceof Error ? err.message : String(err) });
@@ -95,19 +114,88 @@ export default function SalaPage() {
 
   const agents = load.kind === "ready" ? load.agents : NO_AGENTS;
   const topic = load.kind === "ready" ? load.topic : null;
+  const cast = load.kind === "ready" ? load.cast : null;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const nameOf = (key: string | null) => (key ? agents.find((a) => a.key === key)?.name ?? key : OWNER || "Tú");
 
-  // ── Llamadas (una sesión por agente, todas vivas) ──────────────────────
+  // Bitácora + transcript corto para el HUD y el QA.
+  const logRef = useRef<{ t: number; ev: SalaCallEvent | CastEvent }[]>([]);
+  const [lines, setLines] = useState<Line[]>([]);
+  const pushLine = useCallback((l: Line) => setLines((prev) => [...prev.slice(-7), l]), []);
+
+  // ── Modo ELENCO ────────────────────────────────────────────────────────
+  const castRef = useRef<CastCall | null>(null);
+  const [castLive, setCastLive] = useState<{ status: SalaCallStatus; speaking: boolean; error: string | null }>({
+    status: "idle",
+    speaking: false,
+    error: null,
+  });
+
+  useEffect(() => {
+    if (!cast) return;
+    const onEvent = (ev: CastEvent) => {
+      logRef.current.push({ t: Math.round(performance.now()), ev });
+      if (logRef.current.length > 200) logRef.current.shift();
+      if (ev.kind === "status") setCastLive((s) => ({ ...s, status: ev.status ?? s.status, error: ev.status === "error" ? s.error : null }));
+      else if (ev.kind === "mode") setCastLive((s) => ({ ...s, speaking: ev.mode === "speaking" }));
+      else if (ev.kind === "line") pushLine({ key: ev.key ?? null, text: ev.text ?? "" });
+      else setCastLive((s) => ({ ...s, error: ev.text ?? "error" }));
+    };
+    const call = new CastCall({
+      fetchToken: () => fetchTokenFor("cast"),
+      clientTools: salaClientTools(),
+      labels: cast.labels,
+      defaultKey: cast.default,
+      owner: OWNER || "el usuario",
+      onEvent,
+    });
+    castRef.current = call;
+    window.__hermesSalaSay = (text) => call.say(text);
+    return () => {
+      delete window.__hermesSalaSay;
+      void call.hangup();
+      castRef.current = null;
+    };
+  }, [cast, pushLine]);
+
+  const castFraming = useCallback(() => {
+    const members = (cast?.members ?? []).map((k) => agentsRef.current.find((a) => a.key === k)).filter(Boolean) as SalaAgentPublic[];
+    return [
+      `${OWNER || "El usuario"} está en la Sala de Agentes 3D frente a ${members.map((m) => m.name).join(" y ")}. Le habla a la sala con la voz; cuando nombra a uno, responde ese.`,
+      topic ? `Tema de hoy: ${topic}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }, [cast, topic]);
+
+  const connectCast = useCallback(() => {
+    const call = castRef.current;
+    if (!call || call.isConnected() || call.getStatus() === "connecting") return;
+    void call.connect(castFraming());
+  }, [castFraming]);
+
+  const hangupCast = useCallback(() => {
+    void castRef.current?.hangup();
+    setLines([]);
+  }, []);
+
+  // La sala se enciende sola la primera vez que la cámara te ve.
+  const autoRef = useRef(false);
+  useEffect(() => {
+    if (!cast || !bodyInFrame || autoRef.current) return;
+    autoRef.current = true;
+    connectCast();
+  }, [cast, bodyInFrame, connectCast]);
+
+  // ── Modo SESIONES (sin elenco) ─────────────────────────────────────────
   const callsRef = useRef<SalaCalls | null>(null);
   const [live, setLive] = useState<Record<string, AgentLive>>({});
   const [tertulia, setTertulia] = useState(false);
   const [focusKey, setFocusKey] = useState<string | null>(null);
 
-  // Bitácora de eventos de las llamadas (QA: window.__hermesSalaDebug().log).
-  const logRef = useRef<{ t: number; ev: SalaCallEvent }[]>([]);
-
   useEffect(() => {
+    if (cast || load.kind !== "ready") return;
     const onEvent = (ev: SalaCallEvent) => {
       logRef.current.push({ t: Math.round(performance.now()), ev });
       if (logRef.current.length > 200) logRef.current.shift();
@@ -125,9 +213,11 @@ export default function SalaPage() {
                 : { ...cur, error: ev.text ?? "error" };
         return { ...prev, [ev.key]: next };
       });
+      if (ev.kind === "message") pushLine({ key: ev.role === "agent" ? ev.key : null, text: ev.text ?? "" });
       if (ev.kind === "status") setFocusKey(callsRef.current?.focusedKey() ?? null);
     };
     const calls = new SalaCalls({ fetchToken, clientTools: salaClientTools(), owner: OWNER || "el usuario", onEvent });
+    calls.topic = topic;
     callsRef.current = calls;
     window.__hermesSalaSay = (text) => calls.say(text);
     return () => {
@@ -135,16 +225,12 @@ export default function SalaPage() {
       calls.dispose();
       callsRef.current = null;
     };
-  }, []);
+  }, [cast, load.kind, topic, pushLine]);
 
-  useEffect(() => {
-    if (callsRef.current) callsRef.current.topic = topic;
-  }, [topic]);
   useEffect(() => {
     if (callsRef.current) callsRef.current.tertulia = tertulia;
   }, [tertulia]);
 
-  /** Enfoca a un agente: lo conecta si hace falta y le da el micrófono. */
   const focusAgent = useCallback(async (key: string) => {
     const calls = callsRef.current;
     const agent = agentsRef.current.find((a) => a.key === key);
@@ -161,7 +247,6 @@ export default function SalaPage() {
     setFocusKey(calls.focusedKey());
   }, []);
 
-  /** Tertulia: conecta a TODOS los que tienen voz y enciende el relevo de turnos. */
   const startTertulia = useCallback(async () => {
     const calls = callsRef.current;
     if (!calls) return;
@@ -173,10 +258,12 @@ export default function SalaPage() {
 
   const hangupAll = useCallback(() => {
     void callsRef.current?.hangupAll();
+    hangupCast();
     setTertulia(false);
     setFocusKey(null);
     setLive({});
-  }, []);
+    setLines([]);
+  }, [hangupCast]);
 
   // ── Marioneta + mano levantada ─────────────────────────────────────────
   const smootherRef = useRef(new PuppetSmoother());
@@ -184,8 +271,23 @@ export default function SalaPage() {
   // otra mano (o con Esc / Colgar). Infinity = nunca suelta por tiempo.
   const machineRef = useRef(new PointingMachine(undefined, Number.POSITIVE_INFINITY));
   const [aimingKey, setAimingKey] = useState<string | null>(null);
+  const [handKey, setHandKey] = useState<string | null>(null);
   const aimingRef = useRef<string | null>(null);
   const selectedRef = useRef<string | null>(null);
+
+  const onHandSelect = useCallback(
+    (key: string) => {
+      if (cast) {
+        // En el elenco la mano no cambia de micrófono: solo le dice a la sala a quién miras.
+        setHandKey(key);
+        castRef.current?.context(`${OWNER || "El usuario"} levanta la mano hacia ${nameOf(key)}: le está hablando a ${nameOf(key)}.`);
+        return;
+      }
+      void focusAgent(key);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cast, focusAgent, agents],
+  );
 
   const applyPointing = useCallback(
     (target: string | null, handUp: boolean, tMs: number) => {
@@ -203,10 +305,10 @@ export default function SalaPage() {
       }
       if (st.event?.kind === "select" && st.event.key !== selectedRef.current) {
         selectedRef.current = st.event.key;
-        void focusAgent(st.event.key);
+        onHandSelect(st.event.key);
       }
     },
-    [focusAgent],
+    [onHandSelect],
   );
 
   const onSample = useCallback(
@@ -249,6 +351,7 @@ export default function SalaPage() {
       selectedRef.current = null;
       aimingRef.current = null;
       setAimingKey(null);
+      setHandKey(null);
       sceneRef.current?.world()?.figures.forEach((f) => f.setProgress(0));
       hangupAll();
     };
@@ -262,6 +365,7 @@ export default function SalaPage() {
       const world = sceneRef.current?.world();
       const puppet = sceneRef.current?.puppet() ?? null;
       const calls = callsRef.current;
+      const c = castRef.current;
       let headScreen: { x: number; y: number } | null = null;
       if (world && puppet) {
         const h = puppet.debug().head;
@@ -275,6 +379,8 @@ export default function SalaPage() {
         world: Boolean(world),
         aiming: aimingRef.current,
         selected: selectedRef.current,
+        mode: c ? "cast" : "sessions",
+        cast: c ? { status: c.getStatus(), speaking: c.isSpeaking(), speakingKey: c.speakingKey(), ...c.debug() } : null,
         focused: calls?.focusedKey() ?? null,
         calls: calls
           ? Object.fromEntries(calls.keys().map((k) => [k, { status: calls.status(k), speaking: calls.speaking(k) }]))
@@ -284,7 +390,7 @@ export default function SalaPage() {
         renderFrame: world?.renderer.info.render.frame ?? null,
         headScreen,
         bodyInFrame: bodyRef.current,
-        log: logRef.current.slice(-40),
+        log: logRef.current.slice(-60),
       };
     };
     return () => {
@@ -313,9 +419,15 @@ export default function SalaPage() {
     };
   }, [pose.video]);
 
+  // ── Derivados para el HUD ──────────────────────────────────────────────
   const ready = agents.filter((a) => a.ready).length;
-  const connectedCount = agents.filter((a) => live[a.key]?.status === "connected").length;
-  const anyConnecting = agents.some((a) => live[a.key]?.status === "connecting");
+  const connectedCount = cast
+    ? castLive.status === "connected"
+      ? agents.filter((a) => cast.members.includes(a.key)).length
+      : 0
+    : agents.filter((a) => live[a.key]?.status === "connected").length;
+  const anyConnecting = cast ? castLive.status === "connecting" : agents.some((a) => live[a.key]?.status === "connecting");
+  const inCall = connectedCount > 0 || anyConnecting;
 
   const cameraLabel =
     pose.phase === "tracking"
@@ -328,13 +440,53 @@ export default function SalaPage() {
           ? pose.error ?? "Cámara sin acceso"
           : "Cámara apagada";
 
-  const statusLabel = (a: SalaAgentPublic): string => {
-    const l = live[a.key] ?? LIVE0;
-    if (l.error) return l.error;
-    if (l.status === "connecting") return "conectando…";
-    if (l.status === "connected") return l.speaking ? "hablando" : focusKey === a.key ? "te escucha" : "en la llamada";
-    return a.ready ? "" : "sin voz";
+  const headline = (): React.ReactNode => {
+    if (cast) {
+      if (castLive.error) return <span className="text-red">{castLive.error}</span>;
+      if (castLive.status === "connecting") return "Conectando la sala…";
+      if (castLive.status === "connected") {
+        return (
+          <>
+            En la sala con{" "}
+            <span className="font-medium text-text">{cast.members.map((k) => nameOf(k)).join(" e ")}</span>
+            <span className="text-text-faint"> · habla libre, nómbralos para dirigirte a uno · Esc cuelga</span>
+          </>
+        );
+      }
+      return bodyInFrame ? "Entrando a la sala…" : "Entra al cuadro y la sala se enciende";
+    }
+    if (focusKey) {
+      return (
+        <>
+          Hablando con <span className="font-medium text-text">{nameOf(focusKey)}</span>
+          <span className="text-text-faint">
+            {" · "}
+            {anyConnecting ? "conectando…" : tertulia ? "tertulia · levanta la otra mano para cambiar · Esc cuelga" : "levanta la otra mano para cambiar · Esc cuelga"}
+          </span>
+        </>
+      );
+    }
+    if (aimingKey) {
+      return (
+        <>
+          Levantando la mano hacia <span className="font-medium text-text">{nameOf(aimingKey)}</span>
+        </>
+      );
+    }
+    return bodyInFrame ? "Levanta la mano izquierda o la derecha para hablar con ese agente" : null;
   };
+
+  const pulseOf = useCallback(
+    (key: string) => {
+      const c = castRef.current;
+      if (c) return { speaking: c.speakingKey() === key, volume: c.volume() };
+      const calls = callsRef.current;
+      return { speaking: Boolean(calls?.speaking(key)), volume: calls?.volume(key) ?? 0 };
+    },
+    [],
+  );
+
+  const highlightKey = cast ? (castLive.speaking ? castRef.current?.speakingKey() ?? null : handKey) : focusKey;
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-bg text-text">
@@ -344,65 +496,53 @@ export default function SalaPage() {
             key={theme.resolved}
             ref={sceneRef}
             agents={agents}
-            selectedKey={focusKey}
+            selectedKey={highlightKey}
             aimingKey={aimingKey}
           />
-          <SalaVoice calls={() => callsRef.current} figures={() => sceneRef.current?.world()?.figures ?? []} />
+          <SalaVoice pulseOf={pulseOf} figures={() => sceneRef.current?.world()?.figures ?? []} />
         </>
       )}
 
       {/* HUD: contexto arriba a la izquierda, sin tarjeta (lo que se lee va sin marco). */}
-      <header className="pointer-events-none absolute top-5 left-6 z-20 max-w-[560px]">
+      <header className="pointer-events-none absolute top-5 left-6 z-20 max-w-[620px]">
         <h1 className="text-lg font-medium">Sala de agentes</h1>
         <p className="mt-0.5 text-sm text-text-dim">
           {load.kind === "ready"
-            ? `${agents.length} agentes · ${ready} con voz${connectedCount ? ` · ${connectedCount} en la llamada` : ""}`
+            ? `${agents.length} agentes · ${ready} con voz${connectedCount ? ` · ${connectedCount} en la llamada` : ""}${cast ? " · elenco" : ""}`
             : load.kind === "loading"
               ? "Cargando…"
               : "Sin agentes"}
         </p>
-        {load.kind === "ready" && (
-          <p className="mt-3 text-sm text-text-dim">
-            {focusKey ? (
-              <>
-                Hablando con{" "}
-                <span className="font-medium text-text">{agents.find((a) => a.key === focusKey)?.name ?? focusKey}</span>
-                <span className="text-text-faint">
-                  {" · "}
-                  {anyConnecting
-                    ? "conectando…"
-                    : tertulia
-                      ? "tertulia a tres · levanta la otra mano para cambiar · Esc cuelga"
-                      : "levanta la otra mano para cambiar · Esc cuelga"}
-                </span>
-              </>
-            ) : aimingKey ? (
-              <>
-                Levantando la mano hacia{" "}
-                <span className="font-medium text-text">{agents.find((a) => a.key === aimingKey)?.name ?? aimingKey}</span>
-              </>
-            ) : bodyInFrame ? (
-              "Levanta la mano izquierda o la derecha para hablar con ese agente"
-            ) : null}
-          </p>
-        )}
+        {load.kind === "ready" && <p className="mt-3 text-sm text-text-dim">{headline()}</p>}
         {load.kind === "ready" && topic && <p className="mt-1 text-xs text-text-faint">Tema: {topic}</p>}
       </header>
 
-      {/* Controles: tertulia y colgar (arriba a la derecha). */}
+      {/* Controles (arriba a la derecha). */}
       {load.kind === "ready" && (
         <nav className="absolute top-5 right-6 z-20 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => (tertulia ? setTertulia(false) : void startTertulia())}
-            className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
-              tertulia ? "border-accent bg-accent/10 text-accent" : "border-line bg-panel/80 text-text-dim hover:text-text"
-            }`}
-            title="Conecta a todos los agentes con voz y hace que se comenten entre sí"
-          >
-            {tertulia ? "● Tertulia" : "Tertulia"}
-          </button>
-          {(connectedCount > 0 || anyConnecting) && (
+          {cast ? (
+            !inCall && (
+              <button
+                type="button"
+                onClick={connectCast}
+                className="cursor-pointer rounded-full border border-accent bg-accent/10 px-3 py-1 text-xs text-accent"
+              >
+                Entrar a la sala
+              </button>
+            )
+          ) : (
+            <button
+              type="button"
+              onClick={() => (tertulia ? setTertulia(false) : void startTertulia())}
+              className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
+                tertulia ? "border-accent bg-accent/10 text-accent" : "border-line bg-panel/80 text-text-dim hover:text-text"
+              }`}
+              title="Conecta a todos los agentes con voz y hace que se comenten entre sí"
+            >
+              {tertulia ? "● Tertulia" : "Tertulia"}
+            </button>
+          )}
+          {inCall && (
             <button
               type="button"
               onClick={hangupAll}
@@ -414,24 +554,21 @@ export default function SalaPage() {
         </nav>
       )}
 
-      {/* Estado por agente: quién está en la llamada, quién habla, su última frase. */}
-      {load.kind === "ready" && (
-        <section className="pointer-events-none absolute bottom-5 left-6 z-20 flex max-w-[60vw] flex-col gap-1.5">
-          {agents.map((a) => {
-            const l = live[a.key] ?? LIVE0;
-            const label = statusLabel(a);
-            if (!label && !l.last) return null;
+      {/* Transcript corto: quién dijo qué (últimas líneas). */}
+      {load.kind === "ready" && lines.length > 0 && (
+        <section className="pointer-events-none absolute bottom-5 left-6 z-20 flex max-w-[58vw] flex-col gap-1 text-xs">
+          {lines.map((l, i) => {
+            const a = l.key ? agents.find((x) => x.key === l.key) : null;
             return (
-              <div key={a.key} className="flex items-start gap-2 text-xs">
+              <div key={i} className={`flex items-start gap-2 ${i === lines.length - 1 ? "" : "opacity-70"}`}>
                 <span
                   aria-hidden
-                  className={`mt-1 h-2 w-2 shrink-0 rounded-full ${l.speaking ? "animate-pulse" : ""}`}
-                  style={{ backgroundColor: l.status === "connected" ? a.color : "var(--color-text-faint)" }}
+                  className="mt-1 h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: a?.color ?? "var(--color-text-faint)" }}
                 />
                 <div className="min-w-0">
-                  <span className="font-medium text-text">{a.name}</span>
-                  {label && <span className={l.error ? "text-red" : "text-text-dim"}> · {label}</span>}
-                  {l.last && <div className="truncate text-text-faint">«{l.last}»</div>}
+                  <span className="font-medium text-text">{a?.name ?? (OWNER || "Tú")}</span>
+                  <span className="text-text-dim"> · {l.text}</span>
                 </div>
               </div>
             );
