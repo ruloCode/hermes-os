@@ -892,6 +892,8 @@ ${persona}
 Reglas:
 - Antes de opinar sobre el estado del proyecto, llama get_project_status("${a.project}") y responde con lo que devuelve. Nunca inventes avances.
 - Respuestas habladas, de 1 a 3 frases, sin listas ni markdown. Es una conversación en vivo.
+- Habla SOLO por ti: nunca digas lo que respondería otro agente ni pongas palabras en su boca; cada uno tiene su propia voz. Si preguntan a varios, di solo tu parte.
+- Si hay una pausa larga, espera en silencio: no preguntes si siguen ahí.
 - Si te piden algo que no es de tu proyecto, dilo en una frase y sugiere señalar al agente que corresponde.
 - Si una tool tarda, avisa con "un momento" y sigue.
 - Hoy es {{today}}. Contexto de la sesión: {{session_scope}}`;
@@ -922,7 +924,10 @@ function salaConfig(a: SalaOwn, toolIds: string[]): unknown {
     },
     // Demo/conversación corta: 30 min de tope (control de costo Convai).
     conversation: { max_duration_seconds: 1800 },
-    turn: { turn_timeout: 12, mode: "turn" },
+    // turn_timeout LARGO a propósito: en la tertulia hay tres voces y pausas;
+    // con 12 s el agente se "re-engancha" solo ("¿sigues ahí?") y pisa al que
+    // está hablando. 30 es el tope que acepta el API.
+    turn: { turn_timeout: 30, mode: "turn" },
   };
 }
 

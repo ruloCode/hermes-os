@@ -56,14 +56,22 @@ export class SalaCalls {
   private connecting = new Set<string>();
   tertulia = false;
   topic: string | null = null;
-  /** Comentario pendiente: cuando `from` termine de hablar, `to` comenta `text`. */
-  private pendingComment: { from: string; to: string; text: string } | null = null;
+  /** Acciones que disparan una voz, en espera de que NADIE esté hablando. */
+  private quietQueue: (() => void)[] = [];
+  /** Comentario pendiente de la tertulia (uno por turno del humano). */
+  private pendingComment: { to: string; text: string } | null = null;
+  /** Primer mensaje recibido por línea (para no pisar el saludo al conectar en secuencia). */
+  private readonly greeted = new Set<string>();
   /** El humano habló desde el último comentario: el próximo turno del enfocado merece réplica. */
   private roundOpen = false;
   /** Debounce del "terminó de hablar": el modo parpadea speaking/listening entre frases. */
   private quietTimer: ReturnType<typeof setTimeout> | null = null;
   /** Último texto del humano (dedupe entre say() y un eco del SDK). */
   private lastUser: { text: string; t: number } | null = null;
+  /** Re-aplica los mutes tras un "listening" del compañero (parpadea entre frases). */
+  private muteTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Cinturón de seguridad: los mutes se re-aplican periódicamente (el SDK ignora el mute si la sala aún no está conectada). */
+  private readonly muteInterval = setInterval(() => this.applyMutes(), 1500);
 
   constructor(private readonly opts: SalaCallsOptions) {}
 
@@ -107,7 +115,9 @@ export class SalaCalls {
       );
     }
     if (this.topic) parts.push(`Tema de la conversación: ${this.topic}.`);
-    parts.push("Respuestas cortas y habladas (1 a 3 frases). Es una conversación en vivo entre tres.");
+    parts.push(
+      "Respuestas cortas y habladas (1 a 3 frases). Es una conversación en vivo entre tres. Habla SOLO por ti: nunca digas lo que respondería el otro agente ni pongas palabras en su boca — tiene su propia voz y responderá él. Si te preguntan a los dos, di solo tu parte. Si hay una pausa, espera en silencio; no preguntes si siguen ahí.",
+    );
     return parts.join("\n");
   }
 
@@ -158,10 +168,11 @@ export class SalaCalls {
         : await VoiceConversation.startSession({ ...common, signedUrl: creds.signedUrl!, connectionType: "websocket" });
       const line: Line = { conv, agent, status: "connected", mode: "listening", lastAgentText: "" };
       this.lines.set(key, line);
-      // Mic: solo el enfocado escucha; el nuevo entra callado salvo que sea el primero.
-      const shouldFocus = this.focused === null;
-      conv.setMicMuted(!shouldFocus);
-      if (shouldFocus) this.focused = key;
+      // Mic: solo el enfocado escucha; el nuevo entra callado salvo que sea el
+      // primero. applyMutes se repite al conectar de verdad y cada 1,5 s: el
+      // SDK descarta setMicMuted si la sala WebRTC aún no está lista.
+      if (this.focused === null) this.focused = key;
+      this.applyMutes();
       // Presentar al recién llegado a los que ya estaban.
       for (const other of this.lines.values()) {
         if (other.agent.key === key) continue;
@@ -181,33 +192,72 @@ export class SalaCalls {
    * (first_message) antes de meter al siguiente: si no, dos voces arrancan
    * encima. Tope de espera por agente para no colgarse si nunca habla.
    */
-  async connectAll(agents: SalaAgentPublic[], waitMs = 9000): Promise<void> {
+  async connectAll(agents: SalaAgentPublic[], waitMs = 12000): Promise<void> {
     for (const a of agents) {
       if (this.isConnected(a.key)) continue;
       await this.connect(a);
       const t0 = performance.now();
-      // Espera a que EMPIECE a hablar (≤2 s) y luego a que termine.
-      while (performance.now() - t0 < 2000 && !this.speaking(a.key)) await sleep(100);
-      while (performance.now() - t0 < waitMs && this.speaking(a.key)) await sleep(100);
+      // Espera su primer mensaje (el saludo puede tardar varios segundos en
+      // arrancar) y luego a que TODOS callen; tope para no colgarse.
+      while (performance.now() - t0 < waitMs && !this.greeted.has(a.key)) await sleep(100);
+      while (performance.now() - t0 < waitMs && this.anySpeaking()) await sleep(100);
+      await sleep(400);
     }
+  }
+
+  private anySpeaking(): boolean {
+    return [...this.lines.values()].some((l) => l.mode === "speaking");
+  }
+
+  /** Ejecuta `fn` ahora si nadie habla; si no, cuando llegue el silencio (700 ms seguidos). */
+  private whenQuiet(fn: () => void): void {
+    if (!this.anySpeaking()) fn();
+    else this.quietQueue.push(fn);
+  }
+
+  private flushQuiet(): void {
+    if (this.anySpeaking()) return;
+    const q = this.quietQueue;
+    this.quietQueue = [];
+    // Una sola voz por silencio: la primera dispara, el resto espera al próximo.
+    const first = q.shift();
+    if (q.length) this.quietQueue = q;
+    first?.();
   }
 
   /** A quién le habla el micrófono. Los demás siguen conectados, en silencio. */
   focus(key: string): void {
     if (!this.lines.has(key)) return;
     this.focused = key;
-    for (const [k, l] of this.lines) l.conv.setMicMuted(k !== key);
+    this.applyMutes();
     this.opts.onEvent({ key, kind: "status", status: this.status(key) });
+  }
+
+  /**
+   * Regla de los micrófonos, en UN solo sitio: solo el enfocado escucha, y
+   * NADIE escucha mientras un compañero habla — si no, el enfocado oye el TTS
+   * del otro por los parlantes y le contesta encima. Idempotente.
+   */
+  private applyMutes(): void {
+    const partnerSpeaking = [...this.lines].some(([k, l]) => k !== this.focused && l.mode === "speaking");
+    for (const [k, l] of this.lines) {
+      if (l.status !== "connected") continue;
+      l.conv.setMicMuted(partnerSpeaking || k !== this.focused);
+    }
   }
 
   /** Texto del humano al agente enfocado (QA sin micrófono; también para chips). */
   say(text: string): boolean {
     const l = this.focused ? this.lines.get(this.focused) : undefined;
     if (!l || l.status !== "connected") return false;
-    l.conv.sendUserMessage(text);
-    // El SDK no emite onMessage(user) para lo que mandamos por texto: se
-    // procesa aquí como si el humano lo hubiera dicho (contexto + ronda).
-    this.onMessage(l.agent.key, "user", text);
+    // Nunca encima de una voz: si alguien habla, sale al primer silencio.
+    this.whenQuiet(() => {
+      if (l.status !== "connected") return;
+      l.conv.sendUserMessage(text);
+      // El SDK no emite onMessage(user) para lo que mandamos por texto: se
+      // procesa aquí como si el humano lo hubiera dicho (contexto + ronda).
+      this.onMessage(l.agent.key, "user", text);
+    });
     return true;
   }
 
@@ -215,6 +265,7 @@ export class SalaCalls {
     const l = this.lines.get(key);
     if (!l) return;
     this.lines.delete(key);
+    this.greeted.delete(key);
     if (this.focused === key) this.focused = this.lines.keys().next().value ?? null;
     if (this.focused) this.focus(this.focused);
     await l.conv.endSession().catch(() => undefined);
@@ -226,8 +277,18 @@ export class SalaCalls {
     await Promise.all(keys.map((k) => this.hangup(k)));
     if (this.quietTimer) clearTimeout(this.quietTimer);
     this.quietTimer = null;
+    if (this.muteTimer) clearTimeout(this.muteTimer);
+    this.muteTimer = null;
     this.pendingComment = null;
+    this.quietQueue = [];
+    this.greeted.clear();
     this.roundOpen = false;
+  }
+
+  /** Libera timers (al desmontar la página). */
+  dispose(): void {
+    clearInterval(this.muteInterval);
+    void this.hangupAll();
   }
 
   // ── Internos ─────────────────────────────────────────────────────────
@@ -235,6 +296,7 @@ export class SalaCalls {
   private setStatus(key: string, status: Status): void {
     const l = this.lines.get(key);
     if (l) l.status = status;
+    if (status === "connected") this.applyMutes();
     this.opts.onEvent({ key, kind: "status", status });
   }
 
@@ -242,21 +304,20 @@ export class SalaCalls {
     const l = this.lines.get(key);
     if (l) l.mode = mode;
     this.opts.onEvent({ key, kind: "mode", mode });
-    if (!this.pendingComment || this.pendingComment.from !== key) return;
-    // El que habló pasa a "listening" entre frase y frase: solo tras ~0,9 s
-    // seguidos callado se considera que terminó y se cede el turno.
+    // Mutes: al empezar a hablar alguien, todos callados YA; al callarse,
+    // devolver el mic al enfocado tras 700 ms (entre frases parpadea).
+    if (this.muteTimer) clearTimeout(this.muteTimer);
+    this.muteTimer = null;
+    if (mode === "speaking") this.applyMutes();
+    else this.muteTimer = setTimeout(() => this.applyMutes(), 700);
+    // Silencio REAL = nadie habla durante ~0,9 s (entre frase y frase el modo
+    // parpadea): ahí sale UNA cosa de la cola (turno del compañero, texto…).
     if (this.quietTimer) clearTimeout(this.quietTimer);
     this.quietTimer = null;
-    if (mode !== "listening") return;
+    if (mode !== "listening" || this.anySpeaking()) return;
     this.quietTimer = setTimeout(() => {
       this.quietTimer = null;
-      const pc = this.pendingComment;
-      if (!pc || pc.from !== key) return;
-      const from = this.lines.get(key);
-      if (from && from.mode === "speaking") return; // volvió a hablar: esperar al próximo silencio
-      this.pendingComment = null;
-      const target = this.lines.get(pc.to);
-      if (target && target.status === "connected") target.conv.sendUserMessage(pc.text);
+      this.flushQuiet();
     }, 900);
   }
 
@@ -276,6 +337,9 @@ export class SalaCalls {
     const others = [...this.lines.values()].filter((l) => l.agent.key !== key);
 
     if (role === "user") {
+      // "..." no es el humano: es el turn-timeout del servidor de ElevenLabs
+      // (el agente se re-engancha solo). No se relata ni abre ronda.
+      if (!text.replace(/[.…\s]/g, "").length) return;
       // Solo el enfocado tiene el mic abierto: una transcripción que llegue
       // por otra línea es ruido (audio previo al mute) y no abre ronda.
       if (key !== this.focused) return;
@@ -289,18 +353,24 @@ export class SalaCalls {
     }
 
     line.lastAgentText = text;
+    this.greeted.add(key);
     for (const o of others) this.safeContext(o, `${line.agent.name} dijo: "${text}"`);
 
     // Tertulia: una réplica de un compañero por turno del humano, y solo
-    // cuando el que habló termine (ver setMode).
-    if (this.tertulia && this.roundOpen && key === this.focused && others.length) {
+    // cuando haya silencio (ver whenQuiet/flushQuiet).
+    if (this.tertulia && this.roundOpen && key === this.focused && others.length && !this.pendingComment) {
       const partner = others[0];
       this.roundOpen = false;
-      this.pendingComment = {
-        from: key,
+      const pc = {
         to: partner.agent.key,
         text: `[tertulia] ${line.agent.name} acaba de decir: "${text}". Comenta en 1 o 2 frases, dirigiéndote a ${line.agent.name} o a ${this.opts.owner}. No repitas lo que dijo.`,
       };
+      this.pendingComment = pc;
+      this.whenQuiet(() => {
+        this.pendingComment = null;
+        const target = this.lines.get(pc.to);
+        if (target && target.status === "connected") target.conv.sendUserMessage(pc.text);
+      });
     }
   }
 }

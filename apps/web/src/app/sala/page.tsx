@@ -132,7 +132,7 @@ export default function SalaPage() {
     window.__hermesSalaSay = (text) => calls.say(text);
     return () => {
       delete window.__hermesSalaSay;
-      void calls.hangupAll();
+      calls.dispose();
       callsRef.current = null;
     };
   }, []);
