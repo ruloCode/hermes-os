@@ -5,3 +5,4 @@ export * from "./capture.js";
 export * from "./sala.js";
 export * from "./one-euro.js";
 export * from "./sala-puppet.js";
+export * from "./sala-point.js";

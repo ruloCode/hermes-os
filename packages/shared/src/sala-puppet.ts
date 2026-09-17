@@ -189,7 +189,11 @@ export class PuppetSmoother {
   private readonly filters: OneEuroFilter[][] = [];
   private readonly wasVisible: boolean[] = new Array(PUPPET_POINT_COUNT).fill(false);
 
-  constructor(minCutoff = 1.6, beta = 0.05) {
+  // beta alto a propósito: aquí las velocidades van en m/s (un brazo que sube
+  // recorre ~1 m en medio segundo) y con la beta del cursor (0.02) el filtro
+  // tardaba ~300 ms en alcanzar el brazo extendido — latencia que se sumaba al
+  // dwell. En reposo el corte sigue bajo (sin temblor).
+  constructor(minCutoff = 1.5, beta = 0.6) {
     for (let i = 0; i < PUPPET_POINT_COUNT; i++) {
       this.filters.push([
         new OneEuroFilter(minCutoff, beta),

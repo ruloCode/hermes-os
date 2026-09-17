@@ -5,7 +5,14 @@
 // @hermes/shared); aquí solo hay three.js.
 
 import * as THREE from "three";
-import { jointRadius, PUPPET_BONES, PUPPET_HEAD, PUPPET_POINT_COUNT, type PuppetFrame } from "@hermes/shared";
+import {
+  jointRadius,
+  PUPPET_BONES,
+  PUPPET_HEAD,
+  PUPPET_POINT_COUNT,
+  type PointingRay,
+  type PuppetFrame,
+} from "@hermes/shared";
 
 const BONE_RADIUS = 0.016;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -25,8 +32,12 @@ export class PuppetMesh {
   private readonly mid = new THREE.Vector3();
   private readonly dir = new THREE.Vector3();
   private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  /** Haz de señalar: línea del hombro hacia el frente, solo con el brazo extendido. */
+  private readonly beam: THREE.Line;
+  private readonly beamMat: THREE.LineBasicMaterial;
+  private readonly beamPos: Float32Array;
 
-  constructor(color: string) {
+  constructor(color: string, accent: string) {
     const c = new THREE.Color(color);
     this.mat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.2, emissive: c, emissiveIntensity: 0.12 });
     this.headMat = this.mat.clone();
@@ -47,8 +58,33 @@ export class PuppetMesh {
     this.head = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), this.headMat);
     this.head.castShadow = true;
 
-    this.group.add(this.joints, this.bones, this.head);
+    // Haz: dos puntos que se reescriben; opacidad baja para guiar sin gritar.
+    this.beamPos = new Float32Array(6);
+    const beamGeo = new THREE.BufferGeometry();
+    beamGeo.setAttribute("position", new THREE.BufferAttribute(this.beamPos, 3));
+    this.beamMat = new THREE.LineBasicMaterial({ color: new THREE.Color(accent), transparent: true, opacity: 0.55, depthWrite: false });
+    this.beam = new THREE.Line(beamGeo, this.beamMat);
+    this.beam.frustumCulled = false;
+    this.beam.visible = false;
+
+    this.group.add(this.joints, this.bones, this.head, this.beam);
     this.group.visible = false;
+  }
+
+  /** Dibuja (o esconde con null) el rayo de señalar, `length` metros hacia adelante. */
+  setRay(ray: PointingRay | null, length = 9): void {
+    if (!ray) {
+      this.beam.visible = false;
+      return;
+    }
+    this.beamPos[0] = ray.origin.x;
+    this.beamPos[1] = ray.origin.y;
+    this.beamPos[2] = ray.origin.z;
+    this.beamPos[3] = ray.origin.x + ray.dir.x * length;
+    this.beamPos[4] = ray.origin.y + ray.dir.y * length;
+    this.beamPos[5] = ray.origin.z + ray.dir.z * length;
+    (this.beam.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+    this.beam.visible = true;
   }
 
   update(frame: PuppetFrame): void {
@@ -98,6 +134,7 @@ export class PuppetMesh {
     } else {
       this.head.visible = false;
     }
+    if (!any) this.beam.visible = false;
     this.group.visible = any;
   }
 
@@ -120,6 +157,8 @@ export class PuppetMesh {
     this.joints.geometry.dispose();
     this.bones.geometry.dispose();
     this.head.geometry.dispose();
+    this.beam.geometry.dispose();
+    this.beamMat.dispose();
     this.mat.dispose();
     this.headMat.dispose();
     this.joints.dispose();

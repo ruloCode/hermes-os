@@ -12,8 +12,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   emptyPuppetFrame,
+  pickTarget,
+  pointingRay,
+  PointingMachine,
   puppetFrame,
   PuppetSmoother,
+  type PointTarget,
   type SalaAgentPublic,
 } from "@hermes/shared";
 import { hermesGet } from "@/lib/hermes";
@@ -61,26 +65,86 @@ export default function SalaPage() {
     };
   }, []);
 
-  // ── Marioneta ────────────────────────────────────────────────────────
+  // ── Marioneta + señalar ──────────────────────────────────────────────
   // La malla es de la escena (vive con el canvas); aquí solo se le mandan
-  // frames: cuerpo crudo → escena (puro) → One Euro → malla.
+  // frames: cuerpo crudo → escena (puro) → One Euro → malla → rayo → dwell.
   const smootherRef = useRef(new PuppetSmoother());
+  const machineRef = useRef(new PointingMachine());
+  // Selección/apuntado como estado de React SOLO cuando cambian (para las
+  // tarjetas y, en la fase 4, la voz); el progreso del anillo va directo a la figura.
+  const [aimingKey, setAimingKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const aimingRef = useRef<string | null>(null);
+  const selectedRef = useRef<string | null>(null);
 
-  const onSample = useCallback((s: PoseSample) => {
-    const inFrame = s.world !== null;
-    if (inFrame !== bodyRef.current) {
-      bodyRef.current = inFrame;
-      setBodyInFrame(inFrame);
+  const applyPointing = useCallback((target: string | null, armUp: boolean, tMs: number) => {
+    const world = sceneRef.current?.world();
+    const st = machineRef.current.update(target, armUp, tMs);
+    if (world) {
+      for (const f of world.figures) {
+        if (f.key === st.selected) f.setProgress(1);
+        else f.setProgress(f.key === st.aiming ? st.progress : 0);
+      }
     }
-    const puppet = sceneRef.current?.puppet();
-    if (!puppet) return;
-    if (!s.world) {
-      smootherRef.current.reset();
-      puppet.update(emptyPuppetFrame());
-      return;
+    if (st.aiming !== aimingRef.current) {
+      aimingRef.current = st.aiming;
+      setAimingKey(st.aiming);
     }
-    const raw = puppetFrame(s.world, { origin: AVATAR_ORIGIN });
-    puppet.update(smootherRef.current.update(raw, s.tMs));
+    if (st.selected !== selectedRef.current) {
+      selectedRef.current = st.selected;
+      setSelectedKey(st.selected);
+    }
+  }, []);
+
+  const onSample = useCallback(
+    (s: PoseSample) => {
+      const inFrame = s.world !== null;
+      if (inFrame !== bodyRef.current) {
+        bodyRef.current = inFrame;
+        setBodyInFrame(inFrame);
+      }
+      const scene = sceneRef.current;
+      const puppet = scene?.puppet();
+      const world = scene?.world();
+      if (!puppet || !world) return;
+      if (!s.world) {
+        smootherRef.current.reset();
+        puppet.update(emptyPuppetFrame());
+        puppet.setRay(null);
+        applyPointing(null, false, s.tMs);
+        return;
+      }
+      const frame = smootherRef.current.update(puppetFrame(s.world, { origin: AVATAR_ORIGIN }), s.tMs);
+      puppet.update(frame);
+      const ray = pointingRay(frame);
+      puppet.setRay(ray);
+      const targets: PointTarget[] = world.figures.map((f) => ({
+        key: f.key,
+        center: f.hitSphere.center,
+        radius: f.hitSphere.radius,
+      }));
+      applyPointing(pickTarget(ray, targets), ray !== null, s.tMs);
+    },
+    [applyPointing],
+  );
+
+  // Esc suelta la selección (y en la fase 4, corta la llamada).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const st = machineRef.current.release(performance.now());
+      sceneRef.current?.world()?.figures.forEach((f) => f.setProgress(0));
+      if (aimingRef.current !== null) {
+        aimingRef.current = null;
+        setAimingKey(null);
+      }
+      if (st.selected !== selectedRef.current) {
+        selectedRef.current = st.selected;
+        setSelectedKey(st.selected);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const pose = usePose(onSample);
@@ -101,6 +165,9 @@ export default function SalaPage() {
       return {
         puppet: puppet?.debug() ?? null,
         world: Boolean(world),
+        aiming: aimingRef.current,
+        selected: selectedRef.current,
+        figures: world?.figures.map((f) => ({ key: f.key, center: f.hitSphere.center.toArray() })) ?? null,
         stageInScene: world ? world.scene.children.includes(world.stage) : null,
         stageChildren: world?.stage.children.length ?? null,
         puppetParentIsStage: world && puppet ? puppet.group.parent === world.stage : null,
@@ -153,7 +220,13 @@ export default function SalaPage() {
     <main className="fixed inset-0 overflow-hidden bg-bg text-text">
       {load.kind === "ready" && (
         // key=tema: el mundo lee los tokens al montar (bg, piso, grilla).
-        <SalaScene key={theme.resolved} ref={sceneRef} agents={agents} />
+        <SalaScene
+          key={theme.resolved}
+          ref={sceneRef}
+          agents={agents}
+          selectedKey={selectedKey}
+          aimingKey={aimingKey}
+        />
       )}
 
       {/* HUD: contexto arriba a la izquierda, sin tarjeta (lo que se lee va sin marco). */}
@@ -166,6 +239,26 @@ export default function SalaPage() {
               ? "Cargando…"
               : "Sin agentes"}
         </p>
+        {load.kind === "ready" && (
+          <p className="mt-3 text-sm text-text-dim">
+            {selectedKey ? (
+              <>
+                Hablando con{" "}
+                <span className="font-medium text-text">
+                  {agents.find((a) => a.key === selectedKey)?.name ?? selectedKey}
+                </span>
+                <span className="text-text-faint"> · baja el brazo o Esc para soltar</span>
+              </>
+            ) : aimingKey ? (
+              <>
+                Apuntando a{" "}
+                <span className="font-medium text-text">{agents.find((a) => a.key === aimingKey)?.name ?? aimingKey}</span>
+              </>
+            ) : bodyInFrame ? (
+              "Extiende el brazo hacia un agente para hablarle"
+            ) : null}
+          </p>
+        )}
       </header>
 
       {/* Cámara: estado + preview espejado (abajo a la derecha, chico). */}

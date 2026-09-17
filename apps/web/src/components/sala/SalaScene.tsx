@@ -74,7 +74,7 @@ export const SalaScene = forwardRef<SalaSceneHandle, Props>(function SalaScene(
       },
       { onLabels },
     );
-    const puppet = new PuppetMesh(readToken("--color-text", "#f0ede6"));
+    const puppet = new PuppetMesh(readToken("--color-text", "#f0ede6"), readToken("--color-accent", "#d97757"));
     world.stage.add(puppet.group);
     worldRef.current = world;
     puppetRef.current = puppet;
