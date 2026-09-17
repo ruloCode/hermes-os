@@ -15,6 +15,7 @@
     "backfill:embeddings": "pnpm --filter @hermes/agent exec tsx scripts/backfill-embeddings.ts",
     "backfill:knowledge": "pnpm --filter @hermes/agent exec tsx scripts/backfill-knowledge.ts",
     "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts",
+    "sala:portraits": "pnpm --filter @hermes/agent exec tsx scripts/sala-portraits.ts",
     "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
