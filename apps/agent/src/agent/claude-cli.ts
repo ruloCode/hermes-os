@@ -30,6 +30,7 @@ const MODELS = new Set([
   "opus", "sonnet", "haiku", "fable",
   // IDs vigentes — los que ofrece la UI.
   "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5",
+  "claude-fable-5-1",
   // Anteriores: siguen activos y aparecen en sesiones guardadas.
   "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
 ]);
