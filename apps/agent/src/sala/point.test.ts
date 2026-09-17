@@ -12,6 +12,8 @@ import {
   pickTarget,
   pointingRay,
   puppetFrame,
+  raisedHandTarget,
+  handRaised,
   raySphereHit,
   salaArcPositions,
   syntheticBody,
@@ -203,5 +205,40 @@ describe("PointingMachine", () => {
     assert.equal(s.selected, null);
     assert.deepEqual(s.event, { kind: "release", key: "a2" });
     assert.equal(m.release(950).event, null);
+  });
+});
+
+describe("raisedHandTarget (selección por mano, sin rayo)", () => {
+  const two = targets().filter((_, i) => i === 0 || i === 4); // a0 izquierda · a4 derecha
+
+  it("manos abajo: nadie y handUp=false", () => {
+    const f = puppetFrame(syntheticBody(), { origin: ORIGIN });
+    assert.deepEqual(raisedHandTarget(f, two), { target: null, handUp: false, side: null });
+  });
+
+  it("mano DERECHA arriba → agente de la derecha de la pantalla; IZQUIERDA → el de la izquierda", () => {
+    const r = puppetFrame(syntheticBody({ raise: "right" }), { origin: ORIGIN });
+    assert.equal(handRaised(r, "right"), true);
+    assert.deepEqual(raisedHandTarget(r, two), { target: "a4", handUp: true, side: "right" });
+    const l = puppetFrame(syntheticBody({ raise: "left" }), { origin: ORIGIN });
+    assert.deepEqual(raisedHandTarget(l, two), { target: "a0", handUp: true, side: "left" });
+  });
+
+  it("no exige el codo recto ni apuntar: una mano doblada por encima del hombro cuenta", () => {
+    const body = syntheticBody();
+    const s = body[POSE.RIGHT_SHOULDER];
+    body[POSE.RIGHT_ELBOW] = { x: s.x - 0.05, y: s.y - 0.05, z: -0.1, visibility: 0.99 };
+    body[POSE.RIGHT_WRIST] = { x: s.x, y: s.y - 0.3, z: -0.15, visibility: 0.99 }; // y negativo = arriba
+    const f = puppetFrame(body, { origin: ORIGIN });
+    assert.equal(raisedHandTarget(f, two).target, "a4");
+  });
+
+  it("con las dos manos arriba manda la más alta; si el modelo no ve la muñeca, esa mano no cuenta", () => {
+    const body = syntheticBody({ raise: "left" });
+    const s = body[POSE.RIGHT_SHOULDER];
+    body[POSE.RIGHT_WRIST] = { x: s.x, y: s.y - 0.6, z: -0.1, visibility: 0.99 }; // derecha MÁS alta
+    assert.equal(raisedHandTarget(puppetFrame(body, { origin: ORIGIN }), two).target, "a4");
+    body[POSE.RIGHT_WRIST].visibility = 0.1;
+    assert.equal(raisedHandTarget(puppetFrame(body, { origin: ORIGIN }), two).target, "a0");
   });
 });

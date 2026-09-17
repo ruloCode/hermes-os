@@ -148,6 +148,44 @@ export function pickTarget(ray: PointingRay | null, targets: PointTarget[], maxZ
   return best.ang <= zone ? targets[best.i].key : null;
 }
 
+/** Cuánto debe subir la muñeca sobre el hombro para contar como "mano levantada" (m). */
+export const HAND_RAISE_MIN = 0.05;
+
+/** ¿Está esta mano levantada (muñeca claramente por encima del hombro)? Sin exigir codo recto. */
+export function handRaised(frame: PuppetFrame, side: Side): boolean {
+  const j = JOINTS[side];
+  if (!frame.visible[j.shoulder] || !frame.visible[j.wrist]) return false;
+  return frame.points[j.wrist].y > frame.points[j.shoulder].y + HAND_RAISE_MIN;
+}
+
+/**
+ * Selección por MANO, sin rayo: la mano izquierda levantada elige al agente
+ * de la izquierda de la pantalla, la derecha al de la derecha (con las dos,
+ * manda la muñeca más alta). Pensado para DOS agentes: con más, izquierda y
+ * derecha son los extremos del arco. Devuelve también si hay alguna mano
+ * arriba (para el release de la máquina de dwell).
+ */
+export function raisedHandTarget(
+  frame: PuppetFrame,
+  targets: PointTarget[],
+): { target: string | null; handUp: boolean; side: Side | null } {
+  const left = handRaised(frame, "left");
+  const right = handRaised(frame, "right");
+  if ((!left && !right) || targets.length === 0) return { target: null, handUp: left || right, side: null };
+  const side: Side =
+    left && right
+      ? frame.points[POSE.LEFT_WRIST].y >= frame.points[POSE.RIGHT_WRIST].y
+        ? "left"
+        : "right"
+      : left
+        ? "left"
+        : "right";
+  // Izquierda del usuario = x negativo en escena (está de espaldas): el agente con menor x.
+  const sorted = [...targets].sort((a, b) => a.center.x - b.center.x);
+  const pick = side === "left" ? sorted[0] : sorted[sorted.length - 1];
+  return { target: pick.key, handUp: true, side };
+}
+
 export interface PointingState {
   /** Agente bajo el rayo ahora (cargando dwell), o null. */
   aiming: string | null;

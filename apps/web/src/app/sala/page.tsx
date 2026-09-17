@@ -12,9 +12,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   emptyPuppetFrame,
-  pickTarget,
-  pointingRay,
   PointingMachine,
+  raisedHandTarget,
   puppetFrame,
   PuppetSmoother,
   type PointTarget,
@@ -127,25 +126,26 @@ export default function SalaPage() {
       if (!s.world) {
         smootherRef.current.reset();
         puppet.update(emptyPuppetFrame());
-        puppet.setRay(null);
         applyPointing(null, false, s.tMs);
         return;
       }
       const frame = smootherRef.current.update(puppetFrame(s.world, { origin: AVATAR_ORIGIN }), s.tMs);
       puppet.update(frame);
-      const ray = pointingRay(frame);
-      puppet.setRay(ray);
+      // Selección por MANO: izquierda arriba = agente de la izquierda, derecha
+      // = el de la derecha. Sin rayo (apuntar a 6 m con la profundidad de la
+      // muñeca era una lotería); el dwell sigue filtrando gestos casuales.
       const targets: PointTarget[] = world.figures.map((f) => ({
         key: f.key,
         center: f.hitSphere.center,
         radius: f.hitSphere.radius,
       }));
-      applyPointing(pickTarget(ray, targets), ray !== null, s.tMs);
+      const hand = raisedHandTarget(frame, targets);
+      applyPointing(hand.target, hand.handUp, s.tMs);
     },
     [applyPointing],
   );
 
-  // Esc suelta la selección (y en la fase 4, corta la llamada).
+  // Esc suelta la selección (y corta la llamada).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -314,8 +314,8 @@ export default function SalaPage() {
                       : voice.connecting
                         ? "conectando…"
                         : voice.connected
-                          ? "en llamada · baja el brazo o Esc para colgar"
-                          : "baja el brazo o Esc para soltar"}
+                          ? "en llamada · baja la mano o Esc para colgar"
+                          : "baja la mano o Esc para soltar"}
                 </span>
               </>
             ) : aimingKey ? (
@@ -324,7 +324,7 @@ export default function SalaPage() {
                 <span className="font-medium text-text">{agents.find((a) => a.key === aimingKey)?.name ?? aimingKey}</span>
               </>
             ) : bodyInFrame ? (
-              "Extiende el brazo hacia un agente para hablarle"
+              "Levanta la mano izquierda o la derecha para hablar con ese agente"
             ) : null}
           </p>
         )}
