@@ -2,15 +2,32 @@
 
 // SALA DE AGENTES 3D — página suelta a pantalla completa (fuera del shell,
 // hermana de /dev/terminator): cinco agentes de pie, cada uno dueño de un
-// proyecto REAL del vault, con su color, su nombre y su estado. Los
-// personajes salen de ~/.hermes-os/sala.json vía GET /sala/agents; nada aquí
-// está escrito a mano. Plan y decisiones: docs/sala-de-agentes-3d.md.
+// proyecto REAL del vault, con su color, su nombre y su estado; y tu cuerpo,
+// capturado por la webcam con MediaPipe Pose, como marioneta de espaldas al
+// frente de la sala. Los personajes salen de ~/.hermes-os/sala.json vía
+// GET /sala/agents; nada aquí está escrito a mano. Plan y decisiones:
+// docs/sala-de-agentes-3d.md.
 
-import { useEffect, useRef, useState } from "react";
-import type { SalaAgentPublic } from "@hermes/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
+import * as THREE from "three";
+import {
+  emptyPuppetFrame,
+  puppetFrame,
+  PuppetSmoother,
+  type SalaAgentPublic,
+} from "@hermes/shared";
 import { hermesGet } from "@/lib/hermes";
 import { useTheme } from "@/state/ThemeProvider";
+import { usePose, type PoseSample } from "@/hooks/usePose";
+import { AVATAR_ORIGIN } from "@/lib/sala/world";
 import { SalaScene, type SalaSceneHandle } from "@/components/sala/SalaScene";
+
+declare global {
+  interface Window {
+    /** QA: estado de la marioneta y del mundo (Playwright). */
+    __hermesSalaDebug?: () => unknown;
+  }
+}
 
 type Load =
   | { kind: "loading" }
@@ -23,6 +40,9 @@ export default function SalaPage() {
   const theme = useTheme();
   const sceneRef = useRef<SalaSceneHandle>(null);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  // ¿Hay alguien en cuadro? Estado solo cuando CAMBIA (el callback corre a 30 fps).
+  const [bodyInFrame, setBodyInFrame] = useState(false);
+  const bodyRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -41,8 +61,93 @@ export default function SalaPage() {
     };
   }, []);
 
+  // ── Marioneta ────────────────────────────────────────────────────────
+  // La malla es de la escena (vive con el canvas); aquí solo se le mandan
+  // frames: cuerpo crudo → escena (puro) → One Euro → malla.
+  const smootherRef = useRef(new PuppetSmoother());
+
+  const onSample = useCallback((s: PoseSample) => {
+    const inFrame = s.world !== null;
+    if (inFrame !== bodyRef.current) {
+      bodyRef.current = inFrame;
+      setBodyInFrame(inFrame);
+    }
+    const puppet = sceneRef.current?.puppet();
+    if (!puppet) return;
+    if (!s.world) {
+      smootherRef.current.reset();
+      puppet.update(emptyPuppetFrame());
+      return;
+    }
+    const raw = puppetFrame(s.world, { origin: AVATAR_ORIGIN });
+    puppet.update(smootherRef.current.update(raw, s.tMs));
+  }, []);
+
+  const pose = usePose(onSample);
+
+  // Seam de QA: estado de la marioneta sin abrir el inspector.
+  useEffect(() => {
+    window.__hermesSalaDebug = () => {
+      const world = sceneRef.current?.world();
+      const puppet = sceneRef.current?.puppet() ?? null;
+      let headScreen: { x: number; y: number } | null = null;
+      if (world && puppet) {
+        const h = puppet.debug().head;
+        if (h) {
+          const v = new THREE.Vector3(h.x, h.y, h.z).project(world.camera);
+          headScreen = { x: (v.x + 1) / 2, y: (1 - v.y) / 2 };
+        }
+      }
+      return {
+        puppet: puppet?.debug() ?? null,
+        world: Boolean(world),
+        stageInScene: world ? world.scene.children.includes(world.stage) : null,
+        stageChildren: world?.stage.children.length ?? null,
+        puppetParentIsStage: world && puppet ? puppet.group.parent === world.stage : null,
+        renderFrame: world?.renderer.info.render.frame ?? null,
+        headScreen,
+        bodyInFrame: bodyRef.current,
+      };
+    };
+    return () => {
+      delete window.__hermesSalaDebug;
+    };
+  }, []);
+
+  // Cámara: arranca sola al tener la sala (el demo no debe pedir un clic).
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (load.kind !== "ready" || startedRef.current) return;
+    startedRef.current = true;
+    void pose.start();
+  }, [load.kind, pose]);
+
+  // Preview chico y espejado del video (el <video> lo crea el hook).
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = previewRef.current;
+    const v = pose.video;
+    if (!box || !v) return;
+    v.className = "h-full w-full -scale-x-100 object-cover";
+    box.replaceChildren(v);
+    return () => {
+      if (v.parentElement === box) box.removeChild(v);
+    };
+  }, [pose.video]);
+
   const agents = load.kind === "ready" ? load.agents : [];
   const ready = agents.filter((a) => a.ready).length;
+
+  const cameraLabel =
+    pose.phase === "tracking"
+      ? bodyInFrame
+        ? "Te veo"
+        : "Entra al cuadro"
+      : pose.phase === "starting"
+        ? "Abriendo cámara…"
+        : pose.phase === "error"
+          ? pose.error ?? "Cámara sin acceso"
+          : "Cámara apagada";
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-bg text-text">
@@ -62,6 +167,40 @@ export default function SalaPage() {
               : "Sin agentes"}
         </p>
       </header>
+
+      {/* Cámara: estado + preview espejado (abajo a la derecha, chico). */}
+      {load.kind === "ready" && (
+        <aside className="absolute right-5 bottom-5 z-20 flex flex-col items-end gap-2">
+          <div
+            ref={previewRef}
+            className={`h-[120px] w-[160px] overflow-hidden rounded-md border border-line bg-panel ${
+              pose.video ? "" : "hidden"
+            }`}
+          />
+          <div className="flex items-center gap-2 rounded-full border border-line bg-panel/80 px-3 py-1 text-xs">
+            <span
+              aria-hidden
+              className={`h-2 w-2 rounded-full ${
+                pose.phase === "tracking" && bodyInFrame
+                  ? "bg-green"
+                  : pose.phase === "error"
+                    ? "bg-red"
+                    : "bg-text-faint"
+              }`}
+            />
+            <span className="text-text-dim">{cameraLabel}</span>
+            {pose.phase === "error" && (
+              <button
+                type="button"
+                onClick={() => void pose.start()}
+                className="cursor-pointer text-accent hover:underline"
+              >
+                reintentar
+              </button>
+            )}
+          </div>
+        </aside>
+      )}
 
       {load.kind !== "ready" && load.kind !== "loading" && (
         <section className="absolute inset-0 z-20 grid place-items-center px-6">

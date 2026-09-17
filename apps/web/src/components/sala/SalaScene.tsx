@@ -11,9 +11,12 @@ import type { SalaAgentPublic } from "@hermes/shared";
 import { readToken } from "@/components/ui/tones";
 import { getHermesKey, getHermesUrl } from "@/lib/hermes";
 import { SalaWorld, type LabelAnchor } from "@/lib/sala/world";
+import { PuppetMesh } from "@/lib/sala/puppet-mesh";
 
 export interface SalaSceneHandle {
   world: () => SalaWorld | null;
+  /** La marioneta del humano: vive y muere con el mundo (misma vida que el canvas). */
+  puppet: () => PuppetMesh | null;
 }
 
 interface Props {
@@ -36,11 +39,19 @@ export const SalaScene = forwardRef<SalaSceneHandle, Props>(function SalaScene(
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<SalaWorld | null>(null);
+  const puppetRef = useRef<PuppetMesh | null>(null);
   const labelRefs = useRef(new Map<string, HTMLDivElement>());
 
-  useImperativeHandle(ref, () => ({ world: () => worldRef.current }), []);
+  useImperativeHandle(
+    ref,
+    () => ({ world: () => worldRef.current, puppet: () => puppetRef.current }),
+    [],
+  );
 
-  // Mundo: vive mientras el componente viva (el padre lo re-monta con key=tema).
+  // Mundo + marioneta: viven mientras el componente viva (el padre lo re-monta
+  // con key=tema). TODO objeto three.js se crea AQUÍ, en el mismo efecto: un
+  // efecto del padre que metiera cosas al mundo se quedaría apuntando a un
+  // mundo viejo cuando este se re-crea solo (StrictMode en dev lo hace).
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
@@ -63,9 +74,15 @@ export const SalaScene = forwardRef<SalaSceneHandle, Props>(function SalaScene(
       },
       { onLabels },
     );
+    const puppet = new PuppetMesh(readToken("--color-text", "#f0ede6"));
+    world.stage.add(puppet.group);
     worldRef.current = world;
+    puppetRef.current = puppet;
     world.start();
     return () => {
+      world.stage.remove(puppet.group);
+      puppet.dispose();
+      puppetRef.current = null;
       world.dispose();
       worldRef.current = null;
     };

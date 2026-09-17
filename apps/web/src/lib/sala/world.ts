@@ -34,7 +34,7 @@ export interface SalaWorldHooks {
 }
 
 /** Punto fijo donde vive el avatar del humano (frente al arco). */
-export const AVATAR_ORIGIN = new THREE.Vector3(0, 0, 1.0);
+export const AVATAR_ORIGIN = new THREE.Vector3(0, 0, 1.9);
 
 export class SalaWorld {
   readonly scene = new THREE.Scene();
@@ -72,9 +72,11 @@ export class SalaWorld {
 
     // Cámara fija detrás del avatar, mirando al arco. Sin controles: la sala
     // se opera con el cuerpo, no con el mouse.
-    this.camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
-    this.camera.position.set(0, 2.05, 6.2);
-    this.camera.lookAt(0, 1.05, -2.4);
+    // Más alta y más lejos que la marioneta: el humano queda ABAJO en el
+    // cuadro y los agentes arriba — no se pisan aunque el brazo suba.
+    this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+    this.camera.position.set(0, 2.9, 7.4);
+    this.camera.lookAt(0, 0.9, -2.6);
 
     // ── Luz: cálida, baja, un solo foco que proyecta sombra ──────────────
     const hemi = new THREE.HemisphereLight(new THREE.Color(colors.text), bg, 0.55);
