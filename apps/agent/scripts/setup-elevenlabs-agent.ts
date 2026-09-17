@@ -935,7 +935,7 @@ async function setupSala(toolIdByName: Map<string, string>): Promise<{ key: stri
     console.log(`\n(sin ${SALA_PATH}: no hay personajes de sala que crear)`);
     return [];
   }
-  const own = config.agents.filter((a): a is SalaOwn => !a.voice.reuse);
+  const own = config.agents.filter((a): a is SalaOwn => !a.voice.reuse && a.enabled !== false);
   const out: { key: string; agentId: string }[] = [];
   for (const a of own) {
     console.log(`⚙️  Sala · ${a.name} (${a.project})…`);

@@ -110,6 +110,18 @@ describe("raySphereHit / pickTarget", () => {
     }
   });
 
+  it("con DOS agentes, apuntar 15° desviado sigue eligiendo al correcto (zona de 22°)", () => {
+    const two = targets().filter((_, i) => i === 0 || i === 4);
+    const t = two[1].center;
+    // Desvía el objetivo ~15° en horizontal alrededor del hombro (radio ~6 m → ~1.6 m).
+    const off = { x: t.x - 1.6, y: t.y + 0.6, z: t.z };
+    const f = puppetFrame(bodyAimingAt(off), { origin: ORIGIN });
+    assert.equal(pickTarget(pointingRay(f), two), two[1].key);
+    // Pero apuntando al frente (a ~33° de cada uno, fuera de la zona de 22°) → nadie.
+    const far = { x: 0, y: t.y, z: t.z };
+    assert.equal(pickTarget(pointingRay(puppetFrame(bodyAimingAt(far), { origin: ORIGIN })), two), null);
+  });
+
   it("apuntando entre dos agentes (o al cielo) no se elige a nadie", () => {
     const tg = targets();
     const mid = { x: (tg[0].center.x + tg[1].center.x) / 2, y: 1.0, z: (tg[0].center.z + tg[1].center.z) / 2 };

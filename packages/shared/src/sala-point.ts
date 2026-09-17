@@ -27,8 +27,15 @@ export const POINT_ELBOW_MIN_DEG = 150;
 export const POINT_WRIST_DROP_MAX = 0.18;
 /** Alcance mínimo hacia adelante/lados del hombro a la muñeca (m). */
 export const POINT_REACH_MIN = 0.32;
-/** Radio de la esfera de acierto alrededor del pecho de cada agente (m). */
+/** Radio de la esfera de acierto alrededor del pecho de cada agente (m) — solo para raySphereHit. */
 export const POINT_HIT_RADIUS = 0.75;
+/**
+ * Zona angular máxima por agente (grados). Apuntar con el brazo a 6 m tiene
+ * ±10° de ruido fácil (la profundidad de la muñeca es lo peor que estima el
+ * modelo), así que se elige al MÁS CERCANO en ángulo dentro de su zona; la
+ * zona se achica sola cuando hay vecinos cerca (mitad de la separación).
+ */
+export const POINT_ZONE_MAX_DEG = 22;
 
 export type Side = "left" | "right";
 
@@ -110,15 +117,35 @@ export interface PointTarget {
   radius: number;
 }
 
-/** El agente más cercano que el rayo atraviesa, o null. */
-export function pickTarget(ray: PointingRay | null, targets: PointTarget[]): string | null {
-  if (!ray) return null;
-  let best: { key: string; t: number } | null = null;
-  for (const tg of targets) {
-    const t = raySphereHit(ray.origin, ray.dir, tg.center, tg.radius);
-    if (t !== null && (best === null || t < best.t)) best = { key: tg.key, t };
+/** Ángulo (grados) entre dos direcciones. */
+function angleDeg(a: Vec3, b: Vec3): number {
+  const c = dot(a, b) / ((len(a) || 1e-9) * (len(b) || 1e-9));
+  return (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
+}
+
+/**
+ * El agente al que apunta el rayo: el más cercano EN ÁNGULO desde el origen
+ * del rayo, si cae dentro de su zona. La zona de cada agente es
+ * min(POINT_ZONE_MAX_DEG, mitad del ángulo a su vecino más próximo − 1°):
+ * con dos figuras separadas 96° cada una tiene 22°; con cinco a ~15°, unos 6°
+ * (equivalente a la esfera de antes). Entre dos vecinos exactamente a la
+ * mitad no se elige a nadie.
+ */
+export function pickTarget(ray: PointingRay | null, targets: PointTarget[], maxZoneDeg = POINT_ZONE_MAX_DEG): string | null {
+  if (!ray || targets.length === 0) return null;
+  const dirs = targets.map((tg) => sub(tg.center, ray.origin));
+  let best: { i: number; ang: number } | null = null;
+  for (let i = 0; i < targets.length; i++) {
+    const ang = angleDeg(ray.dir, dirs[i]);
+    if (best === null || ang < best.ang) best = { i, ang };
   }
-  return best?.key ?? null;
+  if (!best) return null;
+  let zone = maxZoneDeg;
+  for (let j = 0; j < targets.length; j++) {
+    if (j === best.i) continue;
+    zone = Math.min(zone, angleDeg(dirs[best.i], dirs[j]) / 2 - 1);
+  }
+  return best.ang <= zone ? targets[best.i].key : null;
 }
 
 export interface PointingState {

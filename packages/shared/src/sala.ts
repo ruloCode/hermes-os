@@ -67,6 +67,8 @@ export interface SalaAgentConfig {
   build: SalaBuild;
   /** Prompt texto→imagen para su retrato (`pnpm sala:portraits`). */
   portrait_prompt?: string;
+  /** false = definido pero fuera de la sala (no se sirve ni se crea su voz). Default true. */
+  enabled?: boolean;
   voice: SalaVoice;
 }
 
@@ -168,6 +170,7 @@ function parseAgent(raw: unknown, idx: number): SalaAgentConfig {
     ...(a.portrait_prompt !== undefined
       ? { portrait_prompt: str(a.portrait_prompt, `${where}.portrait_prompt`, 2000) }
       : {}),
+    ...(a.enabled === false ? { enabled: false } : {}),
     voice: parseVoice(a.voice, `${where}.voice`),
   };
 }

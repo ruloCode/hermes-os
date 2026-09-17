@@ -89,7 +89,7 @@ export async function listSalaAgents(projects: ProjectStatus[]): Promise<SalaAge
   if (!config) return [];
   const bySlug = new Map(projects.map((p) => [p.slug, p]));
   return Promise.all(
-    config.agents.map(async (a) => {
+    config.agents.filter((a) => a.enabled !== false).map(async (a) => {
       const project = bySlug.get(a.project);
       return {
         key: a.key,
