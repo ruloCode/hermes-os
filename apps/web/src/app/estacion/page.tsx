@@ -303,6 +303,25 @@ export default function EstacionPage() {
     [],
   );
 
+  // Esc: cuelga y deja la pantalla como estaba para el siguiente viajero.
+  // Es lo que se presiona al terminar el ensayo, y lo que hará quien atienda
+  // el stand entre una persona y la siguiente.
+  const reset = useCallback(() => {
+    void castRef.current?.hangup();
+    setLines([]);
+    setView({ kind: "idle" });
+    autoRef.current = false;
+    setStatus("idle");
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") reset();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [reset]);
+
   useEffect(() => {
     window.__hermesEstacionDebug = () => ({
       load: load.kind,

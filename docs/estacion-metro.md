@@ -63,17 +63,6 @@ Vigencia del feed descargado: `20151231`–`20251231`. Mientras no salga el feed
 próximas salidas son **horario de referencia**, no predicción en vivo, y así hay que
 mostrarlas.
 
-## Config del humano (`~/.hermes-os/`)
-
-| Archivo | Para qué | Plantilla |
-| --- | --- | --- |
-| `gtfs/metro/*.txt` | el feed descompactado (override `HERMES_GTFS_DIR`) | — |
-| `metro.json` | alias de estaciones, nombres con tilde para mostrar, fusiones manuales, minutos de transbordo por defecto (override `HERMES_METRO_CONFIG`) | `docs/metro.example.json` |
-
-Los alias son lo que la gente dice ("arví", "el poblado", "centro"); `display` corrige las
-tildes que el feed no trae ("Parque Arvi" → "Parque Arví"). Sin `metro.json` la red se
-arma igual, solo que con los nombres tal como vienen del feed.
-
 ## Cómo se prueba
 
 ```bash
@@ -103,9 +92,83 @@ Poblado → Parque Arví · 39 min (35 en tren + 4 de transbordo) · 2 transbord
 Los colores salen de `route_color` del feed, no de una constante: la A es azul `#0960A7`,
 la K lima `#CBD308` y la L marrón `#A36A18`.
 
+## Archivos del humano, todos en `~/.hermes-os/`
+
+| Archivo | Qué decide | Plantilla |
+| --- | --- | --- |
+| `gtfs/metro/*.txt` | la red: líneas, estaciones, tiempos, transbordos (`HERMES_GTFS_DIR`) | — |
+| `metro.json` | alias, nombres con tilde, fusiones, minutos de transbordo (`HERMES_METRO_CONFIG`) | `docs/metro.example.json` |
+| `lugares.json` | qué hay cerca de cada estación, con horario y fuente (`HERMES_PLACES_PATH`) | `docs/lugares.example.json` |
+| `metro-status.json` | novedades del servicio de hoy (`HERMES_METRO_STATUS_PATH`) | `docs/metro-status.example.json` |
+| `sala.json` → `station` | dónde está plantada la pantalla: `id`, `name`, `line`, `default_language` | `docs/sala.example.json` |
+
+Regla que atraviesa los cuatro: lo que no está en el archivo no se muestra. Sin
+`lugares.json` no hay tarjetas de lugares; sin `metro-status.json` no hay banner
+de novedades; un lugar sin horario publicado se muestra como "sin horario
+publicado" en vez de inventarse uno. Y `hours` solo se escribe si `source` dice
+de dónde salió.
+
+## Rutas del agente
+
+| Ruta | Devuelve |
+| --- | --- |
+| `POST /metro/route {from?, to}` | el plan con tramos, colores del GTFS, paradas, minutos, novedades que tocan esas líneas y próximas salidas. Sin `from`, el origen es la estación del tótem. Si no reconoce un nombre, devuelve candidatas en vez de adivinar |
+| `GET /metro/stations` | estaciones, líneas y vigencia del feed |
+| `GET /metro/next?station=` | próximas salidas por línea y sentido; `stale: true` = horario publicado, no predicción |
+| `GET /metro/status` | novedades vigentes (`[]` si no hay archivo) |
+| `GET /metro/places?station=` | lugares con minutos a pie, horario y fuente |
+| `POST /sala/handoff` · `GET /sala/handoff/:token` | el pase de 15 minutos para seguir en el celular |
+
+Todas responden `{ ok, … | error }` con 200 (como `/lights`), para que la voz
+relate el problema en vez de tropezar con un 500. `HERMES_ESTACION=off` las apaga.
+
+## Cómo correr el demo
+
+```bash
+# 1. agente (o launchctl kickstart -k gui/$UID/com.hermes-os.agent)
+pnpm --filter @hermes/agent dev
+# 2. web
+NEXT_PUBLIC_WEB_PORT=31999 pnpm --filter @hermes/web dev
+# 3. la pantalla: http://localhost:31999/estacion  (vertical, probada a 1080×1920)
+```
+
+La pantalla se conecta sola cuando la cámara ve a alguien; el botón "Tocar para
+hablar" es el respaldo. **Micrófono de solapa o de diadema**, no el de la
+laptop: el ruido del evento es el mismo problema que tendría la estación.
+Esc cuelga y deja la pantalla lista para el siguiente viajero.
+
+Ensayo del guion sin micrófono (tres preguntas por texto, verifica tools,
+tarjetas, una sola voz a la vez y subtítulos limpios):
+
+```bash
+~/.cache/hermes-pw-venv/bin/python apps/web/scripts/estacion-qa.py --runs 3
+```
+
+Para que el celular pueda HABLAR hace falta https: el navegador solo entrega el
+micrófono en contexto seguro, así que por `http://<ip-lan>` el teléfono ve su
+ruta y la pantalla explica por qué no puede hablar. Con una URL https (un túnel
+sobre la web) se pone en `NEXT_PUBLIC_ESTACION_PUBLIC_URL` y el QR la usa.
+
+## El QR, y cómo se verificó
+
+El generador es propio (`packages/shared/src/qr.ts`, sin dependencias): modo
+byte UTF-8, versiones 1 a 10, los cuatro niveles de corrección. Se verificó de
+dos maneras independientes: un round-trip en `pnpm test` con un decodificador
+escrito aparte, y —fuera del repo— decodificando las mismas matrices con OpenCV,
+que es un lector real:
+
+```bash
+uv run --with opencv-python-headless --with numpy python -c "…"   # ver el historial del PR
+```
+
+El bug que costó tiempo: la información de formato va en (columna, fila) y
+estaba transpuesta. El código se veía perfecto y ningún lector lo aceptaba.
+
 ## Pendiente de los datos
 
-- Rutas del agente, tools del elenco, pantalla del tótem y handoff al celular (fases 1 a 5).
+- HTTPS para el celular (hoy el QR abre la ruta, pero hablar exige contexto seguro).
+- El servicio launchd del agente no levanta en esta máquina (`EX_CONFIG`); el
+  demo corre con `pnpm --filter @hermes/agent dev`.
 - Feed 2026 cuando el Metro lo publique: cambia el zip y desaparece el aviso de horario
   de referencia.
 
