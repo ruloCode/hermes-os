@@ -30,6 +30,7 @@ import { Hosts, type HostView } from "@/components/estacion/Hosts";
 import { RouteCard } from "@/components/estacion/RouteCard";
 import { PlacesGrid } from "@/components/estacion/PlacesGrid";
 import { Subtitles, type SubtitleLine } from "@/components/estacion/Subtitles";
+import { HandoffQr } from "@/components/estacion/HandoffQr";
 
 declare global {
   interface Window {
@@ -59,6 +60,22 @@ type View =
   | { kind: "failed"; query: string; error: string; suggestions: string[] };
 
 const TZ = "America/Bogota";
+
+/**
+ * Lo que el celular necesita para retomar sin hacer repetir al viajero: la
+ * ruta en una línea y las últimas frases de la charla. Nada de identidad —
+ * ni quién es, ni de dónde viene: solo a dónde iba.
+ */
+function handoffSummary(plan: UiRoutePlan, lines: SubtitleLine[]): string {
+  const ruta = `Iba de ${plan.from} a ${plan.to}: ${plan.legs
+    .map((l) => `${l.lineName} hasta ${l.to}`)
+    .join(", luego ")}. ${plan.minutes} minutos, ${plan.transfers} transbordos.`;
+  const charla = lines
+    .slice(-4)
+    .map((l) => `${l.name}: ${l.text}`)
+    .join(" | ");
+  return `${ruta}${charla ? ` Lo último que se habló en la pantalla — ${charla}` : ""}`;
+}
 
 export default function EstacionPage() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -376,7 +393,18 @@ export default function EstacionPage() {
             )}
           </div>
         )}
-        {view.kind === "route" && <RouteCard plan={view.plan} lang={lang} next={view.next} scheduleStale={view.scheduleStale} />}
+        {view.kind === "route" && (
+          <>
+            <RouteCard plan={view.plan} lang={lang} next={view.next} scheduleStale={view.scheduleStale} />
+            {/* El QR solo aparece cuando hay algo que llevarse. */}
+            <HandoffQr
+              plan={view.plan}
+              summary={handoffSummary(view.plan, lines)}
+              station={station?.name ?? ""}
+              lang={lang}
+            />
+          </>
+        )}
         {view.kind === "places" && <PlacesGrid station={view.station} places={view.places} lang={lang} />}
         {view.kind === "failed" && (
           <div className="rounded-[24px] bg-[var(--est-butter)]/10 p-7 text-center">

@@ -195,6 +195,19 @@ export class CastCall {
     return true;
   }
 
+  /**
+   * Micrófono abierto o cerrado. En el celular el mic NO puede estar siempre
+   * abierto: el viajero va por la calle y todo lo que suene sería un turno.
+   * De ahí el "mantén para hablar" de la app.
+   */
+  setMicMuted(muted: boolean): void {
+    try {
+      this.conv?.setMicMuted(muted);
+    } catch {
+      /* la sala WebRTC aún no está lista: quien llama lo re-aplica */
+    }
+  }
+
   /** Contexto sin turno (p. ej. "levanta la mano hacia Iván"). */
   context(text: string): void {
     if (!this.conv || this.status !== "connected") return;

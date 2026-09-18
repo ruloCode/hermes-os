@@ -8,3 +8,4 @@ export * from "./sala-puppet.js";
 export * from "./sala-point.js";
 export * from "./gtfs.js";
 export * from "./estacion.js";
+export * from "./qr.js";

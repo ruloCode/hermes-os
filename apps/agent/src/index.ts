@@ -19,6 +19,7 @@ import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
 import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
+import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
 import { SalaValidationError } from "@hermes/shared";
 import { readProjectContext } from "./vault/project-context.js";
 import { resolveVaultDoc } from "./vault/doc.js";
@@ -2496,6 +2497,30 @@ app.get("/metro/places", async (c) => {
   } catch (err) {
     return c.json({ ok: false, error: err instanceof Error ? err.message : String(err), path: PLACES_PATH });
   }
+});
+
+// "Sigue en tu celular": el tótem guarda la ruta y el hilo bajo un token de 15
+// minutos y muestra el QR; el teléfono abre /m/:token y retoma la charla. En
+// memoria y sin identidad del viajero (ver sala/handoff.ts).
+app.post("/sala/handoff", async (c) => {
+  if (!env.SALA_ENABLED) return c.json({ ok: false, error: "sala desactivada" }, 404);
+  type HandoffBody = { summary?: string; language?: string; route?: unknown; station?: string };
+  const body = await c.req.json<HandoffBody>().catch(() => ({}) as HandoffBody);
+  const entry = createHandoff({
+    summary: (body.summary ?? "").trim(),
+    language: body.language ?? "es",
+    route: body.route,
+    station: body.station,
+  });
+  return c.json({ ok: true, token: entry.token, expiresAt: entry.expiresAt, ttlMs: HANDOFF_TTL_MS });
+});
+
+app.get("/sala/handoff/:token", (c) => {
+  if (!env.SALA_ENABLED) return c.json({ ok: false, error: "sala desactivada" }, 404);
+  const entry = readHandoff(c.req.param("token"));
+  // Vencido ≠ error del sistema: el celular lo cuenta y ofrece volver al tótem.
+  if (!entry) return c.json({ ok: false, expired: true, error: "ese pase ya venció o no existe" }, 404);
+  return c.json({ ok: true, ...entry });
 });
 
 // Retrato del personaje (PNG generado por `pnpm sala:portraits`). Un <img>
