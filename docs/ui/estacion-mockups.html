@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Tótem de estación · tres direcciones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/*
+  REFERENCIA DE CONSTRUCCIÓN del tótem de estación (/estacion).
+  Tres direcciones sobre los MISMOS datos reales del GTFS (Parque Berrío →
+  Parque Arví, líneas A·K·L, 34 min, 2 transbordos). Cada <section> mide
+  exactamente 1080×1920: lo que se ve aquí es lo que hay que reproducir.
+
+  Paleta (docs/estacion-metro.md): verde montaña de fondo, guayaba para la
+  ciudad, azul del sistema para los datos, lima para confirmar, naranja para
+  alertar, mantequilla para las tarjetas. Los colores de LÍNEA salen del feed
+  y no se tocan: A #0960A7 · K #CBD308 · L #A36A18.
+*/
+:root{
+  --mountain:#1F4D3A; --mountain-deep:#173A2C; --guava:#C4553A; --system:#0065B3;
+  --lime:#B2D459; --alert:#F8821E; --butter:#F6E7C1; --ink:#12261D;
+  --line-a:#0960A7; --line-k:#CBD308; --line-l:#A36A18;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0d;font-family:Inter,system-ui,sans-serif;display:flex;flex-wrap:wrap;gap:48px;padding:48px;align-items:flex-start}
+.totem{width:1080px;height:1920px;position:relative;overflow:hidden;background:var(--mountain);color:var(--butter);flex:0 0 auto}
+.contours{position:absolute;inset:0;pointer-events:none}
+.z{position:relative;z-index:1;height:100%;display:flex;flex-direction:column}
+.baloo{font-family:"Baloo 2",Inter,sans-serif}
+.tag{position:absolute;top:-38px;left:0;color:#9a9a9a;font:600 24px Inter;letter-spacing:.02em}
+
+/* ── Cabecera compartida ─────────────────────────────────────────── */
+.head{display:flex;align-items:center;gap:24px;padding:44px 56px 0}
+.badge{width:96px;height:96px;border-radius:24px;display:grid;place-items:center;font:800 52px "Baloo 2";color:#fff;flex:0 0 auto}
+.head h1{font:600 54px "Baloo 2";line-height:1}
+.head .sub{font:400 24px Inter;opacity:.65;margin-top:8px}
+.clock{margin-left:auto;font:600 56px "Baloo 2";font-variant-numeric:tabular-nums}
+
+/* ── A · ANDÉN ───────────────────────────────────────────────────── */
+.a-ask{padding:56px 56px 0;font:500 40px "Baloo 2";opacity:.85}
+.a-total{padding:28px 56px 0}
+.a-total .big{font:700 104px "Baloo 2";line-height:.95}
+.a-total .meta{font:400 34px Inter;opacity:.7;margin-top:10px}
+.rail{padding:52px 56px 0;display:flex;flex-direction:column;flex:1}
+.leg{display:flex;gap:32px;flex:1}
+.leg .col{width:96px;flex:0 0 auto;display:flex;flex-direction:column;align-items:center}
+.dot{width:96px;height:96px;border-radius:50%;display:grid;place-items:center;font:800 48px "Baloo 2";color:#fff}
+.stem{width:14px;flex:1;border-radius:8px;min-height:120px}
+.leg .body{padding-top:10px;flex:1;min-width:0}
+.leg .to{font:600 56px "Baloo 2";line-height:1.05}
+.leg .info{font:400 30px Inter;opacity:.72;margin-top:8px}
+.leg .stops{font:400 25px Inter;opacity:.45;margin-top:10px;line-height:1.4}
+.xfer{display:inline-flex;align-items:center;gap:12px;margin:22px 0 22px 128px;padding:10px 22px;border-radius:999px;
+      background:rgba(246,231,193,.12);font:500 26px Inter}
+.a-foot{margin-top:auto;padding:0 56px 44px;display:flex;flex-direction:column;gap:28px}
+.hosts{display:flex;gap:56px;align-items:flex-end}
+.host{display:flex;flex-direction:column;align-items:center;gap:12px}
+.face{width:150px;height:150px;border-radius:50%;display:grid;place-items:center}
+.face.on{box-shadow:0 0 0 12px rgba(255,255,255,.16)}
+.eyes{display:flex;gap:26px}
+.eyes i{width:17px;height:17px;border-radius:50%;background:rgba(255,255,255,.92);display:block}
+.host .nm{font:600 32px "Baloo 2"}
+.host .rl{font:400 20px Inter;opacity:.6}
+.subs{font:400 26px Inter;line-height:1.45}
+.subs .who{font-family:"Baloo 2";font-weight:600}
+.qr{display:flex;align-items:center;gap:22px;background:var(--butter);color:var(--ink);border-radius:28px;padding:22px 26px}
+.qr .sq{width:132px;height:132px;flex:0 0 auto;background:
+  repeating-conic-gradient(var(--ink) 0 25%, #fff 0 50%) 0 0/16px 16px;border:8px solid #fff;border-radius:6px}
+.qr .t1{font:600 28px "Baloo 2";display:block}
+.qr .t2{font:400 20px Inter;opacity:.7;margin-top:4px;display:block}
+.privacy{font:400 19px Inter;opacity:.5;line-height:1.35}
+
+/* ── B · CONVERSACIÓN ────────────────────────────────────────────── */
+.b-center{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 72px;text-align:center;gap:40px}
+.b-quote{font:600 76px "Baloo 2";line-height:1.16}
+.b-quote .hl{color:#fff}
+.b-strip{display:flex;align-items:center;gap:18px;background:rgba(246,231,193,.1);border-radius:999px;padding:18px 32px}
+.b-strip .p{width:78px;height:78px;border-radius:50%;display:grid;place-items:center;font:800 40px "Baloo 2";color:#fff}
+.b-strip .arr{font:400 34px Inter;opacity:.45}
+.b-strip .tot{font:600 40px "Baloo 2";margin-left:14px}
+.b-who{display:flex;align-items:center;gap:20px;font:500 30px Inter;opacity:.75}
+.wave{display:flex;align-items:flex-end;gap:7px;height:56px}
+.wave i{width:9px;background:var(--guava);border-radius:6px;display:block}
+.b-mini{display:flex;gap:16px;padding:0 56px 0}
+.b-card{flex:1;background:rgba(246,231,193,.1);border-radius:24px;padding:24px 26px}
+.b-card .k{font:400 22px Inter;opacity:.55}
+.b-card .v{font:600 34px "Baloo 2";margin-top:6px}
+
+/* ── C · PANEL DE ESTACIÓN ───────────────────────────────────────── */
+.c-band{height:18px;display:flex}
+.c-diagram{margin:44px 56px 0;background:var(--butter);color:var(--ink);border-radius:32px;padding:40px}
+.c-diagram .ttl{font:600 44px "Baloo 2"}
+.c-diagram .sum{font:400 30px Inter;opacity:.7;margin-top:6px}
+.track{margin-top:52px;position:relative;height:210px}
+.track .wire{position:absolute;top:44px;left:0;right:0;height:14px;border-radius:8px;overflow:hidden;display:flex}
+.track .stn{position:absolute;top:30px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:14px}
+.track .stn.first{transform:none;align-items:flex-start}
+.track .stn.first .lbl{text-align:left}
+.track .stn.last{transform:translateX(-100%);align-items:flex-end}
+.track .stn.last .lbl{text-align:right}
+.track .pin{width:42px;height:42px;border-radius:50%;background:#fff;border:9px solid var(--ink)}
+.track .pin.big{width:64px;height:64px;border-width:12px;margin-top:-11px}
+.track .lbl{font:600 24px Inter;text-align:center;width:180px;line-height:1.2}
+.track .lbl small{display:block;font:400 20px Inter;opacity:.6;margin-top:3px}
+.c-mods{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin:30px 56px 34px;flex:1;align-content:start}
+.mod{background:rgba(246,231,193,.1);border-radius:26px;padding:28px 30px}
+.mod.wide{grid-column:1/-1}
+.mod .k{font:400 24px Inter;opacity:.6}
+.mod .v{font:600 44px "Baloo 2";margin-top:8px;line-height:1.15}
+.mod .d{font:400 24px Inter;opacity:.7;margin-top:8px;line-height:1.35}
+.alertbar{background:var(--alert);color:#fff;border-radius:22px;padding:22px 28px;font:500 30px Inter;margin:22px 56px 0}
+.c-foot{margin-top:auto;background:var(--mountain-deep);padding:34px 56px 40px;display:flex;flex-direction:column;gap:22px}
+.chips{display:flex;gap:14px}
+.chip{border:1px solid rgba(246,231,193,.35);border-radius:999px;padding:10px 24px;font:400 24px Inter}
+.chip.on{background:var(--butter);color:var(--ink);border-color:var(--butter)}
+.silleta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.blk{border-radius:26px;padding:28px 26px;color:#fff;min-height:300px;display:flex;flex-direction:column}
+.blk .n{font:600 32px "Baloo 2";line-height:1.12}
+.blk .m{font:500 26px Inter;margin-top:auto}
+.blk .h{font:400 21px Inter;opacity:.85;margin-top:6px}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     A · ANDÉN — la ruta es el héroe. Riel vertical continuo, un tramo por
+     bloque, color oficial de cada línea. Se lee a tres metros.
+     Referencias: Transit (riel + badges), Navan (píldora de transbordo).
+════════════════════════════════════════════════════════════════════ -->
+<section class="totem" id="a">
+  <div class="tag">A · Andén</div>
+  <svg class="contours" viewBox="0 0 1080 1920" preserveAspectRatio="xMidYMid slice">
+    <rect width="1080" height="1920" fill="#173A2C" opacity=".55"/>
+    <g fill="none" stroke="#F6E7C1" stroke-opacity=".07" stroke-width="2">
+      <path d="M-40 190 Q270 120 540 200 T1120 170"/><path d="M-40 420 Q270 500 540 400 T1120 460"/>
+      <path d="M-40 700 Q270 620 540 720 T1120 660"/><path d="M-40 980 Q270 1060 540 960 T1120 1020"/>
+      <path d="M-40 1260 Q270 1180 540 1290 T1120 1230"/><path d="M-40 1540 Q270 1620 540 1520 T1120 1580"/>
+      <path d="M-40 1800 Q270 1720 540 1830 T1120 1770"/>
+    </g>
+  </svg>
+  <div class="z">
+    <header class="head">
+      <span class="badge" style="background:var(--line-a)">A</span>
+      <div>
+        <h1>Parque Berrío</h1>
+        <div class="sub">Línea A · Andén sentido norte</div>
+      </div>
+      <span class="clock">10:42</span>
+    </header>
+
+    <p class="a-ask">“¿Cómo llego a Parque Arví?”</p>
+
+    <div class="a-total">
+      <div class="big">34 min</div>
+      <div class="meta">2 transbordos · sale en 4 min</div>
+    </div>
+
+    <div class="rail">
+      <div class="leg">
+        <div class="col"><span class="dot" style="background:var(--line-a)">A</span><span class="stem" style="background:var(--line-a)"></span></div>
+        <div class="body">
+          <div class="to">Acevedo</div>
+          <div class="info">sentido Niquia · 6 paradas · 7 min</div>
+          <div class="stops">Prado · Hospital · Universidad · Caribe · Tricentenario</div>
+        </div>
+      </div>
+      <div class="xfer">↕ Transbordo · 2 min</div>
+      <div class="leg">
+        <div class="col"><span class="dot" style="background:var(--line-k);color:#12261D">K</span><span class="stem" style="background:var(--line-k)"></span></div>
+        <div class="body">
+          <div class="to">Santo Domingo</div>
+          <div class="info">Metrocable · 3 paradas · 8 min</div>
+          <div class="stops">Andalucía · Popular</div>
+        </div>
+      </div>
+      <div class="xfer">↕ Transbordo · 2 min</div>
+      <div class="leg">
+        <div class="col"><span class="dot" style="background:var(--line-l)">L</span></div>
+        <div class="body">
+          <div class="to">Parque Arví</div>
+          <div class="info">Metrocable · 1 parada · 15 min</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="a-foot">
+      <div style="display:flex;gap:24px;align-items:flex-end">
+        <div class="hosts">
+          <div class="host"><span class="face on" style="background:var(--system)"><span class="eyes"><i></i><i></i></span></span><span class="nm">Hermes</span><span class="rl">tu ruta</span></div>
+          <div class="host"><span class="face" style="background:var(--guava)"><span class="eyes"><i></i><i></i></span></span><span class="nm">Iván</span><span class="rl">tu ciudad</span></div>
+        </div>
+        <div class="qr" style="margin-left:auto"><span class="sq"></span><span><span class="t1">Sigue en tu celular</span><span class="t2">Apunta la cámara</span></span></div>
+      </div>
+      <div class="subs"><span class="who" style="color:#7fb3e0">Hermes: </span>Tomas la Línea A hasta Acevedo, ahí el Metrocable K y luego la L hasta Arví. Son 34 minutos.</div>
+      <div class="privacy">La cámara no graba ni guarda tu imagen. Solo detecta que hay alguien para encender la conversación.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     B · CONVERSACIÓN — lo que se DICE es el héroe; la ruta se resume en
+     una tira de badges. Para el stand: se lee desde lejos y se fotografía.
+     Referencias: Pi, State Farm, CVS (frase grande centrada + onda).
+════════════════════════════════════════════════════════════════════ -->
+<section class="totem" id="b">
+  <div class="tag">B · Conversación</div>
+  <svg class="contours" viewBox="0 0 1080 1920" preserveAspectRatio="xMidYMid slice">
+    <rect width="1080" height="1920" fill="#173A2C" opacity=".5"/>
+    <g fill="none" stroke="#F6E7C1" stroke-opacity=".06" stroke-width="2">
+      <path d="M-40 300 Q270 210 540 320 T1120 260"/><path d="M-40 620 Q270 720 540 600 T1120 690"/>
+      <path d="M-40 1120 Q270 1030 540 1150 T1120 1080"/><path d="M-40 1520 Q270 1620 540 1500 T1120 1590"/>
+    </g>
+    <circle cx="540" cy="1180" r="420" fill="#F6E7C1" opacity=".03"/>
+  </svg>
+  <div class="z">
+    <header class="head">
+      <span class="badge" style="background:var(--line-a)">A</span>
+      <div><h1>Parque Berrío</h1><div class="sub">Próximo A · La Estrella · 4 min</div></div>
+      <span class="clock">10:42</span>
+    </header>
+
+    <div class="b-center">
+      <p class="b-quote"><span class="hl">Línea A hasta Acevedo</span>, ahí el Metrocable K y luego la L hasta Arví.</p>
+      <div class="b-strip">
+        <span class="p" style="background:var(--line-a)">A</span><span class="arr">→</span>
+        <span class="p" style="background:var(--line-k);color:#12261D">K</span><span class="arr">→</span>
+        <span class="p" style="background:var(--line-l)">L</span>
+        <span class="tot">34 min · 2 transbordos</span>
+      </div>
+      <div class="b-who">
+        <span class="face on" style="background:var(--system);width:96px;height:96px"><span class="eyes"><i></i><i></i></span></span>
+        Habla Hermes
+        <span class="wave"><i style="height:18px"></i><i style="height:34px"></i><i style="height:52px"></i><i style="height:30px"></i><i style="height:44px"></i><i style="height:22px"></i><i style="height:38px"></i></span>
+      </div>
+    </div>
+
+    <div class="b-mini">
+      <div class="b-card"><div class="k">Sale en</div><div class="v">4 min</div></div>
+      <div class="b-card"><div class="k">Pasajes</div><div class="v">2</div></div>
+      <div class="b-card"><div class="k">Llegas</div><div class="v">11:16</div></div>
+    </div>
+
+    <div class="a-foot" style="padding-top:36px">
+      <div style="display:flex;gap:24px;align-items:flex-end">
+        <div class="hosts">
+          <div class="host"><span class="face on" style="background:var(--system)"><span class="eyes"><i></i><i></i></span></span><span class="nm">Hermes</span><span class="rl">tu ruta</span></div>
+          <div class="host"><span class="face" style="background:var(--guava)"><span class="eyes"><i></i><i></i></span></span><span class="nm">Iván</span><span class="rl">tu ciudad</span></div>
+        </div>
+        <div class="qr" style="margin-left:auto"><span class="sq"></span><span><span class="t1">Sigue en tu celular</span><span class="t2">Apunta la cámara</span></span></div>
+      </div>
+      <div class="subs"><span class="who" style="color:#e08e78">Iván: </span>Y cuando llegues, sube al mirador: se ve todo el valle.</div>
+      <div class="privacy">La cámara no graba ni guarda tu imagen. Solo detecta que hay alguien para encender la conversación.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     C · PANEL DE ESTACIÓN — lenguaje del sistema de transporte: diagrama
+     de línea horizontal con las estaciones, y módulos de dato alrededor.
+     El más institucional: el que se puede enseñar al Metro.
+════════════════════════════════════════════════════════════════════ -->
+<section class="totem" id="c">
+  <div class="tag">C · Panel de estación</div>
+  <svg class="contours" viewBox="0 0 1080 1920" preserveAspectRatio="xMidYMid slice">
+    <rect width="1080" height="1920" fill="#173A2C" opacity=".6"/>
+    <g fill="none" stroke="#F6E7C1" stroke-opacity=".05" stroke-width="2">
+      <path d="M-40 520 Q270 440 540 540 T1120 480"/><path d="M-40 1000 Q270 1090 540 980 T1120 1060"/>
+      <path d="M-40 1480 Q270 1400 540 1500 T1120 1440"/>
+    </g>
+  </svg>
+  <div class="z">
+    <div class="c-band"><span style="flex:1;background:var(--line-a)"></span><span style="flex:1;background:var(--line-k)"></span><span style="flex:1;background:var(--line-l)"></span></div>
+    <header class="head">
+      <span class="badge" style="background:var(--line-a)">A</span>
+      <div><h1>Parque Berrío</h1><div class="sub">Sábado 20 de septiembre</div></div>
+      <span class="clock">10:42</span>
+    </header>
+
+    <div class="alertbar">Línea B: frecuencia reducida por mantenimiento · 8 min</div>
+
+    <div class="c-diagram">
+      <div class="ttl">Parque Berrío → Parque Arví</div>
+      <div class="sum">34 min · 2 transbordos · 2 pasajes</div>
+      <div class="track">
+        <div class="wire">
+          <span style="flex:52;background:var(--line-a)"></span>
+          <span style="flex:27;background:var(--line-k)"></span>
+          <span style="flex:21;background:var(--line-l)"></span>
+        </div>
+        <div class="stn first" style="left:0"><span class="pin big" style="border-color:var(--line-a)"></span><span class="lbl">Parque Berrío<small>ahora</small></span></div>
+        <div class="stn" style="left:52%"><span class="pin" style="border-color:var(--line-k)"></span><span class="lbl">Acevedo<small>cambia a K</small></span></div>
+        <div class="stn" style="left:79%"><span class="pin" style="border-color:var(--line-l)"></span><span class="lbl">Santo Domingo<small>cambia a L</small></span></div>
+        <div class="stn last" style="left:100%"><span class="pin big" style="border-color:var(--line-l)"></span><span class="lbl">Arví</span></div>
+      </div>
+    </div>
+
+    <div class="c-mods">
+      <div class="mod"><div class="k">Próximo tren</div><div class="v">4 min</div><div class="d">A → La Estrella · horario publicado</div></div>
+      <div class="mod"><div class="k">Después</div><div class="v">9 min</div><div class="d">A → Niquia</div></div>
+      <div class="mod wide" style="background:none;padding:0">
+        <div class="k" style="padding:0 4px 14px">Cerca de esta estación</div>
+        <div class="silleta">
+          <div class="blk" style="background:var(--guava)"><div class="n">Basílica de la Candelaria</div><div class="m">2 min a pie</div><div class="h">Lun-sáb 6:00–18:30</div></div>
+          <div class="blk" style="background:#D98E2B"><div class="n">Museo de Antioquia y Plaza Botero</div><div class="m">4 min a pie</div><div class="h">Lun-sáb 9:40–17:30</div></div>
+          <div class="blk" style="background:#2E7DA6"><div class="n">Palacio de la Cultura</div><div class="m">4 min a pie</div><div class="h">Lun-sáb 8:00–16:30</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="c-foot">
+      <div style="display:flex;gap:32px;align-items:center">
+        <div class="hosts">
+          <div class="host"><span class="face on" style="background:var(--system);width:110px;height:110px"><span class="eyes"><i></i><i></i></span></span><span class="nm">Hermes</span></div>
+          <div class="host"><span class="face" style="background:var(--guava);width:110px;height:110px"><span class="eyes"><i></i><i></i></span></span><span class="nm">Iván</span></div>
+        </div>
+        <div class="qr" style="margin-left:auto"><span class="sq"></span><span><span class="t1">Sigue en tu celular</span><span class="t2">Válido 15 min</span></span></div>
+      </div>
+      <div class="subs"><span class="who" style="color:#7fb3e0">Hermes: </span>Son 34 minutos y dos transbordos. Te aviso cuándo bajarte.</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <div class="chips"><span class="chip on">Español</span><span class="chip">English</span><span class="chip">Português</span></div>
+        <span class="privacy" style="margin-left:auto">La cámara no graba ni guarda tu imagen.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>
