@@ -23,6 +23,92 @@ Una pantalla donde dos personajes de IA con personalidad propia (Hermes = la rut
 
 Contar la **estación de metro** como historia principal montada como stand (que es lo que será el sábado), con la ruta real del GTFS, y cerrar con el **stand de empresa** como producto que ya se vende. Micrófono de solapa, no el de la laptop; aviso en pantalla de que el video no se guarda.
 
+# Datos reales: el GTFS del sistema
+
+La implementación (parser, planificador, tests y script) vive en `packages/shared/src/gtfs.ts`,
+`apps/agent/src/metro/gtfs.ts` y `apps/agent/src/sala/gtfs.test.ts`.
+
+## Fuente de datos: el GTFS
+
+El Metro de Medellín publica su feed estático en su portal de datos abiertos (ArcGIS
+Hub), <https://datosabiertos-metrodemedellin.opendata.arcgis.com/>. El dataset vigente
+es **GTFS Metro de Medellín 2025** (`CSV Collection`, ~2,5 MB), que se descarga como zip:
+
+```bash
+mkdir -p ~/.hermes-os/gtfs/metro && cd ~/.hermes-os/gtfs/metro
+curl -L -o gtfs-metro-2025.zip \
+  "https://www.arcgis.com/sharing/rest/content/items/929fbd2dbfbf493ab44935577e8fbff6/data"
+unzip -o gtfs-metro-2025.zip && mv GTFS-2025/* . && rmdir GTFS-2025
+```
+
+Página del dataset (para ver versiones nuevas):
+<https://datosabiertos-metrodemedellin.opendata.arcgis.com/datasets/929fbd2dbfbf493ab44935577e8fbff6>.
+El portal también publica los años 2017, 2019, 2022 y 2024, y una capa de puntos
+`Estaciones Sistema Metro` (Feature Service) que **no hace falta**: el GTFS ya trae
+coordenadas.
+
+Qué trae el feed 2025: 110 paradas, 12 líneas (A, B, tranvía T-A, cables J, K, L, H, M,
+P y los buses alimentadores 1, 2, O), 68 497 viajes y 326 532 filas de `stop_times.txt`,
+más `transfers.txt` con los 13 pares oficiales de transbordo y `calendar`/`calendar_dates`.
+No hay `frequencies.txt`: los horarios son viaje a viaje, así que "próximo tren" sale de
+`stop_times`. Tres rarezas del feed que el parser resuelve y que conviene saber:
+
+| Rareza | Qué hace el parser |
+| --- | --- |
+| `stop_name` trae la dirección pegada ("Poblado Cra.49 #9-69 Medellin") | `cleanStopName` corta en la primera palabra de vía y quita el sufijo de andén |
+| Cada línea tiene su propio andén con sufijo (`ACE`, `ACE-K`, `ACEP`) | se fusionan por nombre normalizado + distancia (≤300 m) y por `transfers.txt` |
+| `calendar.txt` vence el 31-12-2025 | `activeServices` cae al patrón del día de la semana y lo marca `stale`; la UI lo dice |
+
+Vigencia del feed descargado: `20151231`–`20251231`. Mientras no salga el feed 2026, las
+próximas salidas son **horario de referencia**, no predicción en vivo, y así hay que
+mostrarlas.
+
+## Config del humano (`~/.hermes-os/`)
+
+| Archivo | Para qué | Plantilla |
+| --- | --- | --- |
+| `gtfs/metro/*.txt` | el feed descompactado (override `HERMES_GTFS_DIR`) | — |
+| `metro.json` | alias de estaciones, nombres con tilde para mostrar, fusiones manuales, minutos de transbordo por defecto (override `HERMES_METRO_CONFIG`) | `docs/metro.example.json` |
+
+Los alias son lo que la gente dice ("arví", "el poblado", "centro"); `display` corrige las
+tildes que el feed no trae ("Parque Arvi" → "Parque Arví"). Sin `metro.json` la red se
+arma igual, solo que con los nombres tal como vienen del feed.
+
+## Cómo se prueba
+
+```bash
+pnpm --filter @hermes/agent exec tsx scripts/metro-route.ts Poblado "Parque Arví"
+pnpm --filter @hermes/agent exec tsx scripts/metro-route.ts --next "Parque Berrío"
+pnpm --filter @hermes/agent exec tsx scripts/metro-route.ts --stations
+pnpm test        # incluye apps/agent/src/sala/gtfs.test.ts
+```
+
+La lógica es pura y vive en `packages/shared/src/gtfs.ts` (sin fs ni red): `buildNetwork`
+arma estaciones, líneas y aristas con los segundos reales (mediana entre viajes),
+`planRoute` hace Dijkstra sobre (estación, línea) con costo lexicográfico —primero menos
+transbordos, luego menos minutos—, `resolveStation` entiende tildes y "estación", y
+`nextDepartures` da las próximas salidas por línea y sentido. Los tests corren contra un
+feed sintético de tres líneas y dos transbordos; los tres del final corren contra el feed
+real si está descargado y se saltan solos si no.
+
+El caso de referencia, con el feed 2025:
+
+```
+Poblado → Parque Arví · 39 min (35 en tren + 4 de transbordo) · 2 transbordos
+  Línea A  #0960A7  Poblado → Acevedo (sentido Niquia) · 11 paradas · 12 min
+  Línea K  #CBD308  Acevedo → Santo Domingo · 3 paradas · 8 min
+  Línea L  #A36A18  Santo Domingo → Parque Arví · 1 parada · 15 min
+```
+
+Los colores salen de `route_color` del feed, no de una constante: la A es azul `#0960A7`,
+la K lima `#CBD308` y la L marrón `#A36A18`.
+
+## Pendiente de los datos
+
+- Rutas del agente, tools del elenco, pantalla del tótem y handoff al celular (fases 1 a 5).
+- Feed 2026 cuando el Metro lo publique: cambia el zip y desaparece el aviso de horario
+  de referencia.
+
 # Mercado y competencia (investigación del 17 de septiembre de 2026)
 
 ## 1. Mercado

@@ -1,0 +1,20 @@
+{
+  "_comment": "Copia a ~/.hermes-os/metro.json (override HERMES_METRO_CONFIG). Todo es opcional: nombres como los dice la gente → nombre de estación del feed; nombres para mostrar (tildes); fusiones manuales por stop_id; minutos de transbordo cuando transfers.txt no trae el par.",
+  "aliases": {
+    "arvi": "Parque Arvi",
+    "el poblado": "Poblado",
+    "centro": "San Antonio"
+  },
+  "display": {
+    "Parque Arvi": "Parque Arví",
+    "Parque Berrio": "Parque Berrío",
+    "Niquia": "Niquía",
+    "Itagui": "Itagüí",
+    "Ayura": "Ayurá",
+    "Anadalucia": "Andalucía",
+    "Aguacatala": "Aguacatala"
+  },
+  "merges": [],
+  "transfer_minutes": 3,
+  "merge_radius_m": 300
+}
