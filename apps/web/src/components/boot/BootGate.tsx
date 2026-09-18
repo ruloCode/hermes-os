@@ -12,6 +12,7 @@
 // dejar la cortina colgada.
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useHermesDataContext } from "@/state/HermesDataProvider";
 import { useDashboard } from "@/state/DashboardProvider";
 import { useAgentEventsContext } from "@/state/AgentEventsProvider";
@@ -21,12 +22,20 @@ const MIN_MS = 1200;   // exhibición mínima antes de completar (anti-parpadeo)
 const SOFT_MS = 2400;  // ya hay datos críticos pero falta el snapshot → no esperes más
 const HARD_MS = 6500;  // tope: dispara aunque el agente esté offline
 
+// Páginas SUELTAS (fuera del dashboard: la sala, el tótem de estación, las de
+// /dev): ahí la cortina de arranque del dashboard no pinta nada — un viajero
+// frente a una pantalla de estación no tiene por qué ver cargar un tablero de
+// proyectos. Son las mismas rutas que no usan el AppShell.
+const STANDALONE = ["/sala", "/estacion", "/m/", "/dev/"];
+
 export function BootGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const standalone = STANDALONE.some((p) => pathname === p || pathname.startsWith(p));
   const { online, projects } = useHermesDataContext();
   const { snapshot } = useDashboard();
   const { connected } = useAgentEventsContext();
 
-  const [showLoader, setShowLoader] = useState(true);
+  const [showLoader, setShowLoader] = useState(!standalone);
   const [progress, setProgress] = useState(6);
   const [finish, setFinish] = useState(false);
   const startRef = useRef<number | null>(null);
@@ -89,7 +98,7 @@ export function BootGate({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
-      {showLoader && (
+      {showLoader && !standalone && (
         <BootLoader
           progress={progress}
           finish={finish}
