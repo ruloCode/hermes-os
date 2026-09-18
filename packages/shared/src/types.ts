@@ -264,6 +264,7 @@ export interface AgentActivityEvent {
     | "gestures"
     | "browser"
     | "lights"
+    | "metro"
     | "scheduled"
     | "learning";
   taskId?: string;

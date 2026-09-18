@@ -18,6 +18,7 @@ import { activityHourly, emit, recentEvents, subscribe } from "./events.js";
 import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence.js";
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
 import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaTopic, SALA_PATH } from "./sala/store.js";
+import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { SalaValidationError } from "@hermes/shared";
 import { readProjectContext } from "./vault/project-context.js";
 import { resolveVaultDoc } from "./vault/doc.js";
@@ -2421,6 +2422,77 @@ app.get("/sala/agents", async (c) => {
   } catch (err) {
     if (err instanceof SalaValidationError) return c.json({ error: err.message, path: SALA_PATH }, 500);
     throw err;
+  }
+});
+
+// ── Tótem de estación (/estacion) ──────────────────────────────────────
+// Rutas del sistema de transporte con datos REALES: el GTFS manda las líneas,
+// tiempos y transbordos (~/.hermes-os/gtfs/metro); las novedades del servicio
+// y los lugares cerca de una estación los escribe el humano en
+// ~/.hermes-os/metro-status.json y ~/.hermes-os/lugares.json. Sin archivo, la
+// respuesta viene vacía y la pantalla no pinta nada: nada se inventa.
+// Contrato { ok, … | error } con 200 (como /lights y /browser): la voz relata
+// el error tal cual en vez de tropezar con un 500.
+const estacionOff = () => ({ ok: false, error: "el tótem está apagado (HERMES_ESTACION=off)" }) as const;
+
+app.post("/metro/route", async (c) => {
+  if (!env.ESTACION_ENABLED) return c.json(estacionOff(), 404);
+  const body = await c.req.json<{ from?: string; to?: string }>().catch(() => ({}) as { from?: string; to?: string });
+  const from = (body.from ?? "").trim();
+  const to = (body.to ?? "").trim();
+  if (!from || !to) return c.json({ ok: false, error: "faltan from y to" }, 400);
+  try {
+    const answer = await routeBetween(from, to);
+    if (answer.ok) emit({ kind: "metro", detail: `ruta · ${answer.plan?.from} → ${answer.plan?.to}` });
+    return c.json(answer);
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get("/metro/stations", async (c) => {
+  if (!env.ESTACION_ENABLED) return c.json(estacionOff(), 404);
+  try {
+    return c.json(await stationList());
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Próximas salidas por línea y sentido (horario del feed). `stale` = el feed
+// venció: es horario de referencia, no predicción, y la UI debe decirlo.
+app.get("/metro/next", async (c) => {
+  if (!env.ESTACION_ENABLED) return c.json(estacionOff(), 404);
+  const station = (c.req.query("station") ?? "").trim();
+  if (!station) return c.json({ ok: false, error: "falta station" }, 400);
+  try {
+    return c.json(await departuresAt(station));
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Novedades del servicio. No hay API pública de estado: sin archivo → [] y la
+// pantalla no muestra banner.
+app.get("/metro/status", async (c) => {
+  if (!env.ESTACION_ENABLED) return c.json(estacionOff(), 404);
+  try {
+    const { notices, all, exists } = await readStatus();
+    return c.json({ ok: true, notices, total: all.length, configured: exists, path: METRO_STATUS_PATH });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err), path: METRO_STATUS_PATH });
+  }
+});
+
+// Lugares cerca de una estación (nombre, minutos a pie, horario, fuente).
+app.get("/metro/places", async (c) => {
+  if (!env.ESTACION_ENABLED) return c.json(estacionOff(), 404);
+  const station = (c.req.query("station") ?? "").trim();
+  if (!station) return c.json({ ok: false, error: "falta station" }, 400);
+  try {
+    return c.json(await placesAt(station));
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err), path: PLACES_PATH });
   }
 });
 

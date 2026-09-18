@@ -1,0 +1,21 @@
+{
+  "_comment": "Copia a ~/.hermes-os/metro-status.json (override HERMES_METRO_STATUS_PATH). Novedades del servicio: no hay API pública de estado, así que las escribe una persona mirando los avisos oficiales. Sin este archivo, el tótem no muestra banner. `line` es el route_short_name ('A', 'K', 'T-A') o \"\" para todo el sistema; `until` caduca la novedad sola (ISO local, 2026-09-18T20:00); `severity` es info | demora | suspension.",
+  "notices": [
+    {
+      "line": "A",
+      "text": "Frecuencia reducida entre dos estaciones por mantenimiento.",
+      "severity": "demora",
+      "delayMin": 8,
+      "since": "2026-09-18T05:00",
+      "until": "2026-09-18T20:00",
+      "source": "Aviso oficial del operador"
+    },
+    {
+      "line": "",
+      "text": "Horario extendido por evento en la ciudad.",
+      "severity": "info",
+      "until": "2026-09-20",
+      "source": "Cuenta oficial del sistema"
+    }
+  ]
+}

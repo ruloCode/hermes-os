@@ -70,6 +70,10 @@ export const env = {
   BROWSER_AGENT_ENABLED: (process.env.HERMES_BROWSER_AGENT || "").toLowerCase() !== "off",
   // Sala de agentes 3D (/sala): "off" apaga /sala/* y el token por clave.
   SALA_ENABLED: (process.env.HERMES_SALA || "").toLowerCase() !== "off",
+  // Tótem de estación (/estacion): "off" apaga /metro/*. Los datos salen del
+  // GTFS en ~/.hermes-os/gtfs/metro y de los JSON del humano (ver
+  // docs/estacion-metro.md); sin feed las rutas responden el motivo.
+  ESTACION_ENABLED: (process.env.HERMES_ESTACION || "").toLowerCase() !== "off",
   // Linear (manejo de tareas). Personal API key (Settings → API en Linear).
   // Sin key, las tools de Linear responden con el CTA de configuración.
   LINEAR_API_KEY: process.env.LINEAR_API_KEY || "",

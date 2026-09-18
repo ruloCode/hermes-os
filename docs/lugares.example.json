@@ -1,0 +1,25 @@
+{
+  "_comment": "Copia a ~/.hermes-os/lugares.json (override HERMES_PLACES_PATH). Qué hay cerca de cada estación. Reglas: `hours` solo si está publicado por la fuente y `source` dice cuál (si no hay horario verificable, deja hours en null y la pantalla no muestra horario); `walkMinutes` es el tiempo real a pie desde la estación. Sin este archivo, el tótem no muestra tarjetas de lugares.",
+  "places": [
+    {
+      "name": "Museo de la ciudad",
+      "station": "Nombre de la estación tal como lo devuelve /metro/stations",
+      "walkMinutes": 5,
+      "hours": "Lun-sáb 9:40-17:30 · dom y festivos 9:40-16:30",
+      "note": "Una frase de por qué vale la pena, no un folleto.",
+      "source": "https://sitio-oficial.example/horarios",
+      "url": "https://sitio-oficial.example",
+      "category": "museo"
+    },
+    {
+      "name": "Plaza del barrio",
+      "station": "Nombre de la estación",
+      "walkMinutes": 3,
+      "hours": null,
+      "note": "Espacio público: sin horario publicado.",
+      "source": null,
+      "url": null,
+      "category": "plaza"
+    }
+  ]
+}

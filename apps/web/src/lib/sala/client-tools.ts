@@ -4,11 +4,125 @@
 // versión mínima que un personaje de la sala necesita para no inventar.
 
 import { hermesGet, hermesPost } from "@/lib/hermes";
+import { emitUiEvent, type UiNotice, type UiPlace, type UiRoutePlan } from "./ui-bus";
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
+interface RouteAnswer {
+  ok: boolean;
+  error?: string;
+  suggestions?: string[];
+  plan?: UiRoutePlan;
+  notices?: UiNotice[];
+  next?: { line: string; headsign: string; inMinutes: number[] }[];
+  scheduleStale?: boolean;
+  say?: string;
+}
+
+/**
+ * Tools del TÓTEM DE ESTACIÓN. Cada una devuelve TEXTO para la voz y además
+ * emite el payload estructurado al bus de UI: la tarjeta de la ruta se pinta
+ * con los datos del agente, no con lo que el modelo alcance a decir.
+ * Sin GTFS o sin archivos de config, la tool dice el motivo y la pantalla no
+ * pinta nada — nunca una ruta inventada.
+ */
+export function estacionClientTools(): Record<string, (p: Record<string, unknown>) => Promise<string>> {
+  return {
+    metro_route: async (p) => {
+      const from = str(p.from) ?? str(p.origen) ?? "";
+      const to = str(p.to) ?? str(p.destino) ?? "";
+      if (!to) return "¿A dónde quieres ir?";
+      try {
+        const r = await hermesPost<RouteAnswer>("/metro/route", { from, to });
+        if (!r.ok || !r.plan) {
+          emitUiEvent({ kind: "route_failed", query: to, error: r.error ?? "sin ruta", suggestions: r.suggestions ?? [] });
+          const near = r.suggestions?.length ? ` ¿Te sirve alguna de estas: ${r.suggestions.slice(0, 3).join(", ")}?` : "";
+          return `${r.error ?? "No pude armar la ruta"}.${near}`;
+        }
+        emitUiEvent({
+          kind: "route",
+          plan: r.plan,
+          notices: r.notices ?? [],
+          next: r.next ?? [],
+          scheduleStale: Boolean(r.scheduleStale),
+        });
+        const avisos = (r.notices ?? []).map((n) => `Aviso — ${n.line ? `Línea ${n.line}: ` : ""}${n.text}`).join(" ");
+        return [avisos, r.say ?? ""].filter(Boolean).join(" ");
+      } catch {
+        return "No alcanzo los datos del sistema ahora mismo.";
+      }
+    },
+    metro_status: async () => {
+      try {
+        const r = await hermesGet<{ ok: boolean; notices?: UiNotice[]; error?: string }>("/metro/status");
+        if (!r.ok) return r.error ?? "No pude leer el estado del servicio.";
+        const notices = r.notices ?? [];
+        emitUiEvent({ kind: "status", notices });
+        if (!notices.length) return "No hay novedades reportadas del servicio.";
+        return notices.map((n) => `${n.line ? `Línea ${n.line}: ` : ""}${n.text}${n.delayMin ? ` (unos ${n.delayMin} minutos)` : ""}`).join(" ");
+      } catch {
+        return "No alcanzo el estado del servicio ahora mismo.";
+      }
+    },
+    places_near: async (p) => {
+      const station = str(p.station) ?? str(p.estacion) ?? "";
+      if (!station) return "¿Cerca de qué estación?";
+      try {
+        const r = await hermesGet<{ ok: boolean; station?: string; places?: UiPlace[]; available?: string[]; configured?: boolean; error?: string }>(
+          `/metro/places?station=${encodeURIComponent(station)}`,
+        );
+        if (!r.ok) return r.error ?? "No pude leer los lugares.";
+        const places = r.places ?? [];
+        emitUiEvent({ kind: "places", station: r.station ?? station, places });
+        if (!places.length) {
+          if (!r.configured) return "Todavía no tengo lugares cargados para ninguna estación.";
+          const other = (r.available ?? []).slice(0, 4).join(", ");
+          return `No tengo lugares cargados para ${r.station ?? station}${other ? `; sí para ${other}` : ""}.`;
+        }
+        return places
+          .slice(0, 3)
+          .map((x) => `${x.name}, ${x.walkMinutes === 0 ? "en la misma estación" : `a ${x.walkMinutes} minutos a pie`}${x.hours ? `, ${x.hours}` : ", sin horario publicado"}`)
+          .join(". ");
+      } catch {
+        return "No alcanzo la lista de lugares ahora mismo.";
+      }
+    },
+    metro_next: async (p) => {
+      const station = str(p.station) ?? str(p.estacion) ?? "";
+      if (!station) return "¿En qué estación?";
+      try {
+        const r = await hermesGet<{
+          ok: boolean;
+          station?: string;
+          stale?: boolean;
+          departures?: { line: string; headsign: string; inMinutes: number[] }[];
+          error?: string;
+        }>(`/metro/next?station=${encodeURIComponent(station)}`);
+        if (!r.ok) return r.error ?? "No pude leer las salidas.";
+        const deps = r.departures ?? [];
+        if (!deps.length) return `No hay salidas programadas ahora en ${r.station ?? station}.`;
+        const txt = deps
+          .slice(0, 3)
+          .map((d) => `${d.line} hacia ${d.headsign} en ${d.inMinutes[0]} minutos`)
+          .join(", ");
+        // El feed vencido NO se disfraza de predicción: se dice que es horario.
+        return r.stale ? `Según el horario publicado: ${txt}.` : `${txt}.`;
+      } catch {
+        return "No alcanzo los horarios ahora mismo.";
+      }
+    },
+    set_language: async (p) => {
+      const lang = (str(p.language) ?? str(p.idioma) ?? "").toLowerCase();
+      if (!lang) return "¿Qué idioma?";
+      emitUiEvent({ kind: "language", language: lang });
+      return `Idioma de la pantalla: ${lang}.`;
+    },
+  };
+}
+
 export function salaClientTools(): Record<string, (p: Record<string, unknown>) => Promise<string> | string> {
   return {
+    ...estacionClientTools(),
     get_project_status: async (p) => {
       try {
         const data = await hermesPost<unknown[]>("/tools/get_project_status", { project: str(p.project) });
