@@ -573,6 +573,73 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
+// ── Tools del TÓTEM DE ESTACIÓN (solo los personajes de la estación) ───
+// Corren en el browser del tótem y llaman al agente local (/metro/*): la
+// respuesta de la ruta sale del GTFS, no de la memoria del modelo. Además de
+// devolver texto, pintan la tarjeta en pantalla.
+
+const ESTACION_TOOLS: ToolDef[] = [
+  {
+    name: "metro_route",
+    description:
+      "Calcula la ruta REAL entre dos estaciones del sistema de transporte (líneas, transbordos, paradas y minutos) y la pinta en la pantalla. Llámala SIEMPRE antes de decir cómo llegar a algún lado: nunca respondas una ruta de memoria. Si el viajero no dice de dónde sale, usa la estación donde está el tótem. Di la respuesta tal como vuelve: línea, transbordos y minutos.",
+    parameters: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Estación de origen; si no la dicen, la estación del tótem" },
+        to: { type: "string", description: "Estación o lugar de destino, tal como lo dijo el viajero" },
+      },
+      required: ["to"],
+    },
+    expects_response: true,
+    response_timeout_secs: 12,
+  },
+  {
+    name: "metro_status",
+    description:
+      "Novedades del servicio reportadas hoy (demoras, cierres). Llámala antes de dar una ruta si el viajero pregunta cómo está el servicio o si algo va demorado. Si no hay novedades, dilo: no inventes retrasos.",
+    parameters: { type: "object", properties: {}, required: [] },
+    expects_response: true,
+    response_timeout_secs: 10,
+  },
+  {
+    name: "places_near",
+    description:
+      "Qué hay cerca de una estación (nombre, minutos a pie, horario publicado). Úsala SIEMPRE que pregunten qué hacer, qué visitar, dónde comer o qué queda cerca: los horarios salen de aquí y nunca de tu memoria. Si devuelve vacío, dilo con gracia y ofrece otra estación.",
+    parameters: {
+      type: "object",
+      properties: { station: { type: "string", description: "Estación de referencia (la del tótem si no dicen otra)" } },
+      required: ["station"],
+    },
+    expects_response: true,
+    response_timeout_secs: 10,
+  },
+  {
+    name: "metro_next",
+    description:
+      "Próximas salidas en una estación por línea y sentido, según el horario publicado. Úsala si preguntan a qué hora pasa el próximo tren. Si la respuesta dice que es horario publicado, dilo así: es horario, no predicción en vivo.",
+    parameters: {
+      type: "object",
+      properties: { station: { type: "string", description: "Estación (la del tótem si no dicen otra)" } },
+      required: ["station"],
+    },
+    expects_response: true,
+    response_timeout_secs: 10,
+  },
+  {
+    name: "set_language",
+    description:
+      "Cambia el idioma de la PANTALLA cuando el viajero pide hablar en otro idioma (español, inglés, portugués). Llámala y sigue hablando en ese idioma.",
+    parameters: {
+      type: "object",
+      properties: { language: { type: "string", description: "Código del idioma: es, en o pt" } },
+      required: ["language"],
+    },
+    expects_response: true,
+    response_timeout_secs: 8,
+  },
+];
+
 // ── Tools del tutor de inglés (solo en el agente tutor) ─────────────────
 
 const TUTOR_TOOLS: ToolDef[] = [
@@ -944,6 +1011,28 @@ const CAST_LLM = process.env.ELEVENLABS_CAST_LLM || "claude-sonnet-4-5";
  * humano nombra a uno y responde ese. El prompt es el "director": reglas de
  * turno + la persona de cada miembro bajo su etiqueta <Nombre>…</Nombre>.
  */
+/**
+ * Reglas del TÓTEM DE ESTACIÓN. La pantalla está plantada en una estación
+ * real: el viajero no dice de dónde sale, y el dato de la ruta NO puede salir
+ * de la memoria del modelo. De ahí las dos reglas duras: llamar la tool antes
+ * de responder una ruta, y no inventar horarios nunca.
+ */
+function stationRules(station: NonNullable<SalaConfig["station"]>): string {
+  return `
+DÓNDE ESTÁS: esta pantalla está en la estación {{station_name}} (línea {{station_line}}) y le habla a quien pasa por el andén. Si el viajero no dice de dónde sale, el origen es {{station_name}}.
+
+REGLAS DE DATO (por encima de cualquier otra):
+- Antes de decir CÓMO LLEGAR a cualquier lado, llama metro_route. Di la ruta tal como vuelve: líneas, transbordos y minutos, sin redondear a tu gusto y sin agregar estaciones que no estén en la respuesta.
+- Nunca inventes horarios, tarifas ni tiempos. Los horarios de lugares salen de places_near; las horas de los trenes, de metro_next; si la respuesta dice que es horario publicado, dilo así.
+- Si hay una novedad del servicio (metro_status) que toca la ruta, dila ANTES de la ruta, en una frase.
+- Si una tool no reconoce el lugar, repregunta con las opciones que devolvió. No adivines la estación.
+- Si una tool falla o no responde, dilo en una frase ("ahora mismo no puedo consultar la ruta") y NO completes con lo que creas recordar: una ruta de memoria es exactamente el error que esta pantalla existe para no cometer.
+- Si no tienes el dato, dilo con gracia y ofrece lo que sí tienes. Es mejor "no lo tengo" que un horario inventado.
+
+CÓMO SUENAN USTEDES AQUÍ: frases de 1 a 3 oraciones, como se habla en un andén con ruido. Nada de listas ni de leer el JSON: el viajero ve la tarjeta en pantalla, ustedes cuentan lo importante. Si el viajero habla en otro idioma, llama set_language y sigue en ese idioma.
+`;
+}
+
 function castPrompt(config: SalaConfig, members: SalaOwn[]): string {
   const names = members.map((m) => `${m.name} (etiqueta <${castLabel(m.name)}>)`).join(", ");
   const personas = members
@@ -959,7 +1048,7 @@ REGLAS DE TURNO (obligatorias):
 - Nunca un personaje habla por el otro ni resume lo que el otro "diría". Cada uno mantiene su tono, su acento y su ángulo.
 - Si ${OWNER} interrumpe, cede el turno: no repitas lo que ya se dijo.
 - Si hay una pausa larga, espera en silencio; no preguntes si siguen ahí.
-${config.topic ? `\nTEMA DE HOY: ${config.topic}.\n` : ""}
+${config.station ? stationRules(config.station) : config.topic ? `\nTEMA DE HOY: ${config.topic}.\n` : ""}
 Hoy es {{today}}. Contexto de la sesión: {{session_scope}}
 
 PERSONAJES:
@@ -977,8 +1066,14 @@ function castConfig(config: SalaConfig, members: SalaOwn[], defaultMember: SalaO
       language: defaultMember.voice.language,
       dynamic_variables: {
         dynamic_variable_placeholders: {
-          session_scope: `${OWNER} está en la Sala de Agentes 3D.`,
+          session_scope: config.station
+            ? `Alguien se acercó al tótem de la estación ${config.station.name}.`
+            : `${OWNER} está en la Sala de Agentes 3D.`,
           today: "Fecha no disponible.",
+          // El nombre de la estación viaja como variable, no en el prompt: el
+          // mismo agente sirve para otra estación cambiando sala.json.
+          station_name: config.station?.name ?? "",
+          station_line: config.station?.line ?? "",
         },
       },
       prompt: { prompt: castPrompt(config, members), llm: CAST_LLM, tool_ids: toolIds, temperature: 0.6 },
@@ -1019,7 +1114,10 @@ async function setupCast(toolIdByName: Map<string, string>): Promise<string | nu
   const defaultMember = members.find((m) => m.key === (config.cast!.default ?? members[0].key)) ?? members[0];
   console.log(`⚙️  Sala · Elenco (${members.map((m) => m.name).join(" + ")})…`);
   for (const m of members) await ensureVoice(m.voice.voice_id, m.voice.voice_name);
-  const ids = [...new Set(members.flatMap((m) => m.voice.tools))].map((n) => toolIdByName.get(n)).filter((x): x is string => Boolean(x));
+  // Con `station`, el elenco es el anfitrión de una estación: sus tools son
+  // las del tótem (datos reales) además de las que pida cada personaje.
+  const names = [...new Set([...members.flatMap((m) => m.voice.tools), ...(config.station ? ESTACION_TOOLS.map((t) => t.name) : [])])];
+  const ids = names.map((n) => toolIdByName.get(n)).filter((x): x is string => Boolean(x));
   const agentId = await upsertAgent(CAST_AGENT_NAME, castConfig(config, members, defaultMember, ids));
   const raw = JSON.parse(await readFile(SALA_PATH, "utf8")) as { cast: Record<string, unknown> };
   raw.cast.agent_id = agentId;
@@ -1067,6 +1165,12 @@ async function setupSala(toolIdByName: Map<string, string>): Promise<{ key: stri
 console.log("⚙️  Configurando client tools de Hermes…");
 const toolIds = await upsertTools(TOOLS);
 const toolIdByName = new Map(TOOLS.map((t, i) => [t.name, toolIds[i]]));
+
+// Tools del tótem de estación: se registran siempre (son baratas de tener) y
+// solo las recibe el elenco cuando sala.json define `station`.
+console.log("⚙️  Configurando client tools del tótem de estación…");
+const estacionIds = await upsertTools(ESTACION_TOOLS);
+ESTACION_TOOLS.forEach((t, i) => toolIdByName.set(t.name, estacionIds[i]));
 
 let agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
 let tutorId = process.env.NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID ?? "";

@@ -19,6 +19,7 @@ import {
   type StationPlace,
 } from "@hermes/shared";
 import { HERMES_HOME } from "../home.js";
+import { salaStation } from "../sala/store.js";
 import { loadMetro, GTFS_DIR } from "./gtfs.js";
 
 /**
@@ -142,11 +143,21 @@ export function sayPlan(plan: RoutePlan): string {
   return `${chain}. Son ${plan.minutes} minutos y ${tr}.`;
 }
 
-/** Ruta entre dos lugares dichos en lenguaje natural. Nunca inventa: si no reconoce, sugiere. */
+/**
+ * Ruta entre dos lugares dichos en lenguaje natural. Nunca inventa: si no
+ * reconoce un nombre, devuelve candidatas. Sin origen (el caso normal en el
+ * tótem: el viajero solo dice a dónde va) el origen es la estación donde está
+ * plantada la pantalla, de sala.json.station.
+ */
 export async function routeBetween(fromText: string, toText: string): Promise<RouteAnswer> {
   const loaded = await loadMetro();
   if (!loaded) return { ok: false, error: `No hay datos del sistema en ${GTFS_DIR}` };
   const { net } = loaded;
+  if (!fromText.trim()) {
+    const station = await salaStation().catch(() => null);
+    if (!station) return { ok: false, error: "falta el origen y esta pantalla no tiene estación configurada" };
+    fromText = station.name;
+  }
   const from = resolveStation(net, fromText);
   const to = resolveStation(net, toText);
   if (!from || !to) {

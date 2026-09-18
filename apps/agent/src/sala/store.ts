@@ -10,6 +10,7 @@ import {
   type SalaAgentPublic,
   type SalaCastPublic,
   type SalaConfig,
+  type SalaStation,
 } from "@hermes/shared";
 import { HERMES_HOME } from "../home.js";
 import { env } from "../env.js";
@@ -112,6 +113,11 @@ export async function salaCast(): Promise<SalaCastPublic | null> {
 /** Tema de la tertulia (sala.json.topic), o null. */
 export async function salaTopic(): Promise<string | null> {
   return (await readSalaConfig())?.topic ?? null;
+}
+
+/** Estación donde está plantado el tótem (sala.json.station), o null = sala normal. */
+export async function salaStation(): Promise<SalaStation | null> {
+  return (await readSalaConfig())?.station ?? null;
 }
 
 /** Lista pública para la escena: sin prompts ni ids, con el estado REAL del proyecto. */

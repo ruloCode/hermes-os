@@ -57,5 +57,12 @@
       "ventas"
     ],
     "default": "ventas"
+  },
+  "station": {
+    "_comment": "Opcional. Presente = el elenco es el anfitrión de un TÓTEM DE ESTACIÓN: el origen por defecto de las rutas es esta estación y el prompt suma las reglas de dato (llamar metro_route antes de decir una ruta, nunca inventar horarios). id se resuelve contra el GTFS (ver docs/estacion-metro.md).",
+    "id": "clave-de-estacion-del-gtfs",
+    "name": "Nombre de la estación",
+    "line": "A",
+    "default_language": "es"
   }
 }

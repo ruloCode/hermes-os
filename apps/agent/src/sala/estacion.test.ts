@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   activeNotices,
+  parseSalaConfig,
+  SalaValidationError,
   describeNotice,
   EstacionConfigError,
   noticesForLines,
@@ -113,5 +115,40 @@ describe("parsePlaces / placesNear", () => {
     assert.throws(() => parsePlaces([{ station: "y", walkMinutes: 1 }]), /name: texto vacío/);
     assert.throws(() => parsePlaces([{ name: "x", station: "y", walkMinutes: 999 }]), /walkMinutes/);
     assert.deepEqual(parsePlaces({}), []);
+  });
+});
+
+describe("sala.json.station (modo tótem)", () => {
+  const base = {
+    agents: [
+      {
+        key: "anfitrion",
+        name: "Anfitrión",
+        project: "demo",
+        color: "#0960a7",
+        head: "sphere",
+        height: 1.8,
+        build: "medium",
+        voice: { voice_id: "v1", language: "es", first_message: "Hola", prompt: "Eres el anfitrión.", tools: [] },
+      },
+    ],
+  };
+
+  it("sin el bloque, la sala sigue siendo una sala (station undefined)", () => {
+    assert.equal(parseSalaConfig(base).station, undefined);
+  });
+
+  it("con el bloque, la estación queda en la config y el idioma admite pt", () => {
+    const c = parseSalaConfig({ ...base, station: { id: "clave", name: "Nombre", line: "A", default_language: "pt" } });
+    assert.deepEqual(c.station, { id: "clave", name: "Nombre", line: "A", default_language: "pt" });
+    // Sin idioma explícito no se inventa uno: la pantalla decide su default.
+    assert.equal(parseSalaConfig({ ...base, station: { id: "c", name: "N", line: "A" } }).station?.default_language, undefined);
+  });
+
+  it("rechaza un bloque incompleto con el motivo", () => {
+    assert.throws(() => parseSalaConfig({ ...base, station: { name: "N", line: "A" } }), /station.id/);
+    assert.throws(() => parseSalaConfig({ ...base, station: { id: "c", name: "N" } }), /station.line/);
+    assert.throws(() => parseSalaConfig({ ...base, station: { id: "c", name: "N", line: "A", default_language: "fr" } }), SalaValidationError);
+    assert.throws(() => parseSalaConfig({ ...base, station: "Parque" }), /station: debe ser un objeto/);
   });
 });

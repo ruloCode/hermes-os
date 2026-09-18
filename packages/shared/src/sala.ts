@@ -86,11 +86,31 @@ export interface SalaCast {
   default?: string;
 }
 
+/**
+ * TÓTEM DE ESTACIÓN: dónde está plantada la pantalla. Con este bloque el
+ * elenco deja de ser una tertulia y se vuelve el anfitrión de una estación
+ * concreta: sabe de dónde sale el viajero (sin que se lo diga) y qué línea
+ * pisa. El nombre de la estación NO vive en el código — sale de aquí y se
+ * resuelve contra el GTFS.
+ */
+export interface SalaStation {
+  /** Clave de estación del GTFS (`/metro/stations`), o el nombre tal cual. */
+  id: string;
+  /** Nombre para mostrar y para decir en voz. */
+  name: string;
+  /** route_short_name de la línea que pasa por aquí ("A"): pinta el badge. */
+  line: string;
+  /** Idioma con el que arranca la pantalla. */
+  default_language?: SalaLanguage | "pt";
+}
+
 export interface SalaConfig {
   agents: SalaAgentConfig[];
   /** Tema de la tertulia (demo a tres voces): lo reciben los agentes al conectar. */
   topic?: string;
   cast?: SalaCast;
+  /** Presente = el elenco es el anfitrión de esta estación (modo tótem). */
+  station?: SalaStation;
 }
 
 /** Etiqueta de voz de un personaje en el elenco: nombre sin acentos ni espacios (`<Ivan>…</Ivan>`). */
@@ -254,10 +274,27 @@ export function parseSalaConfig(raw: unknown): SalaConfig {
           : fail("sala.json.cast.agent_id inválido");
     cast = { agent_id: agentId, members, ...(typeof c.default === "string" ? { default: c.default } : {}) };
   }
+  const stationRaw = (raw as Record<string, unknown>).station;
+  let station: SalaStation | undefined;
+  if (stationRaw !== undefined) {
+    if (!stationRaw || typeof stationRaw !== "object") fail("sala.json.station: debe ser un objeto");
+    const st = stationRaw as Record<string, unknown>;
+    const lang = st.default_language;
+    if (lang !== undefined && lang !== "es" && lang !== "en" && lang !== "pt") {
+      fail('sala.json.station.default_language: "es", "en" o "pt"');
+    }
+    station = {
+      id: str(st.id, "sala.json.station.id", 80),
+      name: str(st.name, "sala.json.station.name", 80),
+      line: str(st.line, "sala.json.station.line", 12),
+      ...(lang !== undefined ? { default_language: lang } : {}),
+    };
+  }
   return {
     agents: parsed,
     ...(topic !== undefined ? { topic: str(topic, "sala.json.topic", 400) } : {}),
     ...(cast ? { cast } : {}),
+    ...(station ? { station } : {}),
   };
 }
 

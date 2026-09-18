@@ -17,7 +17,7 @@ import { verifySupabaseToken } from "./auth.js";
 import { activityHourly, emit, recentEvents, subscribe } from "./events.js";
 import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence.js";
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
-import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaTopic, SALA_PATH } from "./sala/store.js";
+import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { SalaValidationError } from "@hermes/shared";
 import { readProjectContext } from "./vault/project-context.js";
@@ -2418,7 +2418,7 @@ app.get("/sala/agents", async (c) => {
   if (!env.SALA_ENABLED) return c.json({ error: "sala desactivada (HERMES_SALA=off)" }, 404);
   try {
     const agents = await listSalaAgents(await readProjects());
-    return c.json({ agents, topic: await salaTopic(), cast: await salaCast(), path: SALA_PATH });
+    return c.json({ agents, topic: await salaTopic(), cast: await salaCast(), station: await salaStation(), path: SALA_PATH });
   } catch (err) {
     if (err instanceof SalaValidationError) return c.json({ error: err.message, path: SALA_PATH }, 500);
     throw err;
@@ -2440,7 +2440,9 @@ app.post("/metro/route", async (c) => {
   const body = await c.req.json<{ from?: string; to?: string }>().catch(() => ({}) as { from?: string; to?: string });
   const from = (body.from ?? "").trim();
   const to = (body.to ?? "").trim();
-  if (!from || !to) return c.json({ ok: false, error: "faltan from y to" }, 400);
+  // `from` es opcional a propósito: en el tótem el viajero solo dice a dónde
+  // va, y el origen es la estación donde está la pantalla (sala.json.station).
+  if (!to) return c.json({ ok: false, error: "falta to (destino)" }, 400);
   try {
     const answer = await routeBetween(from, to);
     if (answer.ok) emit({ kind: "metro", detail: `ruta · ${answer.plan?.from} → ${answer.plan?.to}` });
