@@ -25,14 +25,14 @@ export function VoiceThread() {
         {transcript.map((l, i) =>
           l.who === "TÚ" ? (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[78%] rounded-lg border border-line bg-violet/10 px-3.5 py-2.5 text-base leading-relaxed">
+              <div className="max-w-[78%] rounded-lg border border-line bg-accent/10 px-3.5 py-2.5 text-base leading-relaxed">
                 {l.text}
               </div>
             </div>
           ) : (
             <div key={i} className="flex flex-col gap-2.5">
               <span className="text-2xs tracking-title text-text-faint uppercase">
-                <b className="font-normal text-violet">{l.who}</b>
+                <b className="font-normal text-accent">{l.who}</b>
               </span>
               <div className="text-base leading-loose text-text-dim">{l.text}</div>
             </div>

@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 /**
  * TabBar — tabs HUD con acento animado bajo el tab activo.
- * El acento (barra de 2px con glow violeta) se posiciona midiendo
+ * El acento (barra de 2px con glow de acento) se posiciona midiendo
  * offsetLeft/offsetWidth del botón activo y anima translateX + width;
  * se recalcula al cambiar `active` y ante resize del contenedor.
  * Teclado: ArrowLeft/ArrowRight con wrap, Home/End a los extremos.

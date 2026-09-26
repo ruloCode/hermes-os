@@ -33,7 +33,7 @@ export function CurrencyToggle({
           onClick={() => onCurrency(c)}
           className={`rounded-sm border px-2 py-0.5 text-2xs tracking-label transition-colors ${
             c === currency
-              ? "border-violet text-violet"
+              ? "border-accent text-accent"
               : "border-line text-text-dim hover:border-line-2 hover:text-text"
           }`}
         >
@@ -172,7 +172,7 @@ function LegendRow({
             max={slice.budget}
             segments={0}
             height={4}
-            tone="violet"
+            tone="accent"
             thresholds={{ warn: 80, danger: 100 }}
             showValue={false}
           />
@@ -287,7 +287,7 @@ export function FinanceSummaryPanel({
               value={Math.max(savings, 0) * 100}
               size={84}
               stroke={8}
-              tone={savingsTone === "neutral" ? "violet" : savingsTone}
+              tone={savingsTone === "neutral" ? "accent" : savingsTone}
               label="ahorro"
               format={() => `${Math.round(savings * 100)}%`}
             />

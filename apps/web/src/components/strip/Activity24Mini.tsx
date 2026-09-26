@@ -25,12 +25,12 @@ export function Activity24Mini({
       style={{ animationDelay: `${delay}ms` }}
     >
       <header className="flex items-center gap-1.5">
-        <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-violet" />
+        <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-accent" />
         <h3 className="min-w-0 truncate text-2xs tracking-label uppercase text-text-dim">
           Actividad 24h{partial ? " (parcial)" : ""}
         </h3>
         <span
-          className="ml-auto font-display text-xs tabular-nums text-violet"
+          className="ml-auto font-display text-xs tabular-nums text-accent"
           title="Eventos del agente en las últimas 24 horas"
         >
           {total.toLocaleString("es-CO")}
@@ -40,7 +40,7 @@ export function Activity24Mini({
         <AreaChartMini
           data={activity.buckets.map((b) => b.total)}
           height={44}
-          tone="violet"
+          tone="accent"
           labels={["-24h", "ahora"]}
           ariaLabel={`Actividad del agente en las últimas 24 horas: ${total} eventos`}
         />

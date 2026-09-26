@@ -128,7 +128,7 @@ export default function GesturesQA() {
             className={`rounded-sm border px-3 py-1.5 text-2xs tracking-label uppercase transition-colors ${
               g.active
                 ? "border-red/60 bg-red/10 text-red"
-                : "border-violet/60 bg-violet/10 text-violet"
+                : "border-accent/60 bg-accent/10 text-accent"
             }`}
           >
             {g.active ? "Apagar" : "Encender control por gestos"}

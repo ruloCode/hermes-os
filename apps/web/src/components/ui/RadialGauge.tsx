@@ -17,7 +17,7 @@ export function RadialGauge({
   max = 100,
   size = 96,
   stroke = 7,
-  tone = "violet",
+  tone = "accent",
   thresholds,
   label,
   sublabel,

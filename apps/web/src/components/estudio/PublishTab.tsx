@@ -274,7 +274,7 @@ function ResultsSection({ piece }: { piece: ContentPiece }) {
 
 /** Clases ESTÁTICAS por tono (Tailwind purga las interpoladas). */
 const TONE_TEXT: Record<string, string> = {
-  violet: "text-violet",
+  accent: "text-accent",
   cyan: "text-cyan",
   green: "text-green",
   amber: "text-amber",
@@ -437,8 +437,8 @@ function PublishRunBanner({ piece }: { piece: ContentPiece }) {
   if (!job || job.status !== "running") return null;
   const min = Math.max(0, Math.round((Date.now() - new Date(job.started_at).getTime()) / 60000));
   return (
-    <div className="flex items-center gap-2 rounded-sm border border-violet/40 bg-violet/5 px-2 py-2">
-      <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet" />
+    <div className="flex items-center gap-2 rounded-sm border border-accent/40 bg-accent/5 px-2 py-2">
+      <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
       <span className="flex-1 text-xs text-text">{job.detail ?? "publicando…"}</span>
       <span className="text-2xs text-text-faint tabular-nums">
         {min < 1 ? "recién" : `${min} min`}
@@ -515,7 +515,7 @@ function VariantRow({
                 : "Sin master no hay nada que subir (paso ①)"
             }
             className={`${btnCls} ${
-              piece.master_path ? "border-violet text-violet" : "opacity-40"
+              piece.master_path ? "border-accent text-accent" : "opacity-40"
             }`}
           >
             {pub.publish_state === "error" ? "↻ Reintentar…" : "▶ Subir…"}
@@ -620,7 +620,7 @@ function PublishCTA({ piece, onOpen }: { piece: ContentPiece; onOpen: () => void
         disabled={!ready}
         className={`w-full rounded-sm border px-4 py-2.5 text-xs tracking-label uppercase ${
           ready
-            ? "border-violet bg-violet/15 text-violet hover:bg-violet/25"
+            ? "border-accent bg-accent/15 text-accent hover:bg-accent/25"
             : "cursor-not-allowed border-line-2 bg-panel-2 text-text-faint"
         }`}
       >
@@ -692,7 +692,7 @@ function PublishConfirmModal({
       confirmLabel={
         scheduled ? `Subir ya · sale ${fmtPublish(piece.publish_at)}` : "Subir ya (queda privado)"
       }
-      tone={scheduled ? "violet" : "amber"}
+      tone={scheduled ? "accent" : "amber"}
       disabled={targets.length === 0}
       busy={busy}
       onConfirm={() => void confirm()}
@@ -715,8 +715,8 @@ function PublishConfirmModal({
         {targets.length ? (
           targets.map((t) => (
             <span key={t.id} className="mr-2 inline-flex items-center gap-1">
-              <span className="text-violet">{PLATFORM_INFO[t.platform].icon}</span>
-              <span className="text-violet">{PLATFORM_INFO[t.platform].label}</span>
+              <span className="text-accent">{PLATFORM_INFO[t.platform].icon}</span>
+              <span className="text-accent">{PLATFORM_INFO[t.platform].label}</span>
               <span className="text-text-faint">— {effectiveTitle(piece, t).slice(0, 48)}</span>
             </span>
           ))

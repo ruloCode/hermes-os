@@ -43,7 +43,7 @@ type Tab = "guion" | "tomas" | "edicion" | "publicacion";
 const ACTIVE_DOT: Record<string, string> = {
   green: "border-green bg-green/20 text-green",
   amber: "border-amber bg-amber/20 text-amber",
-  violet: "border-violet bg-violet/20 text-violet",
+  accent: "border-accent bg-accent/20 text-accent",
   cyan: "border-cyan bg-cyan/20 text-cyan",
   neutral: "border-line-2 bg-panel-2 text-text-dim",
 };
@@ -93,7 +93,7 @@ export function PieceProgress({
         ? "green"
         : overSla
           ? "amber"
-          : "violet";
+          : "accent";
 
   // Descartada: fuera del pipeline — una línea con la salida de vuelta.
   if (discarded)
@@ -104,7 +104,7 @@ export function PieceProgress({
         </p>
         <button
           onClick={() => void patchPiece(piece.id, { status: "idea" })}
-          className="shrink-0 rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-violet"
+          className="shrink-0 rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent"
         >
           ↺ Restaurar a idea
         </button>
@@ -146,7 +146,7 @@ export function PieceProgress({
                   {i > 0 && (
                     <span
                       aria-hidden
-                      className={`h-px min-w-3 flex-1 ${passed || active ? "bg-violet/60" : "bg-line-2"}`}
+                      className={`h-px min-w-3 flex-1 ${passed || active ? "bg-accent/60" : "bg-line-2"}`}
                     />
                   )}
                   <button
@@ -161,9 +161,9 @@ export function PieceProgress({
                     <span
                       className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[8px] leading-none transition-colors ${
                         active
-                          ? (ACTIVE_DOT[tone] ?? ACTIVE_DOT.violet)
+                          ? (ACTIVE_DOT[tone] ?? ACTIVE_DOT.accent)
                           : passed
-                            ? "border-violet/60 bg-violet/15 text-violet"
+                            ? "border-accent/60 bg-accent/15 text-accent"
                             : "border-line-2 text-transparent group-hover:border-text-faint"
                       }`}
                     >
@@ -236,7 +236,7 @@ export function PieceProgress({
                     className={`flex items-center gap-1 rounded-xs border px-1.5 py-0.5 text-2xs ${
                       g.done
                         ? "border-green/30 text-green/70"
-                        : "border-line-2 text-text-dim enabled:hover:border-violet enabled:hover:text-text"
+                        : "border-line-2 text-text-dim enabled:hover:border-accent enabled:hover:text-text"
                     }`}
                   >
                     <span aria-hidden>{g.done ? "✓" : "○"}</span>
@@ -259,7 +259,7 @@ export function PieceProgress({
             className={`shrink-0 self-center rounded-sm border px-2.5 py-1.5 text-2xs tracking-label uppercase ${
               ready
                 ? "border-green bg-green/10 text-green"
-                : "border-line-2 bg-panel-2 text-text-dim hover:border-violet hover:text-text"
+                : "border-line-2 bg-panel-2 text-text-dim hover:border-accent hover:text-text"
             }`}
           >
             {STAGES[next].label} →
@@ -281,7 +281,7 @@ export function PieceProgress({
               history.map((h, i) => (
                 <span key={`${h.status}-${h.at}`} className="text-2xs text-text-faint">
                   {i > 0 && <span className="mx-1 text-line-2">›</span>}
-                  <span className={h.current ? "text-violet" : "text-text-dim"}>
+                  <span className={h.current ? "text-accent" : "text-text-dim"}>
                     {STAGES[h.status].label}
                   </span>{" "}
                   <span className="tabular-nums">{fmtDays(h.days)}</span>
@@ -342,7 +342,7 @@ function StageMoveModal({
   const backward = !discard && toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx;
   const pending = stageGates(piece).filter((g) => !g.done);
   const toLabel = discard ? "Descartada" : STAGES[to].label;
-  const tone = discard ? "red" : backward ? "amber" : "violet";
+  const tone = discard ? "red" : backward ? "amber" : "accent";
 
   return (
     <ConfirmModal
@@ -355,7 +355,7 @@ function StageMoveModal({
       <p className="text-xs text-text">
         <span className="text-text-dim">{STAGES[from].label}</span>
         <span className="mx-1.5 text-text-faint">→</span>
-        <span className={discard ? "text-red" : backward ? "text-amber" : "text-violet"}>
+        <span className={discard ? "text-red" : backward ? "text-amber" : "text-accent"}>
           {toLabel}
         </span>
       </p>
@@ -389,9 +389,9 @@ function StageMoveModal({
       )}
 
       {to === "programado" && (
-        <p className="rounded-xs border border-violet/30 bg-violet/5 px-2 py-1.5 text-2xs leading-snug text-text-dim">
+        <p className="rounded-xs border border-accent/30 bg-accent/5 px-2 py-1.5 text-2xs leading-snug text-text-dim">
           Al entrar a Programado, las variantes con copy se encolan y el barrido las{" "}
-          <span className="text-violet">sube a YouTube</span> (privadas hasta su fecha).
+          <span className="text-accent">sube a YouTube</span> (privadas hasta su fecha).
         </p>
       )}
 

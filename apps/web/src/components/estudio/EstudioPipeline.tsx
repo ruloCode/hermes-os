@@ -71,7 +71,7 @@ export function EstudioPipeline() {
             key={id}
             onClick={() => setView(id)}
             className={`flex-1 rounded-xs px-2 py-1 text-2xs tracking-label uppercase ${
-              view === id ? "bg-violet/16 text-violet" : "text-text-faint hover:text-text-dim"
+              view === id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
             }`}
           >
             {label}
@@ -82,7 +82,7 @@ export function EstudioPipeline() {
       <div className="flex flex-wrap gap-1 px-1 pb-2">
         <button
           onClick={() => setFilter(null)}
-          className={`rounded-xs px-1.5 py-0.5 text-2xs tracking-label uppercase ${filter === null ? "bg-violet/16 text-violet" : "text-text-faint hover:text-text-dim"}`}
+          className={`rounded-xs px-1.5 py-0.5 text-2xs tracking-label uppercase ${filter === null ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"}`}
         >
           Todas
         </button>
@@ -95,7 +95,7 @@ export function EstudioPipeline() {
               title={STAGES[s].meaning}
               className={`rounded-xs px-1.5 py-0.5 text-2xs tracking-label uppercase ${
                 filter === s
-                  ? "bg-violet/16 text-violet"
+                  ? "bg-accent/16 text-accent"
                   : n
                     ? "text-text-faint hover:text-text-dim"
                     : "text-line-2 hover:text-text-faint"
@@ -114,7 +114,7 @@ export function EstudioPipeline() {
           onChange={(e) => setNewTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void submitIdea()}
           placeholder="+ nueva idea (Enter)"
-          className="min-w-0 flex-1 rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-violet focus:outline-none"
+          className="min-w-0 flex-1 rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
         />
         <select
           value={newPillar}
@@ -178,7 +178,7 @@ export function EstudioPipeline() {
                   onClick={() => setSelectedId(p.id)}
                   className={`mb-1 w-full rounded-sm border px-2 py-1.5 text-left transition-colors ${
                     p.id === selectedId
-                      ? "border-violet/40 bg-violet/9"
+                      ? "border-accent/40 bg-accent/9"
                       : "border-transparent hover:bg-panel-2"
                   }`}
                 >
@@ -235,7 +235,7 @@ export function EstudioPipeline() {
                   onClick={() => setSelectedId(p.id)}
                   className={`mb-1 w-full rounded-sm border px-2 py-1.5 text-left transition-colors ${
                     p.id === selectedId
-                      ? "border-violet/40 bg-violet/9"
+                      ? "border-accent/40 bg-accent/9"
                       : "border-transparent hover:bg-panel-2"
                   } ${p.status === "publicado" ? "opacity-55" : ""}`}
                 >
@@ -312,7 +312,7 @@ function StageProgress({ piece }: { piece: ContentPiece }) {
               ? "var(--color-amber)"
               : pct >= 1
                 ? "var(--color-green)"
-                : "var(--color-violet)",
+                : "var(--color-accent)",
           }}
         />
       </span>

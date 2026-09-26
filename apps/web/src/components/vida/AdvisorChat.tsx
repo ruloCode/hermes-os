@@ -171,7 +171,7 @@ export function AdvisorChat({
         {messages.length === 0 && (
           <div className="flex flex-col items-center gap-2 pt-4 text-center">
             <span className="text-xs leading-relaxed tracking-label text-text-dim">
-              {online ? "TU ASESOR FINANCIERO — con tu saldo y gastos a la vista" : "AGENTE OFFLINE"}
+              {online ? "Tu asesor financiero — con tu saldo y gastos a la vista" : "Agente fuera de línea"}
             </span>
             <div className="flex flex-wrap justify-center gap-1.5">
               {STARTERS.map((s) => (
@@ -179,7 +179,7 @@ export function AdvisorChat({
                   key={s}
                   type="button"
                   onClick={() => void send(s)}
-                  className="rounded-sm border border-line px-2 py-1 text-2xs text-text-dim transition-colors hover:border-violet hover:text-violet"
+                  className="rounded-sm border border-line px-2 py-1 text-2xs text-text-dim transition-colors hover:border-accent hover:text-accent"
                 >
                   “{s}”
                 </button>
@@ -191,7 +191,7 @@ export function AdvisorChat({
           <div key={i} className="text-sm leading-relaxed">
             <span
               className={`mr-2 text-2xs font-semibold tracking-label ${
-                m.role === "user" ? "text-cyan" : "text-violet"
+                m.role === "user" ? "text-cyan" : "text-accent"
               }`}
             >
               {m.role === "user" ? "RULO ›" : "ASESOR ›"}
@@ -216,7 +216,7 @@ export function AdvisorChat({
           <button
             type="button"
             onClick={retry}
-            className="rounded-sm border border-line px-2 py-1 text-2xs text-text-dim transition-colors hover:border-violet hover:text-violet"
+            className="rounded-sm border border-line px-2 py-1 text-2xs text-text-dim transition-colors hover:border-accent hover:text-accent"
           >
             ↻ Reintentar
           </button>
@@ -231,7 +231,7 @@ export function AdvisorChat({
           void send();
         }}
       >
-        <span className="pb-1 text-violet">{busy ? "◌" : "❯"}</span>
+        <span className="pb-1 text-accent">{busy ? "◌" : "❯"}</span>
         <textarea
           ref={inputRef}
           value={draft}
@@ -264,7 +264,7 @@ export function AdvisorChat({
             title="Enviar (Enter)"
             aria-label="Enviar"
             disabled={!draft.trim()}
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-violet bg-violet/5 text-violet transition-opacity disabled:opacity-30"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-accent bg-accent/5 text-accent transition-opacity disabled:opacity-30"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
               <path

@@ -36,7 +36,7 @@ function EventRow({
       aria-current={selected ? "true" : undefined}
       className={`flex w-full items-center gap-2.5 border-l-2 py-1.5 pr-2 pl-2.5 text-left transition-colors ${
         selected
-          ? "border-violet bg-violet/8"
+          ? "border-accent bg-accent/8"
           : "border-transparent hover:border-line-2 hover:bg-panel-2/40"
       }`}
     >
@@ -86,7 +86,7 @@ export function AgendaList({
       {groups.map((group) => (
         <section key={group.key}>
           <header className="sticky top-0 z-10 mb-1 flex items-baseline justify-between gap-2 bg-bg/85 py-1 backdrop-blur-sm">
-            <h3 className="font-display text-2xs tracking-title text-violet uppercase">
+            <h3 className="font-display text-2xs tracking-title text-accent uppercase">
               {group.label}
             </h3>
             <span className="text-2xs tabular-nums text-text-faint">

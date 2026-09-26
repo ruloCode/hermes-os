@@ -29,7 +29,7 @@ export function LiveMeetingChip() {
   let dot = true;
   let label: string = "Junta en vivo";
   if (live.phase === "processing") {
-    cls = "border-violet/60 bg-violet/10 text-violet";
+    cls = "border-accent/60 bg-accent/10 text-accent";
     dot = false;
     label = "◈ Procesando junta";
   } else if (live.phase === "reconnecting") {

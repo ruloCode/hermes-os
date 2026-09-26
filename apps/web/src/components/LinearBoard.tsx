@@ -21,7 +21,7 @@ const POLL_MS = 15_000; // API remota de Linear: poll sereno + refresh tras cada
 
 const GROUPS: { type: string; label: string; dot: string }[] = [
   { type: "started", label: "En curso", dot: "text-cyan" },
-  { type: "unstarted", label: "Por hacer", dot: "text-violet" },
+  { type: "unstarted", label: "Por hacer", dot: "text-accent" },
   { type: "backlog", label: "Backlog", dot: "text-text-dim" },
   { type: "completed", label: "Hecho", dot: "text-green" },
 ];
@@ -183,7 +183,7 @@ export function LinearBoard({
             type="button"
             onClick={() => void create()}
             disabled={!newTitle.trim()}
-            className="cmd-btn !w-auto !border-violet !text-violet disabled:opacity-40"
+            className="cmd-btn !w-auto !border-accent !text-accent disabled:opacity-40"
           >
             + Issue
           </button>
@@ -261,7 +261,7 @@ function FilterChip({
       onClick={onClick}
       className={`shrink-0 rounded-sm border px-2 py-0.5 text-2xs tracking-label uppercase transition-colors ${
         active
-          ? "border-violet bg-violet/10 text-violet"
+          ? "border-accent bg-accent/10 text-accent"
           : "border-line text-text-dim hover:border-line-2 hover:text-text"
       }`}
     >
@@ -296,7 +296,7 @@ function IssueRow({
       onClick={onSelect}
       onKeyDown={(e) => e.key === "Enter" && onSelect()}
       className={`group flex cursor-pointer items-center gap-2 border-b border-line/50 px-2 py-1.5 transition-colors ${
-        active ? "bg-violet/10" : "hover:bg-panel-2"
+        active ? "bg-accent/10" : "hover:bg-panel-2"
       }`}
     >
       <PriorityIcon priority={issue.priority} />
@@ -310,7 +310,7 @@ function IssueRow({
         </span>
       )}
       {issue.hasPrompt && !running && (
-        <span className="shrink-0 text-2xs text-violet" title="Copy prompt listo para ejecutar">
+        <span className="shrink-0 text-2xs text-accent" title="Copy prompt listo para ejecutar">
           ⚡
         </span>
       )}

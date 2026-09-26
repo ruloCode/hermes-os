@@ -51,7 +51,7 @@ export function eventState(ev: CalendarEvent, nowMs: number): EventState {
 export function stateTone(state: EventState): Tone {
   if (state === "en-curso") return "green";
   if (state === "pasado") return "neutral";
-  return "violet";
+  return "accent";
 }
 
 export interface DayGroup {

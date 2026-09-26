@@ -5,7 +5,7 @@ export const STAGE_ORDER: SongStage[] = ["idea", "letra", "armonia", "melodia", 
 
 export const STAGES: Record<SongStage, { label: string; hint: string; tone: Tone }> = {
   idea: { label: "Idea", hint: "Una frase-semilla, un título, un tarareo", tone: "neutral" },
-  letra: { label: "Letra", hint: "Versos y coro: decir lo que hay que decir", tone: "violet" },
+  letra: { label: "Letra", hint: "Versos y coro: decir lo que hay que decir", tone: "accent" },
   armonia: { label: "Armonía", hint: "Tonalidad y acordes que sostienen la letra", tone: "cyan" },
   melodia: { label: "Melodía", hint: "Cantarla encima hasta que se pegue", tone: "blue" },
   demo: { label: "Demo", hint: "Grabarla fea para saber si vive", tone: "amber" },
@@ -16,14 +16,14 @@ export const SECTION_KINDS: Record<SectionKind, { label: string; tone: Tone; hin
   intro: { label: "Intro", tone: "neutral", hint: "Establece el clima antes de la primera palabra" },
   verso: { label: "Verso", tone: "blue", hint: "Cuenta: detalles concretos, escena, tiempo" },
   pre: { label: "Pre-coro", tone: "cyan", hint: "Sube la tensión; prepara la frase del coro" },
-  coro: { label: "Coro", tone: "violet", hint: "La idea central, dicha de la forma más simple" },
+  coro: { label: "Coro", tone: "accent", hint: "La idea central, dicha de la forma más simple" },
   puente: { label: "Puente", tone: "amber", hint: "Cambia el ángulo: otra armonía, otra verdad" },
   final: { label: "Final", tone: "green", hint: "Cierra con eco o con silencio" },
   instrumental: { label: "Instrumental", tone: "neutral", hint: "Deja respirar" },
 };
 
 export const REF_KINDS: Record<RefKind, { label: string; glyph: string; tone: Tone }> = {
-  cancion: { label: "Canción", glyph: "♫", tone: "violet" },
+  cancion: { label: "Canción", glyph: "♫", tone: "accent" },
   letra: { label: "Letra", glyph: "❝", tone: "cyan" },
   progresion: { label: "Progresión", glyph: "▤", tone: "blue" },
   poema: { label: "Poema", glyph: "✎", tone: "amber" },
@@ -34,10 +34,10 @@ export const REF_KINDS: Record<RefKind, { label: string; glyph: string; tone: To
 export const PLAN_LABEL = { observar: "observar", probar: "probar", aplicado: "aplicado" } as const;
 
 export const inputCls =
-  "rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-violet focus:outline-none";
+  "rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
 
 export const btnCls =
-  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-violet disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 export const ghostBtnCls =
   "rounded-sm border border-transparent px-2 py-1 text-2xs tracking-label text-text-dim uppercase hover:border-line hover:text-text";
@@ -53,7 +53,7 @@ export function fmtRelative(iso: string, now = Date.now()): string {
 
 /** Clases de tono ESTÁTICAS: Tailwind purga `bg-${tone}` / `text-${tone}`. */
 export const DOT_BG: Record<string, string> = {
-  violet: "bg-violet",
+  accent: "bg-accent",
   cyan: "bg-cyan",
   blue: "bg-blue",
   green: "bg-green",
@@ -63,7 +63,7 @@ export const DOT_BG: Record<string, string> = {
 };
 
 export const TEXT_TONE: Record<string, string> = {
-  violet: "text-violet",
+  accent: "text-accent",
   cyan: "text-cyan",
   blue: "text-blue",
   green: "text-green",

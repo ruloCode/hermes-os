@@ -33,7 +33,7 @@ import { useComposicion } from "./ComposicionContext";
 import { DOT_BG, btnCls } from "./labels";
 import type { Song } from "./types";
 
-const ROLE_TONE = { tónica: "violet", subdominante: "cyan", dominante: "amber" } as const;
+const ROLE_TONE = { tónica: "accent", subdominante: "cyan", dominante: "amber" } as const;
 
 export function KeyPicker({ song }: { song: Song }) {
   const { setKey, notation } = useComposicion();
@@ -67,7 +67,7 @@ export function KeyPicker({ song }: { song: Song }) {
                 key={t.pc}
                 onClick={() => choose({ tonic: t.pc, mode: key.mode })}
                 className={`rounded-sm border px-1 py-1.5 font-mono text-xs leading-tight ${
-                  key.tonic === t.pc ? "border-violet bg-violet/16 text-violet" : "border-line bg-panel-2 text-text-dim hover:border-line-2 hover:text-text"
+                  key.tonic === t.pc ? "border-accent bg-accent/16 text-accent" : "border-line bg-panel-2 text-text-dim hover:border-line-2 hover:text-text"
                 }`}
               >
                 <span className="block">{notation === "latin" ? latinName(t.pc, { tonic: t.pc, mode: "major" }).replace("♭", "♯") : t.sharp}</span>
@@ -84,7 +84,7 @@ export function KeyPicker({ song }: { song: Song }) {
               key={t.pc}
               onClick={() => choose({ tonic: t.pc, mode: key.mode })}
               className={`rounded-sm border px-1 py-2 font-mono text-sm ${
-                key.tonic === t.pc ? "border-violet bg-violet/16 text-violet" : "border-line bg-panel-2 text-text-dim hover:border-line-2 hover:text-text"
+                key.tonic === t.pc ? "border-accent bg-accent/16 text-accent" : "border-line bg-panel-2 text-text-dim hover:border-line-2 hover:text-text"
               }`}
             >
               {notation === "latin" ? latinName(t.pc, key) : t.sharp}
@@ -97,7 +97,7 @@ export function KeyPicker({ song }: { song: Song }) {
               key={m}
               onClick={() => choose({ tonic: key.tonic, mode: m })}
               className={`rounded-sm border px-2 py-1.5 text-2xs tracking-label uppercase ${
-                key.mode === m ? "border-violet bg-violet/16 text-violet" : "border-line bg-panel-2 text-text-dim hover:text-text"
+                key.mode === m ? "border-accent bg-accent/16 text-accent" : "border-line bg-panel-2 text-text-dim hover:text-text"
               }`}
             >
               {m === "major" ? "Mayor · luz" : "menor · sombra"}
@@ -128,7 +128,7 @@ export function KeyPicker({ song }: { song: Song }) {
               key={d.degree}
               onClick={() => play(d.chord)}
               title={`${d.roman} · ${d.role} — clic para oír`}
-              className={`group flex flex-col items-center gap-0.5 rounded-sm border px-1 py-1.5 transition-colors hover:border-violet ${
+              className={`group flex flex-col items-center gap-0.5 rounded-sm border px-1 py-1.5 transition-colors hover:border-accent ${
                 preview === d.chord ? "border-cyan bg-cyan/10" : "border-line bg-panel-2"
               }`}
             >
@@ -139,7 +139,7 @@ export function KeyPicker({ song }: { song: Song }) {
           ))}
         </div>
         <div className="flex gap-3 text-2xs text-text-faint">
-          <span className="flex items-center gap-1"><i className="inline-block h-1.5 w-1.5 rounded-full bg-violet" /> tónica · casa</span>
+          <span className="flex items-center gap-1"><i className="inline-block h-1.5 w-1.5 rounded-full bg-accent" /> tónica · casa</span>
           <span className="flex items-center gap-1"><i className="inline-block h-1.5 w-1.5 rounded-full bg-cyan" /> subdominante · salida</span>
           <span className="flex items-center gap-1"><i className="inline-block h-1.5 w-1.5 rounded-full bg-amber" /> dominante · tensión</span>
         </div>

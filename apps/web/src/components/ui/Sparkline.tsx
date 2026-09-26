@@ -15,7 +15,7 @@ export function Sparkline({
   data,
   width = 120,
   height = 28,
-  tone = "violet",
+  tone = "accent",
   fill = false,
   max,
   strokeWidth = 1.5,

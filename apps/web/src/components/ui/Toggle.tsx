@@ -10,7 +10,7 @@ const SIZES = {
 
 /**
  * Switch HUD dibujado en CSS puro: track redondeado + thumb cuadrado-
- * redondeado que se desliza. ON enciende el thumb en violeta con glow.
+ * redondeado que se desliza. ON enciende el thumb en el acento con glow.
  * El wrapper garantiza área clickable de al menos 28px de alto.
  */
 export function Toggle({
@@ -50,18 +50,18 @@ export function Toggle({
           width: s.track,
           height: s.height,
           background: checked
-            ? "color-mix(in srgb, var(--color-violet) 15%, transparent)"
+            ? "color-mix(in srgb, var(--color-accent) 15%, transparent)"
             : "transparent",
         }}
       >
         <span
-          className={`absolute rounded-[3px] ${checked ? "glow-box-violet" : ""}`}
+          className={`absolute rounded-[3px] ${checked ? "glow-box-accent" : ""}`}
           style={{
             top: s.pad,
             left: s.pad,
             width: s.thumb,
             height: s.thumb,
-            background: checked ? toneVar("violet") : "var(--color-text-faint)",
+            background: checked ? toneVar("accent") : "var(--color-text-faint)",
             transform: checked ? `translateX(${travel}px)` : "translateX(0)",
             transition: "transform 150ms ease, background 150ms ease",
           }}

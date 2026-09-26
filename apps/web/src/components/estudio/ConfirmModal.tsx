@@ -16,7 +16,7 @@ import { btnCls } from "./styles";
 
 /** Clases ESTÁTICAS por tono (Tailwind purga las interpoladas). */
 const CONFIRM_TONE: Record<string, string> = {
-  violet: "border-violet bg-violet/15 text-violet hover:bg-violet/25",
+  accent: "border-accent bg-accent/15 text-accent hover:bg-accent/25",
   green: "border-green bg-green/15 text-green hover:bg-green/25",
   amber: "border-amber bg-amber/15 text-amber hover:bg-amber/25",
   red: "border-red bg-red/15 text-red hover:bg-red/25",
@@ -25,7 +25,7 @@ const CONFIRM_TONE: Record<string, string> = {
 export function ConfirmModal({
   title,
   confirmLabel,
-  tone = "violet",
+  tone = "accent",
   disabled = false,
   busy = false,
   onConfirm,
@@ -35,7 +35,7 @@ export function ConfirmModal({
   title: string;
   /** Específico, nunca "Aceptar": "Subir a YouTube" · "Devolver a Guion". */
   confirmLabel: string;
-  tone?: "violet" | "green" | "amber" | "red";
+  tone?: "accent" | "green" | "amber" | "red";
   disabled?: boolean;
   busy?: boolean;
   onConfirm: () => void;

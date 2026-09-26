@@ -6,7 +6,7 @@ import type { ContentPillar, ContentStatus, PublishState } from "@hermes/shared"
 import type { Tone } from "@/components/ui/tones";
 
 export const PILLARS: Record<ContentPillar, { label: string; short: string; tone: Tone }> = {
-  p1: { label: "Jarvis en público", short: "P1", tone: "violet" },
+  p1: { label: "Jarvis en público", short: "P1", tone: "accent" },
   p2: { label: "Agentes que trabajan", short: "P2", tone: "cyan" },
   p3: { label: "Automatización real", short: "P3", tone: "green" },
   p4: { label: "Build in public", short: "P4", tone: "amber" },
@@ -20,7 +20,7 @@ const STATUS_TONE: Record<ContentStatus, Tone> = {
   idea: "neutral",
   guion: "amber",
   grabacion: "cyan",
-  edicion: "violet",
+  edicion: "accent",
   programado: "green",
   publicado: "neutral",
   descartada: "red",
@@ -46,7 +46,7 @@ export const PLATFORMS = ["youtube", "shorts", "tiktok", "reels", "linkedin", "x
 /** Cómo se lee cada estado REAL de publicación (el de máquina, no el editorial). */
 export const PUBLISH_STATES: Record<PublishState, { label: string; tone: Tone }> = {
   pendiente: { label: "en cola", tone: "amber" },
-  subiendo: { label: "subiendo", tone: "violet" },
+  subiendo: { label: "subiendo", tone: "accent" },
   programada: { label: "programada", tone: "cyan" },
   publicada: { label: "en vivo", tone: "green" },
   error: { label: "error", tone: "red" },

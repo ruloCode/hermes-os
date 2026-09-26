@@ -85,7 +85,7 @@ export function ReferencesBoard() {
           <div className="flex flex-col gap-1">
             <span className="text-2xs text-text-faint">Resultados de prueba (en producción los trae Hermes navegando de verdad):</span>
             {results.map((r, i) => (
-              <button key={i} type="button" onClick={() => setDraft({ ...r, takeaway: "" })} className="flex items-center gap-2 rounded-sm border border-line px-2 py-1 text-left hover:border-violet">
+              <button key={i} type="button" onClick={() => setDraft({ ...r, takeaway: "" })} className="flex items-center gap-2 rounded-sm border border-line px-2 py-1 text-left hover:border-accent">
                 <span className="text-xs text-text">{REF_KINDS[r.kind].glyph}</span>
                 <span className="text-xs text-text">{r.title}</span>
                 <span className="text-2xs text-text-faint">· {r.by} · {SOURCE_LABEL[r.source]}</span>
@@ -115,9 +115,9 @@ export function ReferencesBoard() {
 
       {/* Filtros */}
       <div className="flex flex-wrap items-center gap-1">
-        <button onClick={() => setKind("todas")} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${kind === "todas" ? "bg-violet/16 text-violet" : "text-text-dim"}`}>todas · {refs.length}</button>
+        <button onClick={() => setKind("todas")} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${kind === "todas" ? "bg-accent/16 text-accent" : "text-text-dim"}`}>todas · {refs.length}</button>
         {(Object.keys(REF_KINDS) as RefKind[]).map((k) => (
-          <button key={k} onClick={() => setKind(k)} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${kind === k ? "bg-violet/16 text-violet" : "text-text-dim hover:text-text"}`}>
+          <button key={k} onClick={() => setKind(k)} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${kind === k ? "bg-accent/16 text-accent" : "text-text-dim hover:text-text"}`}>
             {REF_KINDS[k].glyph} {REF_KINDS[k].label}
           </button>
         ))}
@@ -143,12 +143,12 @@ export function ReferencesBoard() {
                 <h3 className="text-sm leading-snug text-text">{r.title}</h3>
                 {r.by && <p className="text-2xs text-text-faint">de {r.by} · {SOURCE_LABEL[r.source]}</p>}
                 <p className={`text-2xs leading-relaxed text-text-dim ${expanded ? "" : "line-clamp-3"}`}>
-                  <span className="text-violet">tomo:</span> {r.takeaway}
+                  <span className="text-accent">tomo:</span> {r.takeaway}
                 </p>
                 <div className="flex flex-wrap items-center gap-1 font-mono text-2xs text-text-dim">
                   {r.key && <span className="rounded-xs bg-panel-2 px-1.5 py-0.5">{keyLabel(r.key, notation)}</span>}
                   {r.tempo && <span className="rounded-xs bg-panel-2 px-1.5 py-0.5">{r.tempo} bpm</span>}
-                  {r.progression && <span className="rounded-xs bg-panel-2 px-1.5 py-0.5 text-violet">{r.progression.join(" ")}</span>}
+                  {r.progression && <span className="rounded-xs bg-panel-2 px-1.5 py-0.5 text-accent">{r.progression.join(" ")}</span>}
                   {r.tags.map((t) => (
                     <span key={t} className="text-text-faint">#{t}</span>
                   ))}

@@ -55,7 +55,11 @@ export function EstudioView() {
   if (loaded && !online)
     return (
       <Panel title="Estudio" variant="hero" className="flex-1">
-        <PanelState kind="offline" title="Agente fuera de línea" hint="El pipeline vive en el agente local." />
+        <PanelState
+          kind="offline"
+          title="Agente fuera de línea"
+          hint="El pipeline vive en el agente local."
+        />
       </Panel>
     );
   if (loaded && online && !board.available)
@@ -81,7 +85,7 @@ export function EstudioView() {
             onClick={() => setSection(s.id)}
             title={s.hint}
             className={`rounded-xs px-3 py-1 text-2xs tracking-label uppercase ${
-              section === s.id ? "bg-violet/16 text-violet" : "text-text-faint hover:text-text-dim"
+              section === s.id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
             }`}
           >
             {s.label}
@@ -123,7 +127,11 @@ export function EstudioView() {
               className="min-h-[520px] flex-1 lg:min-h-0"
               padding="sm"
             >
-              <PieceWorkspace onBack={() => setSelectedId(null)} chatOpen={chatOpen} onToggleChat={() => setChatOpen(!chatOpen)} />
+              <PieceWorkspace
+                onBack={() => setSelectedId(null)}
+                chatOpen={chatOpen}
+                onToggleChat={() => setChatOpen(!chatOpen)}
+              />
             </Panel>
           </div>
           {chatOpen && (

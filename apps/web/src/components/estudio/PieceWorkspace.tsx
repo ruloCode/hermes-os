@@ -102,7 +102,7 @@ export function PieceWorkspace({
             onClick={() => setTab(id)}
             className={`-mb-px border-b-2 px-3 py-1.5 text-2xs tracking-label uppercase ${
               tab === id
-                ? "border-violet text-violet"
+                ? "border-accent text-accent"
                 : "border-transparent text-text-faint hover:text-text-dim"
             }`}
           >
@@ -384,7 +384,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
               key={id}
               onClick={() => setMode(id)}
               className={`rounded-xs px-2.5 py-0.5 text-2xs tracking-label uppercase ${
-                mode === id ? "bg-violet/16 text-violet" : "text-text-faint hover:text-text-dim"
+                mode === id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
               }`}
             >
               {label}
@@ -398,7 +398,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
           {mode === "editar" && (
             <button
               onClick={() => setFull(true)}
-              className={`${btnCls} border-violet text-violet`}
+              className={`${btnCls} border-accent text-accent`}
               title="Escribir a pantalla completa (Esc para salir)"
             >
               ⛶ Escribir
@@ -415,7 +415,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
           <button
             onClick={() => void save()}
             disabled={!dirty}
-            className={`${btnCls} ${dirty ? "border-violet text-violet" : "opacity-40"}`}
+            className={`${btnCls} ${dirty ? "border-accent text-accent" : "opacity-40"}`}
           >
             {dirty ? "Guardar ⌘S" : saveState}
           </button>
@@ -423,7 +423,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
       </div>
 
       {genOpen && (
-        <div className="flex flex-col gap-1.5 rounded-sm border border-violet/40 bg-violet/5 px-2 py-1.5">
+        <div className="flex flex-col gap-1.5 rounded-sm border border-accent/40 bg-accent/5 px-2 py-1.5">
           <textarea
             value={genDesc}
             onChange={(e) => setGenDesc(e.target.value)}
@@ -438,7 +438,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
             <button
               onClick={() => void generate()}
               disabled={generating}
-              className={`${btnCls} shrink-0 ${generating ? "opacity-60" : "border-violet text-violet"}`}
+              className={`${btnCls} shrink-0 ${generating ? "opacity-60" : "border-accent text-accent"}`}
             >
               {generating ? "◌ Generando… ~30-60s" : "✦ Generar kit completo"}
             </button>
@@ -502,7 +502,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
                   ← Salir
                 </button>
                 <span className="min-w-0 truncate text-xs text-text-dim">{piece.title}</span>
-                <span className="shrink-0 text-2xs tracking-label text-violet uppercase">
+                <span className="shrink-0 text-2xs tracking-label text-accent uppercase">
                   {STAGES[piece.status].label}
                 </span>
               </div>
@@ -518,7 +518,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
                 <button
                   onClick={() => void save()}
                   disabled={!dirty}
-                  className={`${btnCls} ${dirty ? "border-violet text-violet" : "opacity-40"}`}
+                  className={`${btnCls} ${dirty ? "border-accent text-accent" : "opacity-40"}`}
                 >
                   Guardar ⌘S
                 </button>
@@ -649,7 +649,7 @@ function FolderBar({
         <button
           onClick={() => void open()}
           title={`Abrir ${media.dir} en Finder`}
-          className="min-w-0 flex-1 truncate text-left text-2xs text-text-dim hover:text-violet"
+          className="min-w-0 flex-1 truncate text-left text-2xs text-text-dim hover:text-accent"
         >
           {media.exists ? media.dir : `${media.dir} (se crea al abrir)`}
         </button>
@@ -742,7 +742,7 @@ function CaptureChecklist({
               <button
                 onClick={() => void copy(stem)}
                 title="Copiar el nombre para grabar/guardar con él"
-                className="shrink-0 rounded-xs border border-line-2 bg-panel-2 px-1.5 py-0.5 font-mono text-2xs text-violet hover:border-violet"
+                className="shrink-0 rounded-xs border border-line-2 bg-panel-2 px-1.5 py-0.5 font-mono text-2xs text-accent hover:border-accent"
               >
                 {copied === stem ? "✓ copiado" : `${stem} ⧉`}
               </button>
@@ -987,7 +987,7 @@ function CrudosSection({ piece }: { piece: ContentPiece }) {
           key={c.id}
           className="flex items-center gap-2 rounded-sm border border-line px-2 py-1.5"
         >
-          <span aria-hidden className="text-violet">
+          <span aria-hidden className="text-accent">
             ▮
           </span>
           <span className="min-w-0 flex-1 truncate text-xs text-text" title={c.path}>
@@ -1011,14 +1011,14 @@ function CrudosSection({ piece }: { piece: ContentPiece }) {
       {!clips.length && !browsing && (
         <button
           onClick={() => setBrowsing(true)}
-          className="flex flex-col items-center gap-1 rounded-sm border border-dashed border-line-2 px-3 py-5 text-center hover:border-violet"
+          className="flex flex-col items-center gap-1 rounded-sm border border-dashed border-line-2 px-3 py-5 text-center hover:border-accent"
         >
           <span className="text-xs text-text-dim">Sin crudos todavía</span>
           <span className="text-2xs text-text-faint">
             Vincula el material grabado (quedan como rutas locales; nada se copia) para armar el
             corte automático.
           </span>
-          <span className="mt-1 text-2xs tracking-label text-violet uppercase">＋ Agregar crudos</span>
+          <span className="mt-1 text-2xs tracking-label text-accent uppercase">＋ Agregar crudos</span>
         </button>
       )}
 
@@ -1092,7 +1092,7 @@ function ClipBrowser({
   const knownSet = new Set(known);
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-sm border border-violet/40 bg-violet/5 px-2 py-2">
+    <div className="flex flex-col gap-1.5 rounded-sm border border-accent/40 bg-accent/5 px-2 py-2">
       <div className="flex items-center gap-2">
         {data?.parent && (
           <button onClick={() => void load(data.parent!)} className={btnCls}>
@@ -1135,7 +1135,7 @@ function ClipBrowser({
                 checked={linked || sel.has(f.path)}
                 disabled={linked}
                 onChange={() => toggle(f.path)}
-                className="accent-violet"
+                className="accent-accent"
               />
               <span className="min-w-0 flex-1 truncate text-text">{f.name}</span>
               <span className="shrink-0 text-2xs text-text-faint tabular-nums">
@@ -1157,7 +1157,7 @@ function ClipBrowser({
         <button
           onClick={() => void add()}
           disabled={!sel.size || adding}
-          className={`${btnCls} ${sel.size && !adding ? "border-violet text-violet" : "opacity-40"}`}
+          className={`${btnCls} ${sel.size && !adding ? "border-accent text-accent" : "opacity-40"}`}
         >
           {adding ? "◌ vinculando…" : `Agregar ${sel.size || ""} ${sel.size === 1 ? "clip" : "clips"}`}
         </button>
@@ -1200,11 +1200,11 @@ function AutoEditCard({ piece }: { piece: ContentPiece }) {
   if (job?.status === "running") {
     const min = Math.max(0, Math.round((Date.now() - new Date(job.started_at).getTime()) / 60000));
     return (
-      <div className="flex flex-col gap-1.5 rounded-sm border border-violet/40 bg-violet/5 px-2 py-2">
+      <div className="flex flex-col gap-1.5 rounded-sm border border-accent/40 bg-accent/5 px-2 py-2">
         <div className="flex items-center gap-2">
-          <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet" />
+          <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
           <span className="flex-1 text-xs text-text">
-            Editando con OpenMontage — <span className="text-violet">{job.stage ?? "…"}</span>
+            Editando con OpenMontage — <span className="text-accent">{job.stage ?? "…"}</span>
           </span>
           <span className="text-2xs text-text-faint tabular-nums">
             {min < 1 ? "recién" : `${min} min`}
@@ -1279,7 +1279,7 @@ function AutoEditCard({ piece }: { piece: ContentPiece }) {
           onClick={() => void run()}
           disabled={noClips || busy}
           title={noClips ? "Vincula al menos un crudo primero" : undefined}
-          className={`${btnCls} shrink-0 ${noClips || busy ? "opacity-40" : "border-violet text-violet"}`}
+          className={`${btnCls} shrink-0 ${noClips || busy ? "opacity-40" : "border-accent text-accent"}`}
         >
           {busy ? "◌ arrancando…" : "✦ Editar con OpenMontage"}
         </button>
@@ -1292,7 +1292,7 @@ function AutoEditCard({ piece }: { piece: ContentPiece }) {
 // ── Puntos de edición ──────────────────────────────────────────────────
 
 const EDIT_KINDS: ContentEditPoint["kind"][] = ["corte", "zoom", "caption", "broll", "card"];
-const KIND_TONE = { corte: "red", zoom: "violet", caption: "amber", broll: "green", card: "cyan" } as const;
+const KIND_TONE = { corte: "red", zoom: "accent", caption: "amber", broll: "green", card: "cyan" } as const;
 
 function EditPointsSection({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn }) {
   const [tc, setTc] = useState("");

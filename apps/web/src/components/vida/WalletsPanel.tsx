@@ -61,7 +61,7 @@ export function WalletsPanel({
               label="Total combinado"
               value={money(Math.round(totalCop + totalUsd * fx.usd_cop), "COP")}
               size="lg"
-              tone="violet"
+              tone="accent"
             />
             <span className="text-2xs text-text-faint tabular-nums">
               TRM US$1 = {money(Math.round(fx.usd_cop), "COP")}
@@ -145,7 +145,7 @@ export function WalletsPanel({
               onClick={() => void addWallet()}
               disabled={!newName.trim() || !newBalance.trim()}
               title="Crear billetera"
-              className="text-xs text-violet transition-colors hover:text-violet-hot disabled:opacity-40"
+              className="text-xs text-accent transition-colors hover:text-accent-hot disabled:opacity-40"
             >
               +
             </button>

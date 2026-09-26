@@ -59,7 +59,7 @@ export function GoalsPanel({
                   max={max}
                   segments={0}
                   height={5}
-                  tone={pct >= 1 ? "green" : "violet"}
+                  tone={pct >= 1 ? "green" : "accent"}
                 />
               </div>
               {g.target_value != null && (

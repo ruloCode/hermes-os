@@ -65,7 +65,7 @@ export function LiveMeetingView() {
     return (
       <div className="grid h-full place-items-center px-4">
         <div className="space-y-2 text-center">
-          <p className="text-xs tracking-label text-violet uppercase pulse-dot">
+          <p className="text-xs tracking-label text-accent uppercase pulse-dot">
             ◈ Procesando la junta…
           </p>
           <p className="text-2xs leading-snug text-text-dim">

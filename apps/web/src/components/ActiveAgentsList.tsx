@@ -31,7 +31,7 @@ export function ActiveAgentsList({ stats, online }: { stats: Stats | null; onlin
       title="Agentes activos"
       delay={110}
       right={
-        <span className="font-display text-xs tabular-nums text-violet">{count}</span>
+        <span className="font-display text-xs tabular-nums text-accent">{count}</span>
       }
     >
       <div className="space-y-2">
@@ -81,7 +81,7 @@ export function ActiveAgentsList({ stats, online }: { stats: Stats | null; onlin
         {tasks.map((t) => (
           <div key={t.id} className="flex items-center justify-between gap-2" title={t.prompt}>
             <div className="min-w-0 flex-1">
-              <p className="truncate font-display text-xs font-semibold tracking-label text-violet uppercase">
+              <p className="truncate font-display text-xs font-semibold tracking-label text-accent uppercase">
                 task
               </p>
               <p className="truncate text-2xs text-text-dim">

@@ -25,7 +25,7 @@ const MODES = [
   { id: "pregunta", label: "Pregúntame", prompt: "Hazme UNA pregunta que me destrabe el verso 2. No sugieras versos." },
 ];
 
-const KIND_TONE = { rima: "cyan", verso: "violet", metafora: "violet", acorde: "amber", estructura: "blue", referencia: "green", pregunta: "neutral" } as const;
+const KIND_TONE = { rima: "cyan", verso: "accent", metafora: "accent", acorde: "amber", estructura: "blue", referencia: "green", pregunta: "neutral" } as const;
 
 export function CoWriterPanel({ song, focusSectionId, onFocusHandled }: { song: Song; focusSectionId: string | null; onFocusHandled: () => void }) {
   const { patchSection, patchSong } = useComposicion();
@@ -103,7 +103,7 @@ export function CoWriterPanel({ song, focusSectionId, onFocusHandled }: { song: 
       {/* El contrato, visible */}
       <div className="flex items-center justify-between gap-2 rounded-sm border border-line bg-panel-2 px-2 py-1.5">
         <p className="text-2xs text-text-dim">
-          <span className="text-violet">Hermes sugiere, tú decides.</span> Nada entra a la canción sin <span className="text-text">Usar</span>.
+          <span className="text-accent">Hermes sugiere, tú decides.</span> Nada entra a la canción sin <span className="text-text">Usar</span>.
         </p>
         <Toggle size="sm" checked={quiet} onChange={setQuiet} label="silencio" />
       </div>
@@ -112,7 +112,7 @@ export function CoWriterPanel({ song, focusSectionId, onFocusHandled }: { song: 
         {MODES.map((m) => (
           <button key={m.id} onClick={() => setText(m.prompt)} className={ghostBtnCls}>{m.label}</button>
         ))}
-        {pending > 0 && <Badge tone="violet" size="sm">{pending} por decidir</Badge>}
+        {pending > 0 && <Badge tone="accent" size="sm">{pending} por decidir</Badge>}
       </div>
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pr-1">
@@ -120,7 +120,7 @@ export function CoWriterPanel({ song, focusSectionId, onFocusHandled }: { song: 
           <div className="flex flex-col gap-2 py-4">
             <p className="text-xs text-text-dim">Sin conversación todavía. Empieza por una de estas:</p>
             {MODES.slice(0, 3).map((m) => (
-              <button key={m.id} onClick={() => setText(m.prompt)} className="rounded-sm border border-line px-2 py-1.5 text-left text-2xs text-text-dim hover:border-violet hover:text-text">
+              <button key={m.id} onClick={() => setText(m.prompt)} className="rounded-sm border border-line px-2 py-1.5 text-left text-2xs text-text-dim hover:border-accent hover:text-text">
                 <span className="text-text">{m.label}</span> · {m.prompt}
               </button>
             ))}
@@ -128,7 +128,7 @@ export function CoWriterPanel({ song, focusSectionId, onFocusHandled }: { song: 
         )}
         {turns.map((t) => (
           <div key={t.id} className={`flex flex-col gap-1.5 ${t.role === "tú" ? "items-end" : "items-start"}`}>
-            <div className={`max-w-[92%] rounded-sm px-2.5 py-1.5 text-xs leading-relaxed ${t.role === "tú" ? "bg-violet/12 text-text" : "border border-line text-text"}`}>
+            <div className={`max-w-[92%] rounded-sm px-2.5 py-1.5 text-xs leading-relaxed ${t.role === "tú" ? "bg-accent/12 text-text" : "border border-line text-text"}`}>
               {t.text}
             </div>
             {!quiet &&
@@ -147,7 +147,7 @@ export function CoWriterPanel({ song, focusSectionId, onFocusHandled }: { song: 
                     {s.options && (
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {s.options.map((o, oi) => (
-                          <button key={`${o}-${oi}`} disabled={done} onClick={() => apply(s, o)} className="rounded-xs border border-line px-1.5 py-0.5 font-mono text-2xs text-text hover:border-violet disabled:opacity-50" title="Usar esta opción">
+                          <button key={`${o}-${oi}`} disabled={done} onClick={() => apply(s, o)} className="rounded-xs border border-line px-1.5 py-0.5 font-mono text-2xs text-text hover:border-accent disabled:opacity-50" title="Usar esta opción">
                             {o}
                           </button>
                         ))}

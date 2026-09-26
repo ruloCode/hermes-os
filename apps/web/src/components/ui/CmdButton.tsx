@@ -9,7 +9,7 @@ import { toneVar } from "./tones";
  *
  * Nota de especificidad: `.cmd-btn` vive fuera de @layer en globals.css,
  * así que gana a las utilities de Tailwind — los overrides van por `style`,
- * usando CSS vars (`--line`, `--violet`, `--violet-hot`) que la clase base
+ * usando CSS vars (`--line`, `--accent`, `--accent-hot`) que la clase base
  * ya consume, para que su hover siga funcionando en cada variante.
  */
 export function CmdButton({
@@ -43,16 +43,16 @@ export function CmdButton({
   }
 
   if (variant === "solid") {
-    // Fondo violeta al 12% + borde line-2 (vía la var que lee .cmd-btn).
-    style.background = "color-mix(in srgb, var(--color-violet) 12%, transparent)";
+    // Fondo de acento al 12% + borde line-2 (vía la var que lee .cmd-btn).
+    style.background = "color-mix(in srgb, var(--color-accent) 12%, transparent)";
     style["--line"] = "var(--color-line-2)";
   } else if (variant === "danger") {
     // Tiñe texto/borde de rojo; el prefijo ">" y el hover de .cmd-btn
-    // leen --violet/--violet-hot, así que también se vuelven rojos.
+    // leen --accent/--accent-hot, así que también se vuelven rojos.
     style.color = toneVar("red");
     style["--line"] = "color-mix(in srgb, var(--color-red) 45%, transparent)";
-    style["--violet"] = toneVar("red");
-    style["--violet-hot"] = toneVar("red");
+    style["--accent"] = toneVar("red");
+    style["--accent-hot"] = toneVar("red");
   }
 
   return (

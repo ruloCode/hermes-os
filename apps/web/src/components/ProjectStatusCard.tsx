@@ -107,7 +107,7 @@ export function ProjectStatusCard({ slug, name }: { slug: string; name?: string 
               const pri = SOURCE_PRIORITY[t.source] ?? SOURCE_PRIORITY.manual;
               return (
                 <li key={t.id} className="flex items-baseline gap-2">
-                  <span className="shrink-0 font-display text-xs text-violet tabular-nums">
+                  <span className="shrink-0 font-display text-xs text-accent tabular-nums">
                     {i + 1}.
                   </span>
                   <span className="min-w-0 flex-1 truncate text-xs text-text" title={t.title}>

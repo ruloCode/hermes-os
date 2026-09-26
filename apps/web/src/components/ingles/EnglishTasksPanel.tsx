@@ -22,7 +22,7 @@ const POLL_MS = 30_000; // API remota de Linear: poll sereno
 
 const STATE_DOT: Record<string, string> = {
   started: "text-cyan",
-  unstarted: "text-violet",
+  unstarted: "text-accent",
   backlog: "text-text-dim",
   completed: "text-green",
 };
@@ -101,7 +101,7 @@ export function EnglishTasksPanel() {
           type="button"
           onClick={() => void create()}
           disabled={!title.trim()}
-          className="shrink-0 rounded-sm border border-violet px-2 py-1 text-2xs tracking-label text-violet uppercase transition-colors disabled:opacity-40"
+          className="shrink-0 rounded-sm border border-accent px-2 py-1 text-2xs tracking-label text-accent uppercase transition-colors disabled:opacity-40"
         >
           +
         </button>
@@ -166,7 +166,7 @@ export function EnglishTasksPanel() {
       <button
         type="button"
         onClick={() => ws.showPanel("tareas")}
-        className="shrink-0 self-start text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-violet"
+        className="shrink-0 self-start text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-accent"
       >
         tablero completo →
       </button>

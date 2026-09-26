@@ -73,7 +73,7 @@ export function EnglishStats({
             max={Math.max(vocab.length, 1)}
             segments={0}
             height={5}
-            tone="violet"
+            tone="accent"
             showValue={false}
           />
         </div>

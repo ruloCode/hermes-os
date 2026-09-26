@@ -13,7 +13,7 @@ import type { ClaudeUsageData } from "@/lib/claude-usage";
 import type { ClaudeLimits } from "@/lib/claude-limits";
 
 // Tonos HUD por modelo (mismo tono en toda la fila del desglose).
-const MODEL_TONES: Tone[] = ["violet", "cyan", "amber", "green", "blue"];
+const MODEL_TONES: Tone[] = ["accent", "cyan", "amber", "green", "blue"];
 
 // "Se restablece en 4 h 31 min", igual que la vista /usage de Claude Code.
 function formatReset(iso: string | null): string {
@@ -61,7 +61,7 @@ function PlanLimits({ limits }: { limits: ClaudeLimits | null }) {
           Límites del plan
         </span>
         {limits.plan && (
-          <Badge tone="violet" size="sm">
+          <Badge tone="accent" size="sm">
             {limits.plan}
           </Badge>
         )}
@@ -190,7 +190,7 @@ export function ClaudeUsage() {
       right={
         <span
           className={`text-2xs tracking-label tabular-nums ${
-            data?.available ? "text-violet" : "text-text-dim"
+            data?.available ? "text-accent" : "text-text-dim"
           }`}
         >
           {data ? `${formatTokens(totalTokens)} tk` : "···"}
@@ -221,7 +221,7 @@ export function ClaudeUsage() {
               label="Hoy"
               value={formatTokens(data.today.totalTokens)}
               unit="tk"
-              tone="violet"
+              tone="accent"
               size="md"
             />
             <StatBlock
@@ -254,7 +254,7 @@ export function ClaudeUsage() {
               </p>
             ) : (
               <div className="h-8 w-full">
-                <Sparkline data={spark} height={32} tone="violet" fill />
+                <Sparkline data={spark} height={32} tone="accent" fill />
               </div>
             )}
           </div>

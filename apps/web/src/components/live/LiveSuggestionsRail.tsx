@@ -9,7 +9,7 @@ import { fmtLiveClock, useLiveMeeting } from "@/state/LiveMeetingProvider";
 // (no interpoladas) para que Tailwind las emita.
 const KIND_STYLE: Record<LiveSuggestionKind, { label: string; border: string; text: string }> = {
   decir: { label: "DILO", border: "border-l-cyan", text: "text-cyan" },
-  preguntar: { label: "PREGUNTA", border: "border-l-violet", text: "text-violet" },
+  preguntar: { label: "PREGUNTA", border: "border-l-accent", text: "text-accent" },
   dato: { label: "DATO", border: "border-l-blue", text: "text-blue" },
   rumbo: { label: "RUMBO", border: "border-l-amber", text: "text-amber" },
 };
@@ -36,7 +36,7 @@ export function LiveSuggestionsRail() {
       className="flex shrink-0 flex-col lg:max-wide:w-[300px] wide:w-[340px] max-lg:h-[156px] max-lg:w-full"
     >
       <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-2xs tracking-title text-violet uppercase">▸ Copiloto</span>
+        <span className="text-2xs tracking-title text-accent uppercase">▸ Copiloto</span>
         <button
           type="button"
           onClick={live.suggestNow}
@@ -46,14 +46,14 @@ export function LiveSuggestionsRail() {
               ? "Pide una respuesta inmediata para este momento (capa rápida)"
               : "Fuerza una tanda de sugerencias con lo hablado hasta ahora"
           }
-          className="rounded-sm border border-violet/50 bg-violet/5 px-2 py-1 text-2xs tracking-label text-violet uppercase opacity-90 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-sm border border-accent/50 bg-accent/5 px-2 py-1 text-2xs tracking-label text-accent uppercase opacity-90 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
         >
           ◈ Soplar ahora
         </button>
       </div>
 
       {live.suggesting && (
-        <p className="mb-1.5 shrink-0 text-2xs tracking-label text-violet pulse-dot">
+        <p className="mb-1.5 shrink-0 text-2xs tracking-label text-accent pulse-dot">
           ◈ Analizando la conversación…
         </p>
       )}
@@ -95,7 +95,7 @@ export function LiveSuggestionsRail() {
             return (
               <div
                 key={s.id}
-                className={`shrink-0 rounded-sm border border-line border-l-2 ${k.border} bg-violet/5 p-2.5 max-lg:min-w-[260px] max-lg:snap-start`}
+                className={`shrink-0 rounded-sm border border-line border-l-2 ${k.border} bg-accent/5 p-2.5 max-lg:min-w-[260px] max-lg:snap-start`}
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <span className={`text-2xs tracking-label uppercase ${k.text}`}>

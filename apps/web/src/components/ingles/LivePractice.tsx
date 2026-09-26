@@ -79,9 +79,9 @@ function TutorLine({
             : upcoming
               ? "text-text-faint"
               : saved
-                ? "text-violet"
+                ? "text-accent"
                 : "",
-          saved ? "underline decoration-violet/60 decoration-dotted underline-offset-4" : "",
+          saved ? "underline decoration-accent/60 decoration-dotted underline-offset-4" : "",
           tappable ? "cursor-pointer hover:bg-cyan/10 hover:text-cyan" : "cursor-default",
         ].join(" ");
         if (!tappable) return <span key={i} className={cls}>{t.raw}</span>;
@@ -228,7 +228,7 @@ export function LivePractice({
             {lines.map((l, i) =>
               l.who === "TÚ" ? (
                 <div key={i} className="hud-in flex justify-end">
-                  <div className="max-w-[80%] rounded-lg border border-line bg-violet/10 px-3.5 py-2.5 text-base leading-relaxed text-text">
+                  <div className="max-w-[80%] rounded-lg border border-line bg-accent/10 px-3.5 py-2.5 text-base leading-relaxed text-text">
                     {l.text}
                   </div>
                 </div>

@@ -181,9 +181,9 @@ export function ProjectContextPanel({
               </p>
             )}
 
-            <Section label="Skills" tone="violet" count={ctx.skills.length}>
+            <Section label="Skills" tone="accent" count={ctx.skills.length}>
               {ctx.skills.map((s) => (
-                <Chip key={s.name} tone="violet" title={s.description || undefined}>
+                <Chip key={s.name} tone="accent" title={s.description || undefined}>
                   {s.name}
                 </Chip>
               ))}
@@ -249,7 +249,7 @@ const SECTION_MAX = 8;
 // Clases estáticas por tono (Tailwind necesita literales completos, no
 // nombres de clase interpolados).
 const TONE_TEXT: Record<Tone, string> = {
-  violet: "text-violet",
+  accent: "text-accent",
   cyan: "text-cyan",
   blue: "text-blue",
   green: "text-green",
@@ -259,7 +259,7 @@ const TONE_TEXT: Record<Tone, string> = {
 };
 
 const TONE_CHIP: Record<Tone, string> = {
-  violet: "border-violet text-violet",
+  accent: "border-accent text-accent",
   cyan: "border-cyan text-cyan",
   blue: "border-blue text-blue",
   green: "border-green text-green",
@@ -287,7 +287,7 @@ function Section({
     <div>
       <div className="mb-1.5 flex items-center gap-2 text-2xs tracking-title uppercase">
         <span className={TONE_TEXT[tone]}>▸ {label}</span>
-        <span className="rounded-full bg-violet/10 px-1.5 text-2xs text-text-dim">{count}</span>
+        <span className="rounded-full bg-accent/10 px-1.5 text-2xs text-text-dim">{count}</span>
       </div>
       {count === 0 ? (
         <p className="text-2xs tracking-widest text-text-dim">—</p>
@@ -325,7 +325,7 @@ function Chip({
     <span
       title={title}
       className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-2xs leading-none ${
-        dim ? "border-line bg-transparent text-text-dim" : `${TONE_CHIP[tone]} bg-violet/5`
+        dim ? "border-line bg-transparent text-text-dim" : `${TONE_CHIP[tone]} bg-accent/5`
       }`}
     >
       {children}

@@ -110,7 +110,7 @@ export function AgentSteps({ steps, busy }: { steps: ChatToolStep[]; busy: boole
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="flex items-center gap-1 text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-violet"
+          className="flex items-center gap-1 text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-accent"
         >
           <span aria-hidden>{open ? "▾" : "▸"}</span>
           {steps.length} paso{steps.length === 1 ? "" : "s"}
@@ -123,7 +123,7 @@ export function AgentSteps({ steps, busy }: { steps: ChatToolStep[]; busy: boole
             const live = busy && i === steps.length - 1;
             return (
               <li key={i} className="flex items-baseline gap-1.5 text-2xs leading-snug">
-                <span aria-hidden className={live ? "text-amber" : "text-violet"}>
+                <span aria-hidden className={live ? "text-amber" : "text-accent"}>
                   {glyphOf(s.name)}
                 </span>
                 <span className={`shrink-0 ${live ? "pulse-dot text-text" : "text-text-dim"}`}>

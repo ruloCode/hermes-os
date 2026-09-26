@@ -90,7 +90,7 @@ export function ScriptChecklist({
           <div
             key={`${beat.label}-${i}`}
             className={`group flex items-start gap-1.5 rounded-sm border px-1.5 py-1 ${
-              active ? "border-violet/40 bg-violet/9" : "border-transparent hover:bg-panel-2"
+              active ? "border-accent/40 bg-accent/9" : "border-transparent hover:bg-panel-2"
             }`}
           >
             <button
@@ -113,7 +113,7 @@ export function ScriptChecklist({
               <div className="flex items-baseline gap-1.5">
                 <span
                   className={`shrink-0 text-2xs tracking-label uppercase ${
-                    active ? "text-violet" : "text-text-dim"
+                    active ? "text-accent" : "text-text-dim"
                   }`}
                 >
                   {beat.kind === "hook" ? "✦ Hook" : (beat.heading ?? beat.label)}
@@ -219,7 +219,7 @@ export function ScriptBoard({
               >
                 {GLYPH[state]}
               </button>
-              <span className="text-2xs tracking-label text-violet uppercase">
+              <span className="text-2xs tracking-label text-accent uppercase">
                 {beat.kind === "hook" ? "✦ Hook" : (beat.heading ?? beat.label)}
               </span>
               {beat.heading && beat.time && (
@@ -235,7 +235,7 @@ export function ScriptBoard({
               <button
                 onClick={() => onRecord(i)}
                 title="Grabar desde este bloque"
-                className="rounded-xs border border-line-2 px-1.5 py-0.5 text-2xs text-text-dim hover:border-violet hover:text-violet"
+                className="rounded-xs border border-line-2 px-1.5 py-0.5 text-2xs text-text-dim hover:border-accent hover:text-accent"
               >
                 ▶
               </button>
@@ -246,7 +246,7 @@ export function ScriptBoard({
                   key={j}
                   onClick={onEditHook}
                   title="Editar el hook"
-                  className="mt-1 block w-full text-left text-xs leading-relaxed text-text hover:text-violet"
+                  className="mt-1 block w-full text-left text-xs leading-relaxed text-text hover:text-accent"
                 >
                   {line}
                 </button>

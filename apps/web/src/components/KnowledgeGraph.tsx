@@ -14,7 +14,7 @@ import { readToken } from "@/components/ui/tones";
  * Red de conocimiento en WebGL real (three.js, guiado por las skills
  * threejs-fundamentals/materials/postprocessing/interaction):
  *  - CORE al centro con halo y anillos; proyectos (cian) en capa esférica
- *    interior; memorias (violeta) en cono alrededor de su proyecto.
+ *    interior; memorias (el acento) en cono alrededor de su proyecto.
  *  - Materiales emissive + UnrealBloomPass → el glow es del render, no un truco.
  *  - OrbitControls: arrastra para orbitar, SCROLL para zoom, con damping.
  *  - Raycasting: clic en un proyecto lo enfoca (toggle); clic al vacío limpia.
@@ -138,11 +138,11 @@ export function KnowledgeGraph({
     // Tokens del design system (three no resuelve var(--…)).
     const COLOR = {
       bg: readToken("--color-bg", "#05060f"),
-      core: readToken("--color-violet-hot", "#c4b5fd"),
+      core: readToken("--color-accent-hot", "#e89a7d"),
       // Azul tranquilo del branding (no el cian eléctrico): con el bloom
       // encima, el cian saturado gritaba y las etiquetas no se leían.
       project: readToken("--color-blue", "#60a5fa"),
-      memory: readToken("--color-violet", "#a78bfa"),
+      memory: readToken("--color-accent", "#d97757"),
       label: readToken("--color-text", "#e2e7ff"),
       line: "#7a84ff",
     };
@@ -165,7 +165,7 @@ export function KnowledgeGraph({
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 60);
     camera.position.set(0.9, 0.9, 3.4);
 
-    // Luces: ambiente tenue + punto violeta en el core → los lados no emisivos
+    // Luces: ambiente tenue + punto de acento en el core → los lados no emisivos
     // de las esferas ganan volumen (skill: lighting).
     scene.add(new THREE.AmbientLight(0xffffff, 0.35));
     const coreLight = new THREE.PointLight(new THREE.Color(COLOR.core), 2.5, 8, 1.6);
@@ -199,7 +199,7 @@ export function KnowledgeGraph({
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     // Bloom CONTENIDO: acento de marca, no white-out — los nodos deben leerse
-    // violeta/cian (branding HUD), nunca reventar a blanco.
+    // acento/cian (branding HUD), nunca reventar a blanco.
     const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.38, 0.35, 0.55);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
@@ -648,13 +648,13 @@ export function KnowledgeGraph({
         </span>
         <div className="flex items-center gap-3 text-2xs tracking-label text-text-dim">
           <span>
-            <span className="text-violet-hot">●</span> CORE
+            <span className="text-accent-hot">●</span> CORE
           </span>
           <span>
             <span className="text-blue">●</span> PROYECTO
           </span>
           <span>
-            <span className="text-violet">●</span> MEMORIA
+            <span className="text-accent">●</span> MEMORIA
           </span>
         </div>
       </div>

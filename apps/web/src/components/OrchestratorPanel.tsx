@@ -69,7 +69,7 @@ export function OrchestratorPanel({
           <StatBlock
             label="costo hoy"
             value={`$${dailyCostUsd.toFixed(2)}`}
-            tone="violet"
+            tone="accent"
             size="lg"
           />
           <StatBlock label="ejecuciones" value={runsToday} size="lg" />
@@ -104,7 +104,7 @@ export function OrchestratorPanel({
                   onOpenRun({ slug: r.projectSlug, runId: r.id, sessionId: r.sessionId });
               }}
               title={r.lastText ? `${r.title}\n→ ${r.lastText}` : r.title}
-              className="block w-full cursor-pointer rounded-sm px-2 py-1 text-left transition-colors hover:bg-violet/10"
+              className="block w-full cursor-pointer rounded-sm px-2 py-1 text-left transition-colors hover:bg-accent/10"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 flex-1 truncate font-display text-xs font-semibold tracking-label text-cyan uppercase">

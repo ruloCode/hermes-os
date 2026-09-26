@@ -121,7 +121,7 @@ export function CommandPalette() {
         onKeyDown={onKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
-          <span aria-hidden className="text-violet">
+          <span aria-hidden className="text-accent">
             ⌘
           </span>
           <input
@@ -146,10 +146,10 @@ export function CommandPalette() {
               onClick={item.run}
               onMouseEnter={() => setCursor(i)}
               className={`flex w-full items-baseline justify-between gap-3 rounded-xs px-2.5 py-1.5 text-left transition-colors ${
-                i === cursor ? "bg-violet/10" : ""
+                i === cursor ? "bg-accent/10" : ""
               } ${item.disabled ? "opacity-40" : ""}`}
             >
-              <span className={`text-sm ${i === cursor ? "text-violet-hot" : "text-text"}`}>
+              <span className={`text-sm ${i === cursor ? "text-accent-hot" : "text-text"}`}>
                 {item.label}
               </span>
               <span className="shrink-0 text-2xs tracking-label text-text-dim uppercase">

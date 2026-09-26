@@ -13,7 +13,7 @@ import { DOT_BG, SECTION_KINDS, btnCls, ghostBtnCls, inputCls } from "./labels";
 import type { SectionKind, Song } from "./types";
 
 const TONE_BG: Record<string, string> = {
-  violet: "border-violet/50 bg-violet/10",
+  accent: "border-accent/50 bg-accent/10",
   cyan: "border-cyan/50 bg-cyan/10",
   blue: "border-blue/50 bg-blue/10",
   amber: "border-amber/50 bg-amber/10",
@@ -43,7 +43,7 @@ export function StructureTab({ song }: { song: Song }) {
         </p>
         <div className="flex items-center gap-1">
           {(["4/4", "3/4", "6/8"] as const).map((m) => (
-            <button key={m} onClick={() => patchSong(song.id, { meter: m })} className={`rounded-sm border px-2 py-1 font-mono text-2xs ${song.meter === m ? "border-violet text-violet" : "border-line text-text-dim"}`}>
+            <button key={m} onClick={() => patchSong(song.id, { meter: m })} className={`rounded-sm border px-2 py-1 font-mono text-2xs ${song.meter === m ? "border-accent text-accent" : "border-line text-text-dim"}`}>
               {m}
             </button>
           ))}

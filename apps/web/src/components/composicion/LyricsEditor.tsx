@@ -129,7 +129,7 @@ function SectionCard({ song, section, onAskHermes }: { song: Song; section: Song
           <span className="mr-1 text-2xs tracking-label text-text-dim uppercase">rima con -{rhymeFor}</span>
           {rhymes.length === 0 && <span className="text-2xs text-text-faint">nada en el banco (mock chico)</span>}
           {rhymes.map((r) => (
-            <span key={r.word} className={`rounded-xs px-1.5 py-0.5 font-mono text-2xs ${r.kind === "consonante" ? "bg-violet/16 text-violet" : "bg-cyan/10 text-cyan"}`} title={r.kind ?? ""}>
+            <span key={r.word} className={`rounded-xs px-1.5 py-0.5 font-mono text-2xs ${r.kind === "consonante" ? "bg-accent/16 text-accent" : "bg-cyan/10 text-cyan"}`} title={r.kind ?? ""}>
               {r.word}
             </span>
           ))}
@@ -158,7 +158,7 @@ function LyricLine({ raw, a, show, onRhyme, active }: { raw: string; a: LineAnal
     <div className="group flex items-end gap-3">
       <div className="min-w-0 flex-1 font-mono">
         {chordLine && (
-          <div className="flex whitespace-pre text-2xs leading-none text-violet">
+          <div className="flex whitespace-pre text-2xs leading-none text-accent">
             {chordLine.split(/(\S+)/).map((part, i) =>
               part.trim() ? (
                 <button key={i} onClick={() => { const c = parseChord(part); if (c) playChord(c, 0.9); }} className="hover:text-cyan" title="oír">
@@ -173,7 +173,7 @@ function LyricLine({ raw, a, show, onRhyme, active }: { raw: string; a: LineAnal
         <div className="whitespace-pre text-sm leading-snug text-text">
           {head}
           {tail && (
-            <button onClick={onRhyme} className={`rounded-xs ${active ? "bg-violet/25 text-violet" : "group-hover:bg-violet/10"}`} title="buscar rimas">
+            <button onClick={onRhyme} className={`rounded-xs ${active ? "bg-accent/25 text-accent" : "group-hover:bg-accent/10"}`} title="buscar rimas">
               {tail}
             </button>
           )}
@@ -181,7 +181,7 @@ function LyricLine({ raw, a, show, onRhyme, active }: { raw: string; a: LineAnal
       </div>
       <div className="flex shrink-0 items-center gap-1.5 pb-0.5 font-mono text-2xs">
         <span className="w-4 text-right text-text-dim" title="sílabas métricas (aprox.)">{a.syllables}</span>
-        <span className={`w-3 text-center ${a.scheme === "–" ? "text-text-faint" : a.rhyme === "consonante" ? "text-violet" : "text-cyan"}`} title={a.rhyme ? `rima ${a.rhyme}` : "no rima"}>
+        <span className={`w-3 text-center ${a.scheme === "–" ? "text-text-faint" : a.rhyme === "consonante" ? "text-accent" : "text-cyan"}`} title={a.rhyme ? `rima ${a.rhyme}` : "no rima"}>
           {a.scheme}
         </span>
       </div>

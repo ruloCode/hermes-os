@@ -90,7 +90,7 @@ export function ProjectVersion({ slug }: { slug: string }) {
       </Row>
 
       <Row label="Commit" hint={timeAgo(commitAt)}>
-        <div className="font-display mt-1 text-2xl font-bold tracking-wider tabular-nums text-violet glow-text-violet">
+        <div className="font-display mt-1 text-2xl font-bold tracking-wider tabular-nums text-accent glow-text-accent">
           {commit}
         </div>
         <p className="mt-1 text-xs leading-snug text-text" title={mensaje}>

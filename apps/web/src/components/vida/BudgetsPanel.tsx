@@ -121,7 +121,7 @@ export function BudgetsPanel({
                     max={r.limit}
                     segments={0}
                     height={5}
-                    tone="violet"
+                    tone="accent"
                     thresholds={{ warn: 80, danger: 100 }}
                     showValue={false}
                   />
@@ -178,7 +178,7 @@ export function BudgetsPanel({
               setDraft("");
               setNewCat(freeCategories[0]);
             }}
-            className="shrink-0 self-start text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-violet"
+            className="shrink-0 self-start text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-accent"
           >
             + presupuesto
           </button>

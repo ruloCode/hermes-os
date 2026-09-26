@@ -40,7 +40,7 @@ export function LiveWordBank({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain pr-1">
-      <h3 className="text-2xs tracking-label text-violet uppercase">
+      <h3 className="text-2xs tracking-label text-accent uppercase">
         Esta sesión · {words.length}
       </h3>
       {words.length === 0 ? (
@@ -53,7 +53,7 @@ export function LiveWordBank({
           const entry = byTerm.get(w.term);
           const defined = Boolean(entry?.meaning_es);
           return (
-            <div key={w.term} className="hud-in rounded-sm border border-violet/30 px-2 py-1.5">
+            <div key={w.term} className="hud-in rounded-sm border border-accent/30 px-2 py-1.5">
               <div className="flex items-baseline gap-2">
                 <span className="min-w-0 flex-1 truncate text-xs text-text">{w.term}</span>
                 <span

@@ -38,15 +38,15 @@ export function ComposicionRail() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain">
-      <Panel title="Ritual de hoy" tone="violet" delay={60} className="shrink-0">
+      <Panel title="Ritual de hoy" tone="accent" delay={60} className="shrink-0">
         <div className="flex flex-col gap-1.5">
           <div className="grid grid-cols-2 gap-2">
-            <StatBlock label="racha" value={streak} unit="días" tone="violet" />
+            <StatBlock label="racha" value={streak} unit="días" tone="accent" />
             <StatBlock label="esta semana" value={`${weekDays}/7`} tone="cyan" />
           </div>
           <div className="flex gap-0.5">
             {WRITING_DAYS.slice(-28).map((d, i) => (
-              <span key={i} className={`h-2 flex-1 rounded-xs ${d ? "bg-violet" : "bg-line"}`} title={d ? "escribiste" : "—"} />
+              <span key={i} className={`h-2 flex-1 rounded-xs ${d ? "bg-accent" : "bg-line"}`} title={d ? "escribiste" : "—"} />
             ))}
           </div>
           <ul className="mt-1 flex flex-col gap-1">
@@ -56,7 +56,7 @@ export function ComposicionRail() {
                   onClick={() => setRitual((prev) => prev.map((x) => (x.id === r.id ? { ...x, done: !x.done } : x)))}
                   className="flex w-full items-start gap-2 text-left"
                 >
-                  <span className={`mt-0.5 grid h-3.5 w-3.5 shrink-0 place-items-center rounded-xs border text-2xs ${r.done ? "border-violet bg-violet/20 text-violet" : "border-line text-transparent"}`}>✓</span>
+                  <span className={`mt-0.5 grid h-3.5 w-3.5 shrink-0 place-items-center rounded-xs border text-2xs ${r.done ? "border-accent bg-accent/20 text-accent" : "border-line text-transparent"}`}>✓</span>
                   <span className="min-w-0">
                     <span className={`block text-xs ${r.done ? "text-text-dim line-through" : "text-text"}`}>{r.label}</span>
                     <span className="block text-2xs text-text-faint">{r.hint}</span>
@@ -72,7 +72,7 @@ export function ComposicionRail() {
       <Panel title="Hoy toca" tone="cyan" delay={90} className="shrink-0">
         {today ? (
           <button onClick={() => setSelectedId(today.id)} className="flex w-full flex-col gap-1 text-left">
-            <span className="font-display text-sm tracking-title text-text uppercase hover:text-violet">{today.title}</span>
+            <span className="font-display text-sm tracking-title text-text uppercase hover:text-accent">{today.title}</span>
             <span className="text-2xs text-text-dim">
               {STAGES[today.stage].label}: {STAGES[today.stage].hint}
             </span>
@@ -104,7 +104,7 @@ export function ComposicionRail() {
         <ol className="flex flex-col gap-1.5">
           {PRINCIPLES.map((p, i) => (
             <li key={i} className="flex gap-2 text-2xs leading-relaxed text-text-dim">
-              <span className="font-mono text-violet">{i + 1}</span>
+              <span className="font-mono text-accent">{i + 1}</span>
               <span>{p}</span>
             </li>
           ))}

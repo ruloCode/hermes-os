@@ -296,7 +296,7 @@ export function TransactionList({
               onClick={() => setKindFilter(k)}
               className={`rounded-sm border px-2 py-0.5 text-2xs tracking-label transition-colors ${
                 kindFilter === k
-                  ? "border-violet text-violet"
+                  ? "border-accent text-accent"
                   : "border-line text-text-dim hover:border-line-2 hover:text-text"
               }`}
             >
@@ -354,7 +354,7 @@ export function TransactionList({
           <div key={g.date}>
             {/* Header del día con su total gastado */}
             <div className="mb-1 flex items-baseline justify-between border-b border-line px-1 pb-0.5">
-              <span className="text-2xs tracking-label text-violet uppercase">
+              <span className="text-2xs tracking-label text-accent uppercase">
                 {dayLabel(g.date)}
               </span>
               <span className="text-2xs text-text-dim tabular-nums">

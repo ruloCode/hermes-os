@@ -21,7 +21,7 @@ import { useVoiceConnect } from "@/hooks/useVoiceConnect";
 
 const ACT_ICON: Record<string, { icon: string; cls: string }> = {
   task_start: { icon: "▶", cls: "text-cyan" },
-  tool_call: { icon: "⚙", cls: "text-violet" },
+  tool_call: { icon: "⚙", cls: "text-accent" },
   tool_result: { icon: "↩", cls: "text-text-dim" },
   text: { icon: "…", cls: "text-text-dim" },
   task_done: { icon: "✓", cls: "text-green" },
@@ -29,9 +29,9 @@ const ACT_ICON: Record<string, { icon: string; cls: string }> = {
   session_start: { icon: "◆", cls: "text-blue" },
 };
 
-// Tono de estado → clase de texto (violeta usa la variante hot, como el orbe).
+// Tono de estado → clase de texto (acento usa la variante hot, como el orbe).
 const STATUS_CLS: Record<Tone, string> = {
-  violet: "text-violet-hot",
+  accent: "text-accent-hot",
   cyan: "text-cyan",
   blue: "text-blue",
   green: "text-green",
@@ -59,7 +59,7 @@ export function VozView({ events }: { events: AgentActivityEvent[] }) {
     ? "VOZ NO CONFIGURADA"
     : connected
       ? action
-        ? `EJECUTANDO · ${action}`
+        ? `Ejecutando · ${action}`
         : isSpeaking
           ? "HERMES HABLANDO"
           : "ESCUCHANDO"
@@ -72,7 +72,7 @@ export function VozView({ events }: { events: AgentActivityEvent[] }) {
       ? action
         ? "cyan"
         : isSpeaking
-          ? "violet"
+          ? "accent"
           : "green"
       : connecting
         ? "amber"
@@ -168,7 +168,7 @@ export function VozView({ events }: { events: AgentActivityEvent[] }) {
             </div>
           ) : (
             <>
-              <div className="mb-2 text-xs font-bold text-violet-hot">{artifact.title}</div>
+              <div className="mb-2 text-xs font-bold text-accent-hot">{artifact.title}</div>
               {artifact.status === "running" ? (
                 <div className="flex items-center gap-2 text-xs text-amber">
                   <span className="cursor-blink">Hermes está trabajando en ello</span>
@@ -217,7 +217,7 @@ export function VozView({ events }: { events: AgentActivityEvent[] }) {
               ) : (
                 transcript.map((l, i) => (
                   <div key={i} className="flex gap-1.5">
-                    <b className={`shrink-0 ${l.who === "TÚ" ? "text-cyan" : "text-violet"}`}>
+                    <b className={`shrink-0 ${l.who === "TÚ" ? "text-cyan" : "text-accent"}`}>
                       {l.who}
                     </b>
                     <span className="text-text">{l.text}</span>

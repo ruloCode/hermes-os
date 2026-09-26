@@ -22,7 +22,7 @@ export function HeaderVoiceStrip() {
     ? "N/A"
     : connected
       ? action
-        ? "EJECUTANDO"
+        ? "Ejecutando"
         : tutor
           ? "TUTOR EN" // sesión de práctica de inglés activa
           : isSpeaking
@@ -39,7 +39,7 @@ export function HeaderVoiceStrip() {
         : tutor
           ? "text-green"
           : isSpeaking
-            ? "text-violet-hot"
+            ? "text-accent-hot"
             : "text-green"
       : connecting
         ? "text-amber"

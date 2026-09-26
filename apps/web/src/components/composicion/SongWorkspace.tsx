@@ -63,7 +63,7 @@ export function SongWorkspace({
             <button onClick={() => setNotation(notation === "en" ? "latin" : "en")} className={ghostBtnCls} title="Cómo se escriben las notas">
               {notation === "en" ? "C D E" : "Do Re Mi"}
             </button>
-            <button onClick={onToggleChat} className={`${btnCls} ${chatOpen ? "border-violet text-violet" : ""}`}>✦ Hermes</button>
+            <button onClick={onToggleChat} className={`${btnCls} ${chatOpen ? "border-accent text-accent" : ""}`}>✦ Hermes</button>
           </div>
         </div>
         <input
@@ -84,7 +84,7 @@ export function SongWorkspace({
                     onClick={() => setStage(song.id, st)}
                     title={s.hint}
                     className={`flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-2xs tracking-label uppercase ${
-                      state === "now" ? "bg-violet/16 text-violet" : state === "past" ? "text-text-dim" : "text-text-faint hover:text-text-dim"
+                      state === "now" ? "bg-accent/16 text-accent" : state === "past" ? "text-text-dim" : "text-text-faint hover:text-text-dim"
                     }`}
                   >
                     <span aria-hidden>{state === "past" ? "✓" : state === "now" ? "●" : "○"}</span>
@@ -96,7 +96,7 @@ export function SongWorkspace({
             })}
           </ol>
           <div className="flex items-center gap-2 font-mono text-2xs text-text-dim">
-            <button onClick={() => setTab("tonalidad")} className="text-text hover:text-violet">{keyLabel(song.key, notation)}</button>
+            <button onClick={() => setTab("tonalidad")} className="text-text hover:text-accent">{keyLabel(song.key, notation)}</button>
             <span>·</span>
             <button onClick={() => setTab("acordes")} className="hover:text-text">{song.tempo} bpm</button>
             <span>·</span>
@@ -139,7 +139,7 @@ export function SongWorkspace({
             {[...song.versions].reverse().map((v) => (
               <li key={v.id} className="flex items-center gap-3 rounded-sm border border-line px-2 py-1.5">
                 <span className="w-16 shrink-0 font-mono text-2xs text-text-faint">{fmtRelative(v.at)}</span>
-                <Badge tone={v.scope === "letra" ? "violet" : v.scope === "armonía" ? "amber" : v.scope === "tonalidad" ? "cyan" : "blue"} size="sm">{v.scope}</Badge>
+                <Badge tone={v.scope === "letra" ? "accent" : v.scope === "armonía" ? "amber" : v.scope === "tonalidad" ? "cyan" : "blue"} size="sm">{v.scope}</Badge>
                 <span className="text-xs text-text">{v.note}</span>
               </li>
             ))}

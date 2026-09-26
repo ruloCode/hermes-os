@@ -12,8 +12,13 @@
 // tenía una cajita del 2%, mientras ~15 paneles con el mismo peso visual
 // competían con la consola.
 
+import { useCallback, useRef } from "react";
 import { usePathname } from "next/navigation";
+import { useTheme } from "@/state/ThemeProvider";
 import { useWorkspace } from "@/state/WorkspaceContext";
+import { useOrbState } from "@/components/voice/orbState";
+import { VoiceOrb3D } from "@/components/voice/VoiceOrb3D";
+import { PresenceBar } from "./PresenceBar";
 import { useHermesData } from "@/hooks/useHermesData";
 import { useAgentEvents } from "@/hooks/useAgentEvents";
 import { useHotkeys } from "@/hooks/useHotkeys";
@@ -37,11 +42,19 @@ import { ComposicionView } from "@/components/views/ComposicionView";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const theme = useTheme();
   const ws = useWorkspace();
   const { projects } = useHermesData();
   const { events } = useAgentEvents();
+  const { state: orbState, getVolume } = useOrbState();
   // Atajos globales: ⌘K palette · ⌘1..7 tabs · ⌘B sidebar · Esc.
   useHotkeys();
+
+  // El orbe 3D vive en el SHELL, no en el home: su ancla es el botón de la
+  // PresenceBar, que existe en todas las rutas. `simplified` va siempre en
+  // true porque a ~19px de radio el relieve del ruido se lee como suciedad.
+  const orbAnchorRef = useRef<HTMLButtonElement>(null);
+  const getOrbAnchor = useCallback(() => orbAnchorRef.current, []);
 
   // Fuera del workspace (galería /dev/ui, futuras rutas sueltas): sin shell.
   // /vida vive como redirect a /finanzas (app/vida/page.tsx).
@@ -79,11 +92,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* 👏👏 = toggle de la tira de luces mientras la llamada está activa. */}
       <ClapToLights />
 
+      {/* Canvas fijo a toda la ventana, detrás de la UI (pointer-events:none).
+          En una caja del tamaño del orbe, anillos y partículas se recortan. */}
+      <VoiceOrb3D
+        key={theme.resolved}
+        getAnchor={getOrbAnchor}
+        simplified
+        state={orbState}
+        getVolume={getVolume}
+      />
+
       <div className="relative z-2 flex h-screen">
         <SideRail />
         <main className="flex min-w-0 flex-1 flex-col">
           <TopBar />
-          <div className="flex min-h-0 flex-1 flex-col p-3">
+          {/* pb-20 deja sitio a la PresenceBar fija: sin él, el último elemento
+              de cada vista queda debajo del orbe. */}
+          <div className="flex min-h-0 flex-1 flex-col p-3 pb-20">
             <div className={`min-h-0 flex-1 ${view === "orquestador" ? "flex flex-col" : "hidden"}`}>
               <OrquestadorView />
             </div>
@@ -108,6 +133,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
+
+      {/* La voz, anclada al pie de todas las rutas: orbe + estado + hilo. */}
+      <PresenceBar anchorRef={orbAnchorRef} />
 
       {/* Avisos flotantes de tareas/runs terminados (mismo SSE de events) */}
       <Toasts events={events} />

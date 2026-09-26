@@ -255,9 +255,9 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
                 <button
                   key={s.label}
                   onClick={() => void send(s.label)}
-                  className="group rounded-sm border border-line bg-panel-2/40 px-2.5 py-2 text-left transition-colors hover:border-violet/50 hover:bg-violet/6"
+                  className="group rounded-sm border border-line bg-panel-2/40 px-2.5 py-2 text-left transition-colors hover:border-accent/50 hover:bg-accent/6"
                 >
-                  <span className="block text-xs text-text group-hover:text-violet">
+                  <span className="block text-xs text-text group-hover:text-accent">
                     {s.label}
                   </span>
                   <span className="mt-0.5 block text-2xs leading-snug text-text-faint">
@@ -274,7 +274,7 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
             {m.role === "user" ? (
               /* Usuario: burbuja compacta a la derecha (estándar universal). */
               <div className="flex justify-end pl-8">
-                <p className="max-w-full rounded-md rounded-br-xs bg-violet/14 px-2.5 py-1.5 text-xs leading-relaxed break-words text-text">
+                <p className="max-w-full rounded-md rounded-br-xs bg-accent/14 px-2.5 py-1.5 text-xs leading-relaxed break-words text-text">
                   {m.content}
                 </p>
               </div>
@@ -301,7 +301,7 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
                 ))}
                 {m.working && (
                   <div className="mb-1.5 flex items-center gap-2 rounded-sm border border-line bg-panel-2/50 px-2 py-1">
-                    <span className="animate-pulse text-2xs text-violet">◌</span>
+                    <span className="animate-pulse text-2xs text-accent">◌</span>
                     <span className="text-2xs text-text-faint">editando la pieza…</span>
                   </div>
                 )}
@@ -316,7 +316,7 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
                     {[0, 150, 300].map((d) => (
                       <span
                         key={d}
-                        className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet/70"
+                        className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent/70"
                         style={{ animationDelay: `${d}ms` }}
                       />
                     ))}
@@ -352,7 +352,7 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
       {showJump && (
         <button
           onClick={jumpToBottom}
-          className="absolute bottom-16 left-1/2 z-10 -translate-x-1/2 rounded-full border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs text-text-dim shadow-lg hover:border-violet hover:text-text"
+          className="absolute bottom-16 left-1/2 z-10 -translate-x-1/2 rounded-full border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs text-text-dim shadow-lg hover:border-accent hover:text-text"
           aria-label="Ir a lo último"
         >
           ↓ lo último
@@ -376,7 +376,7 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
           }}
           rows={1}
           placeholder="Pídele un cambio a esta pieza…"
-          className="min-w-0 flex-1 resize-none rounded-md border border-line bg-panel-2/40 px-2.5 py-2 text-xs leading-relaxed text-text placeholder:text-text-faint focus:border-violet focus:outline-none"
+          className="min-w-0 flex-1 resize-none rounded-md border border-line bg-panel-2/40 px-2.5 py-2 text-xs leading-relaxed text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
         />
         {busy ? (
           <button
@@ -392,7 +392,7 @@ export function PieceChat({ piece }: { piece: ContentPiece }) {
             onClick={() => void send(input)}
             disabled={!input.trim()}
             aria-label="Enviar"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-violet/60 bg-violet/14 text-sm text-violet transition-colors hover:bg-violet/25 disabled:border-line disabled:bg-transparent disabled:text-text-faint"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-accent/60 bg-accent/14 text-sm text-accent transition-colors hover:bg-accent/25 disabled:border-line disabled:bg-transparent disabled:text-text-faint"
           >
             ↑
           </button>

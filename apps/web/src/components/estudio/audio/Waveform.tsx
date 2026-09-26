@@ -122,14 +122,14 @@ export function TakeWaveform({
   peaks,
   progress,
   onSeek,
-  tone = "violet",
+  tone = "accent",
   className = "",
 }: {
   peaks: Float32Array | null;
   /** 0-1; null cuando no se ha reproducido. */
   progress: number;
   onSeek?: (fraction: number) => void;
-  tone?: "violet" | "green";
+  tone?: "accent" | "green";
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -137,7 +137,7 @@ export function TakeWaveform({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const played = readToken(tone === "green" ? "--color-green" : "--color-violet", "#a78bfa");
+    const played = readToken(tone === "green" ? "--color-green" : "--color-accent", "#d97757");
     const rest = readToken("--color-line-2", "#2a2a3a");
     const ctx = fitCanvas(canvas);
     if (!ctx) return;

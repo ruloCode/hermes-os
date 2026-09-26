@@ -79,7 +79,7 @@ function TurnAction({ children, onClick }: { children: string; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="cursor-pointer rounded-sm px-2 py-1 text-2xs text-text-faint transition-colors hover:bg-violet/8 hover:text-violet"
+      className="cursor-pointer rounded-sm px-2 py-1 text-2xs text-text-faint transition-colors hover:bg-accent/8 hover:text-accent"
     >
       {children}
     </button>
@@ -443,7 +443,7 @@ export function ChatPanel({
           aria-expanded={histOpen}
           onClick={() => void toggleHist()}
           className={`grid h-6 w-6 shrink-0 place-items-center rounded-sm transition-colors ${
-            histOpen ? "text-violet" : "text-text-dim"
+            histOpen ? "text-accent" : "text-text-dim"
           }`}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -467,7 +467,7 @@ export function ChatPanel({
                 title={t.title || "Conversación nueva"}
                 className={`group flex max-w-[160px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border px-2 py-1 text-2xs leading-none transition-colors ${
                   isActive
-                    ? "border-violet bg-violet/10 text-text"
+                    ? "border-accent bg-accent/10 text-text"
                     : "border-line bg-transparent text-text-dim"
                 }`}
               >
@@ -524,7 +524,7 @@ export function ChatPanel({
                     type="button"
                     onClick={() => void openSession(s.id)}
                     title={s.title}
-                    className="flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-violet/10"
+                    className="flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent/10"
                   >
                     <span className="min-w-0 flex-1 truncate text-xs text-text">
                       {s.title}
@@ -582,7 +582,7 @@ export function ChatPanel({
           if (m.role === "user") {
             return (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[78%] rounded-lg border border-line bg-violet/10 px-3.5 py-2.5 text-base leading-relaxed whitespace-pre-wrap">
+                <div className="max-w-[78%] rounded-lg border border-line bg-accent/10 px-3.5 py-2.5 text-base leading-relaxed whitespace-pre-wrap">
                   {m.content}
                 </div>
               </div>
@@ -593,7 +593,7 @@ export function ChatPanel({
           return (
             <div key={i} className="flex flex-col gap-2.5">
               <span className="text-2xs tracking-title text-text-faint uppercase">
-                <b className="font-normal text-violet">Hermes</b>
+                <b className="font-normal text-accent">Hermes</b>
               </span>
               {/* Pasos del turno ANTES del texto: el trabajo se ve mientras
                   ocurre y la respuesta aterriza debajo (patrón Replit). */}
@@ -679,7 +679,7 @@ export function ChatPanel({
           void send(active.key);
         }}
       >
-        <span className="pb-1 text-violet">
+        <span className="pb-1 text-accent">
           {active.busy ? "◌" : "›"}
         </span>
         <textarea
@@ -732,7 +732,7 @@ export function ChatPanel({
                 ? "bg-green/10 text-green"
                 : voice.connecting
                   ? "animate-pulse text-amber"
-                  : "text-violet"
+                  : "text-accent"
             }`}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -793,7 +793,7 @@ export function ChatPanel({
           title="Enviar (Enter)"
           aria-label="Enviar"
           disabled={active.busy || !active.draft.trim()}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-violet bg-violet/5 text-violet transition-opacity disabled:opacity-30"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-accent bg-accent/5 text-accent transition-opacity disabled:opacity-30"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
             <path

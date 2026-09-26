@@ -65,7 +65,7 @@ export function StatBlock({
         <div className="mt-1">
           <Sparkline
             data={spark}
-            tone={tone === "neutral" ? "violet" : tone}
+            tone={tone === "neutral" ? "accent" : tone}
             width={80}
             height={20}
             fill

@@ -79,7 +79,7 @@ export default function UiGallery() {
       <Panel title="BarMeter" tone="cyan" delay={40}>
         <div className="flex flex-col gap-2">
           <BarMeter value={23} label="CPU" />
-          <BarMeter value={45} label="RAM" tone="violet" />
+          <BarMeter value={45} label="RAM" tone="accent" />
           <BarMeter value={62} label="DISCO" thresholds={{ warn: 75, danger: 90 }} />
           <BarMeter value={88} label="ALERTA" thresholds={{ warn: 75, danger: 90 }} />
           <BarMeter value={62} label="CONTINUA" segments={0} />
@@ -118,13 +118,13 @@ export default function UiGallery() {
 
       <Panel title="StatBlock · DataRow" delay={120}>
         <div className="mb-3 flex flex-wrap items-end gap-5">
-          <StatBlock label="Costo hoy" value="$1.42" tone="violet" size="xl" spark={SPARK} />
+          <StatBlock label="Costo hoy" value="$1.42" tone="accent" size="xl" spark={SPARK} />
           <StatBlock label="Ejecuciones" value={23} size="lg" trend={{ dir: "up", label: "+4" }} />
           <StatBlock label="Tokens" value="1.2M" unit="tok" tone="cyan" />
         </div>
         <DataRow label="Rama" value="main" tone="cyan" />
         <DataRow label="Último commit" value="hace 2 horas" />
-        <DataRow label="Runs hoy" value={23} tone="violet" />
+        <DataRow label="Runs hoy" value={23} tone="accent" />
       </Panel>
 
       <Panel title="Pills · Badges" delay={160}>
@@ -141,7 +141,7 @@ export default function UiGallery() {
           <Badge tone="red" variant="solid">Alta</Badge>
           <Badge tone="amber" variant="solid">Media</Badge>
           <Badge tone="blue" variant="solid">Baja</Badge>
-          <Badge tone="violet">opus</Badge>
+          <Badge tone="accent">opus</Badge>
           <Badge tone="cyan">12 tareas</Badge>
           <Badge size="sm">neutral</Badge>
         </div>
@@ -235,7 +235,7 @@ const DEMO_LINES: { who: "TÚ" | "TUTOR"; text: string }[] = [
   { who: "TUTOR", text: "Excellent use of \"the most important\"! Let's push further: compare it with your previous approach using easier / harder — was it more cumbersome or more straightforward?" },
 ];
 
-// Vocab de mentira: pinta el subrayado violeta de "ya en el banco" en el
+// Vocab de mentira: pinta el subrayado de acento de "ya en el banco" en el
 // transcript ("prepositions") y la cola "repasa hoy" del LiveWordBank.
 const DEMO_VOCAB: VocabEntry[] = [
   {

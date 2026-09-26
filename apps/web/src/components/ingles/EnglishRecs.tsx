@@ -70,7 +70,7 @@ export function EnglishRecs({ sessions }: { sessions: EnglishSession[] }) {
                   onClick={() => void toTask(d)}
                   disabled={busy === d}
                   title="Crear tarea en Linear (proyecto Inglés)"
-                  className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-2xs tracking-label text-text-dim uppercase transition-colors hover:border-violet hover:text-violet disabled:opacity-40"
+                  className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-2xs tracking-label text-text-dim uppercase transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
                 >
                   {busy === d ? "…" : "→ tarea"}
                 </button>

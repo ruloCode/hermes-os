@@ -1,7 +1,7 @@
 "use client";
 
 // Vista MES: cuadrícula 7×6 estilo Google Calendar. Cada celda muestra el
-// número de día (círculo violeta si es hoy, atenuado si es de otro mes) y hasta
+// número de día (círculo acento si es hoy, atenuado si es de otro mes) y hasta
 // 3 chips de evento; el resto colapsa en "+N". Clic en un chip abre el detalle;
 // clic en el número de día salta a la vista Día.
 
@@ -114,7 +114,7 @@ export function MonthGrid({
                 <span
                   className={`grid h-5 min-w-5 place-items-center rounded-full px-1 text-2xs tabular-nums ${
                     today
-                      ? "bg-violet font-semibold text-bg"
+                      ? "bg-accent font-semibold text-bg"
                       : inMonth
                         ? "text-text"
                         : "text-text-faint"

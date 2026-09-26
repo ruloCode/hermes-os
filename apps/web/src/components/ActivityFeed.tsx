@@ -7,7 +7,7 @@ import { PanelState } from "@/components/ui/PanelState";
 // Icono + clase de color por tipo de evento (tokens del design system).
 const KIND_STYLE: Record<string, { icon: string; className: string }> = {
   task_start: { icon: "▶", className: "text-cyan" },
-  tool_call: { icon: "⚙", className: "text-violet" },
+  tool_call: { icon: "⚙", className: "text-accent" },
   tool_result: { icon: "↩", className: "text-text-dim" },
   text: { icon: "…", className: "text-text-dim" },
   task_done: { icon: "✓", className: "text-green" },

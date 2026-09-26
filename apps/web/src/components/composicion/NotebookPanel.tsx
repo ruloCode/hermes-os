@@ -13,8 +13,8 @@ import { useComposicion } from "./ComposicionContext";
 import { TEXT_TONE, btnCls, fmtRelative, ghostBtnCls, inputCls } from "./labels";
 import type { NotebookEntry } from "./types";
 
-const KIND: Record<NotebookEntry["kind"], { label: string; tone: "violet" | "cyan" | "amber" | "green" | "neutral"; glyph: string }> = {
-  verso: { label: "verso", tone: "violet", glyph: "❝" },
+const KIND: Record<NotebookEntry["kind"], { label: string; tone: "accent" | "cyan" | "amber" | "green" | "neutral"; glyph: string }> = {
+  verso: { label: "verso", tone: "accent", glyph: "❝" },
   frase: { label: "frase", tone: "cyan", glyph: "—" },
   tarareo: { label: "tarareo", tone: "amber", glyph: "♪" },
   titulo: { label: "título", tone: "green", glyph: "T" },
@@ -43,7 +43,7 @@ export function NotebookPanel() {
       >
         <div className="flex gap-1">
           {(Object.keys(KIND) as NotebookEntry["kind"][]).filter((k) => k !== "tarareo").map((k) => (
-            <button key={k} type="button" onClick={() => setKind(k)} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${kind === k ? "bg-violet/16 text-violet" : "text-text-dim hover:text-text"}`}>
+            <button key={k} type="button" onClick={() => setKind(k)} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${kind === k ? "bg-accent/16 text-accent" : "text-text-dim hover:text-text"}`}>
               {KIND[k].glyph} {KIND[k].label}
             </button>
           ))}
@@ -78,7 +78,7 @@ export function NotebookPanel() {
                 <div className="mt-1 flex items-center gap-2 text-2xs text-text-faint">
                   <Badge tone={k.tone} size="sm">{k.label}</Badge>
                   <span>{fmtRelative(n.at)}</span>
-                  {song && <span className="text-violet">→ {song.title}</span>}
+                  {song && <span className="text-accent">→ {song.title}</span>}
                 </div>
               </div>
               <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

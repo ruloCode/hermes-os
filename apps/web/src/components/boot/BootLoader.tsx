@@ -42,9 +42,9 @@ const CSS = `
 .hermes-boot {
   --bg: #06050e;
   --bg-panel: #0a0817;
-  --violet: #8b7cf8;
-  --violet-hot: #b7a8ff;
-  --violet-dim: #453a7d;
+  --accent: #8b7cf8;
+  --accent-hot: #b7a8ff;
+  --accent-dim: #453a7d;
   --node-blue: #5fb4f9;
   --alert: #ff3b5c;
   --ok: #3ef08a;
@@ -89,7 +89,7 @@ const CSS = `
 .hermes-boot .frame { position: absolute; inset: 14px; pointer-events: none; }
 .hermes-boot .frame i {
   position: absolute; width: 22px; height: 22px;
-  border: 1px solid var(--violet-dim);
+  border: 1px solid var(--accent-dim);
 }
 .hermes-boot .frame i:nth-child(1) { top: 0;    left: 0;   border-right: 0; border-bottom: 0; }
 .hermes-boot .frame i:nth-child(2) { top: 0;    right: 0;  border-left: 0;  border-bottom: 0; }
@@ -118,7 +118,7 @@ const CSS = `
   font-weight: 700; font-size: 15px; letter-spacing: .42em; color: #fff;
   text-shadow: 0 0 18px rgba(139,124,248,.9), 0 0 42px rgba(139,124,248,.45);
 }
-.hermes-boot .hud-top b span { color: var(--violet-hot); }
+.hermes-boot .hud-top b span { color: var(--accent-hot); }
 
 .hermes-boot canvas.net {
   width:  min(66vmin, 540px);
@@ -144,10 +144,10 @@ const CSS = `
 .hermes-boot .log .line .txt { color: var(--ink); }
 .hermes-boot .log .line .dots {
   flex: 1; min-width: 12px;
-  border-bottom: 1px dotted var(--violet-dim);
+  border-bottom: 1px dotted var(--accent-dim);
   transform: translateY(-3px);
 }
-.hermes-boot .log .line .st { color: var(--violet-hot); }
+.hermes-boot .log .line .st { color: var(--accent-hot); }
 .hermes-boot .log .line.ok .st { color: var(--ok); text-shadow: 0 0 10px rgba(62,240,138,.6); }
 @keyframes hb-rise { to { opacity: 1; transform: none; } }
 
@@ -166,8 +166,8 @@ const CSS = `
   border: 1px solid rgba(139,124,248,.12);
 }
 .hermes-boot .cells i.on {
-  background: var(--violet);
-  border-color: var(--violet-hot);
+  background: var(--accent);
+  border-color: var(--accent-hot);
   box-shadow: 0 0 8px rgba(139,124,248,.75);
 }
 .hermes-boot .cells i.head { animation: hb-blink .5s steps(2) infinite; }
@@ -180,7 +180,7 @@ const CSS = `
   text-shadow: 0 0 16px rgba(139,124,248,.8);
   min-width: 3.2ch; text-align: right;
 }
-.hermes-boot .pct small { font-size: 14px; color: var(--violet-hot); }
+.hermes-boot .pct small { font-size: 14px; color: var(--accent-hot); }
 
 .hermes-boot .status {
   grid-column: 1 / -1;
@@ -188,7 +188,7 @@ const CSS = `
   font-size: 9px; letter-spacing: .3em; text-transform: uppercase;
   color: var(--ink-dim);
 }
-.hermes-boot .status .state { color: var(--violet-hot); }
+.hermes-boot .status .state { color: var(--accent-hot); }
 .hermes-boot .stage.online .pct { color: var(--ok); text-shadow: 0 0 18px rgba(62,240,138,.8); }
 .hermes-boot .stage.online .status .state {
   color: var(--ok); text-shadow: 0 0 10px rgba(62,240,138,.6);
@@ -204,9 +204,9 @@ const CSS = `
 .hermes-boot.hermes-boot {
   --bg: var(--color-bg);
   --bg-panel: var(--color-panel);
-  --violet: var(--color-violet);
-  --violet-hot: var(--color-violet-hot);
-  --violet-dim: var(--color-line-2);
+  --accent: var(--color-accent);
+  --accent-hot: var(--color-accent-hot);
+  --accent-dim: var(--color-line-2);
   --node-blue: var(--color-blue);
   --alert: var(--color-red);
   --ok: var(--color-green);
@@ -219,14 +219,14 @@ const CSS = `
 .hermes-boot .grid-bg, .hermes-boot .vignette, .hermes-boot .scanlines, .hermes-boot .frame { display: none; }
 .hermes-boot .hud-top { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
 .hermes-boot .hud-top b { font-weight: 600; font-size: 15px; letter-spacing: 0; color: var(--ink); text-shadow: none; }
-.hermes-boot .hud-top b span { color: var(--violet); }
+.hermes-boot .hud-top b span { color: var(--accent); }
 .hermes-boot .log { font-size: 13px; letter-spacing: 0; }
 .hermes-boot .log .line .txt { color: var(--ink-dim); }
 .hermes-boot .log .line .dots { border-bottom-color: var(--color-line); }
 .hermes-boot .log .line .st { color: var(--ink-dim); }
 .hermes-boot .log .line.ok .st { color: var(--ok); text-shadow: none; }
 .hermes-boot .cells i { background: var(--color-line); border: 0; border-radius: 3px; height: 6px; }
-.hermes-boot .cells i.on { background: var(--violet); border: 0; box-shadow: none; }
+.hermes-boot .cells i.on { background: var(--accent); border: 0; box-shadow: none; }
 .hermes-boot .pct { color: var(--ink); text-shadow: none; font-family: var(--mono); font-weight: 600; font-size: 22px; letter-spacing: 0; }
 .hermes-boot .pct small { color: var(--ink-dim); font-size: 12px; }
 .hermes-boot .status { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
@@ -268,9 +268,9 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
       const n = parseInt(m[1], 16);
       return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
     };
-    const VIOLET = triplet("--color-violet", "217,119,87"),
+    const VIOLET = triplet("--color-accent", "217,119,87"),
       BLUE = triplet("--color-blue", "138,180,248"),
-      HOT = triplet("--color-violet-hot", "232,154,125"),
+      HOT = triplet("--color-accent-hot", "232,154,125"),
       OK = triplet("--color-green", "108,203,143"),
       INK = triplet("--color-text", "237,235,228");
 

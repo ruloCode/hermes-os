@@ -43,7 +43,7 @@ const FONT_MAX = 56;
 const FONT_KEY = "hermes.estudio.teleprompter.px";
 
 const btn =
-  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-violet disabled:opacity-35";
+  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent disabled:opacity-35";
 
 /** "0:07" — cronómetro del beat en curso. */
 function mmss(seconds: number): string {
@@ -280,7 +280,7 @@ function Teleprompter({
                   }`}
                 >
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="text-2xs tracking-label text-violet uppercase">
+                    <span className="text-2xs tracking-label text-accent uppercase">
                       {beat.kind === "hook" ? "✦ Hook" : (beat.heading ?? beat.label)}
                     </span>
                     {beat.heading && beat.time && (
@@ -314,7 +314,7 @@ function Teleprompter({
                           así el checklist de Tomas lo encuentra en el disco. */}
                       <p className="text-2xs text-text-faint">
                         Archivo:{" "}
-                        <span className="font-mono text-violet">{takeStem(i, beat.label)}</span>
+                        <span className="font-mono text-accent">{takeStem(i, beat.label)}</span>
                       </p>
                       {(() => {
                         // Estado real de la voz en off de ESTE bloque (disco).

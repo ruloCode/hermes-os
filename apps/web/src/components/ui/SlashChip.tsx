@@ -3,7 +3,7 @@
 /**
  * Chip de slash-command bajo el input de la consola. Muestra el comando
  * tal cual (p. ej. "/resumen diario"); al pasar el mouse o estar activo
- * se enciende en violeta con un glow suave.
+ * se enciende en el acento con un glow suave.
  */
 export function SlashChip({
   command,
@@ -18,13 +18,13 @@ export function SlashChip({
   active?: boolean;
   disabled?: boolean;
 }) {
-  // El glow en hover va como arbitrary property (glow-box-violet es una
+  // El glow en hover va como arbitrary property (glow-box-accent es una
   // clase CSS plana, no una utility, y no admite el variant hover:).
   const state = disabled
     ? "cursor-not-allowed border-line text-text-dim opacity-40"
     : active
-      ? "border-violet text-violet glow-box-violet"
-      : "border-line text-text-dim hover:border-violet hover:text-violet hover:[box-shadow:0_0_12px_color-mix(in_srgb,var(--color-violet)_25%,transparent)]";
+      ? "border-accent text-accent glow-box-accent"
+      : "border-line text-text-dim hover:border-accent hover:text-accent hover:[box-shadow:0_0_12px_color-mix(in_srgb,var(--color-accent)_25%,transparent)]";
 
   return (
     <button

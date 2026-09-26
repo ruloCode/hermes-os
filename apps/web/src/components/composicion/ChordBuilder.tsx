@@ -134,7 +134,7 @@ export function ChordBuilder({ song }: { song: Song }) {
             key={s.id}
             onClick={() => setSectionId(s.id)}
             className={`rounded-sm border px-2 py-1 text-2xs tracking-label uppercase ${
-              s.id === section.id ? "border-violet bg-violet/16 text-violet" : "border-line text-text-dim hover:text-text"
+              s.id === section.id ? "border-accent bg-accent/16 text-accent" : "border-line text-text-dim hover:text-text"
             }`}
           >
             {s.label}
@@ -207,7 +207,7 @@ export function ChordBuilder({ song }: { song: Song }) {
         <span className="text-2xs tracking-label text-text-dim uppercase">Paleta · clic agrega y suena</span>
         <div className="flex flex-wrap gap-1">
           {dia.map((d) => (
-            <button key={d.degree} onClick={() => add(d.chord)} className="flex items-center gap-1.5 rounded-sm border border-line bg-panel-2 px-2 py-1 hover:border-violet">
+            <button key={d.degree} onClick={() => add(d.chord)} className="flex items-center gap-1.5 rounded-sm border border-line bg-panel-2 px-2 py-1 hover:border-accent">
               <span className="font-mono text-xs text-text">{chordSymbol(d.chord, key, notation)}</span>
               <span className="font-mono text-2xs text-text-dim">{d.roman}</span>
             </button>
@@ -238,14 +238,14 @@ export function ChordBuilder({ song }: { song: Song }) {
           {PROGRESSION_PRESETS.filter((p) => p.mode === "any" || p.mode === key.mode).map((p) => {
             const resolved = p.romans.map((r) => chordFromRoman(r, key)).filter((c): c is Chord => Boolean(c));
             return (
-              <button key={p.id} onClick={() => applyPreset(p.romans)} className="flex flex-col gap-0.5 rounded-sm border border-line px-2 py-1.5 text-left hover:border-violet">
+              <button key={p.id} onClick={() => applyPreset(p.romans)} className="flex flex-col gap-0.5 rounded-sm border border-line px-2 py-1.5 text-left hover:border-accent">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs text-text">{p.name}</span>
                   <span className="font-mono text-2xs text-text-dim">{p.romans.join("–")}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-2xs text-text-faint">{p.feel}</span>
-                  <span className="font-mono text-2xs text-violet">{resolved.map((c) => chordSymbol(c, key, notation)).join(" ")}</span>
+                  <span className="font-mono text-2xs text-accent">{resolved.map((c) => chordSymbol(c, key, notation)).join(" ")}</span>
                 </div>
               </button>
             );

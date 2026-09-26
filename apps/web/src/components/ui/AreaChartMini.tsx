@@ -18,7 +18,7 @@ const fmt = (n: number): number => Math.round(n * 100) / 100;
 export function AreaChartMini({
   data,
   height = 64,
-  tone = "violet",
+  tone = "accent",
   grid = true,
   highlightLast = true,
   labels,

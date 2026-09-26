@@ -45,7 +45,8 @@ import { btnCls, inputCls, selectCls } from "./styles";
 interface VoiceRow {
   stem: string;
   label: string;
-  say: string | null;
+  /** TODAS las frases del bloque: quedarse con la primera cortaba el guion. */
+  say: string[];
   cues: string[];
   seconds: number | null;
   free: boolean;
@@ -108,7 +109,7 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
     const planned = beats.map((beat, i) => ({
       stem: takeStem(i, beat.label),
       label: beat.heading ?? beat.label,
-      say: beat.say[0] ?? null,
+      say: beat.say,
       cues: beat.cues,
       seconds: beatSeconds(beat),
       free: false,
@@ -119,7 +120,7 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
       const base = f.stem.toLowerCase().replace(/-vo(-\d+)?$/, "");
       if (base === f.stem.toLowerCase()) continue; // no es voz en off
       if (known.has(base) || free.some((r) => r.stem === base)) continue;
-      free.push({ stem: base, label: base, say: null, cues: [], seconds: null, free: true });
+      free.push({ stem: base, label: base, say: [], cues: [], seconds: null, free: true });
     }
     return [...planned, ...free];
   }, [beats, assets]);
@@ -245,14 +246,14 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
           <button
             onClick={() => setCountdownOn(!countdownOn)}
             title="Cuenta regresiva de 3 antes de grabar"
-            className={`${btnCls} ${countdownOn ? "border-violet text-violet" : ""}`}
+            className={`${btnCls} ${countdownOn ? "border-accent text-accent" : ""}`}
           >
             3·2·1
           </button>
           <button
             onClick={() => setAutoNext(!autoNext)}
             title="Al guardar, saltar al siguiente bloque"
-            className={`${btnCls} ${autoNext ? "border-violet text-violet" : ""}`}
+            className={`${btnCls} ${autoNext ? "border-accent text-accent" : ""}`}
           >
             ↓ Auto
           </button>
@@ -292,7 +293,7 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
                   key={row.stem}
                   onClick={() => setSelected(row.stem)}
                   className={`flex items-center gap-2 rounded-sm border px-2 py-1.5 text-left ${
-                    active ? "border-violet bg-violet/5" : "border-line hover:border-line-2"
+                    active ? "border-accent bg-accent/5" : "border-line hover:border-line-2"
                   }`}
                 >
                   <span
@@ -314,7 +315,7 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
               );
             })}
             {adding ? (
-              <div className="flex flex-col gap-1 rounded-sm border border-violet/40 p-1.5">
+              <div className="flex flex-col gap-1 rounded-sm border border-accent/40 p-1.5">
                 <input
                   autoFocus
                   value={freeName}
@@ -341,7 +342,7 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
           {current && (
             <div className="flex min-w-0 flex-col gap-3 rounded-sm border border-line px-3 py-3">
               <div className="flex flex-wrap items-baseline gap-2">
-                <span className="font-mono text-2xs text-violet">{current.stem}</span>
+                <span className="font-mono text-2xs text-accent">{current.stem}</span>
                 {current.seconds != null && (
                   <span className="text-2xs text-text-faint tabular-nums">
                     ~{current.seconds}s
@@ -352,14 +353,20 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
                 )}
               </div>
 
-              {/* Lo que se lee: es el héroe de la pantalla (patrón Meta AI). */}
-              <p className="font-display text-lg leading-snug text-text">
-                {current.say ?? (
-                  <span className="text-sm text-text-faint">
-                    Bloque sin frase escrita — narra lo que corresponda o escríbelo en el guion.
-                  </span>
-                )}
-              </p>
+              {/* Lo que se lee: es el héroe de la pantalla (patrón Meta AI).
+                  Una frase por párrafo, como el teleprompter: un bloque puede
+                  traer varias y cortarlas dejaba al dueño leyendo a medias. */}
+              {current.say.length ? (
+                current.say.map((line, i) => (
+                  <p key={i} className="font-display text-lg leading-snug text-text">
+                    {line}
+                  </p>
+                ))
+              ) : (
+                <p className="text-sm text-text-faint">
+                  Bloque sin frase escrita — narra lo que corresponda o escríbelo en el guion.
+                </p>
+              )}
               {current.cues.map((c) => (
                 <p key={c} className="text-2xs leading-snug text-cyan">
                   ▸ {c}
@@ -617,12 +624,12 @@ function TakeRow({
   return (
     <div
       className={`flex items-center gap-2 rounded-sm border px-2 py-1.5 ${
-        active ? "border-violet/40 bg-violet/5" : "border-line"
+        active ? "border-accent/40 bg-accent/5" : "border-line"
       }`}
     >
       <button
         onClick={() => void play()}
-        className="shrink-0 text-sm text-violet hover:text-violet-hot"
+        className="shrink-0 text-sm text-accent hover:text-accent-hot"
         aria-label={`Reproducir ${file.name}`}
       >
         {loading ? "◌" : player.playing ? "❚❚" : "▶"}
@@ -638,11 +645,11 @@ function TakeRow({
         {fmtSeconds(file.duration_sec)} · {fmtBytes(file.size_bytes)}
       </span>
       {active ? (
-        <span className="shrink-0 text-2xs tracking-label text-violet uppercase">manda</span>
+        <span className="shrink-0 text-2xs tracking-label text-accent uppercase">manda</span>
       ) : (
         <button
           onClick={onPromote}
-          className="shrink-0 text-2xs text-text-faint hover:text-violet"
+          className="shrink-0 text-2xs text-text-faint hover:text-accent"
           title="Usar esta toma (pasa a ser la última)"
         >
           ▲ usar

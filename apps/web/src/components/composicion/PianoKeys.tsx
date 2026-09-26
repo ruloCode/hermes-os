@@ -17,7 +17,7 @@ export function PianoKeys({
   scale = [],
   active = [],
   octaves = 2,
-  tone = "violet",
+  tone = "accent",
   notation = "en",
   onPlay,
   height = 64,

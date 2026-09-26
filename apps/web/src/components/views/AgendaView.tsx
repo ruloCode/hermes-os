@@ -83,7 +83,9 @@ export function AgendaView() {
     <span className="flex items-center gap-2 text-2xs text-text-faint">
       {calendar.stale && <span className="text-amber">cache</span>}
       {calendar.fetchedAt && (
-        <span className="tabular-nums">act. {FETCHED_FMT.format(new Date(calendar.fetchedAt))}</span>
+        <span className="tabular-nums">
+          act. {FETCHED_FMT.format(new Date(calendar.fetchedAt))}
+        </span>
       )}
       <button
         type="button"
@@ -179,34 +181,35 @@ function AgendaSplit({ events, nowMs }: { events: CalendarEvent[]; nowMs: number
   }, [upcoming]);
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 overflow-hidden max-lg:auto-rows-min max-lg:overflow-y-auto">
-      <Panel
-        title={`Próximos · ${upcoming.length}`}
-        delay={40}
-        padding="sm"
-        className="col-span-12 min-h-0 lg:col-span-5 max-lg:min-h-[420px]"
-      >
-        {upcoming.length === 0 ? (
-          <PanelState kind="empty" title="Sin eventos próximos" hint="Nada en el calendario." />
-        ) : (
-          <ScrollArea className="h-full pr-1">
-            <AgendaList
-              groups={groups}
-              selectedId={selectedId}
-              nowMs={nowMs}
-              onSelect={setSelectedId}
-            />
-          </ScrollArea>
-        )}
-      </Panel>
-      <Panel
-        title="Detalle del evento"
-        delay={80}
-        scroll
-        className="col-span-12 min-h-0 lg:col-span-7 max-lg:min-h-[360px]"
-      >
-        <AgendaDetail event={selected} nowMs={nowMs} />
-      </Panel>
+    <div className="grid min-h-0 flex-1 grid-cols-12 gap-x-6 gap-y-3 overflow-hidden max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
+      {/* LISTA: caja, porque aquí se elige. */}
+      <section className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-md border border-line bg-panel max-lg:min-h-[420px] lg:col-span-5">
+        <h3 className="shrink-0 border-b border-line px-3 py-2.5 text-xs font-medium text-text-dim">
+          Próximos · {upcoming.length}
+        </h3>
+        <div className="min-h-0 flex-1 p-2">
+          {upcoming.length === 0 ? (
+            <PanelState kind="empty" title="Sin eventos próximos" hint="Nada en el calendario." />
+          ) : (
+            <ScrollArea className="h-full pr-1">
+              <AgendaList
+                groups={groups}
+                selectedId={selectedId}
+                nowMs={nowMs}
+                onSelect={setSelectedId}
+              />
+            </ScrollArea>
+          )}
+        </div>
+      </section>
+
+      {/* PIEZA: sin marco, se lee. */}
+      <div className="col-span-12 flex min-h-0 flex-col border-line max-lg:min-h-[360px] lg:col-span-7 lg:border-l lg:pl-6">
+        <span className="mb-2.5 shrink-0 text-2xs text-text-faint">Detalle del evento</span>
+        <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
+          <AgendaDetail event={selected} nowMs={nowMs} />
+        </ScrollArea>
+      </div>
     </div>
   );
 }

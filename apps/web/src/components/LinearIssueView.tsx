@@ -25,7 +25,7 @@ import { PriorityIcon } from "@/components/LinearBoard";
 
 const STATE_TONE = {
   backlog: "neutral",
-  unstarted: "violet",
+  unstarted: "accent",
   started: "cyan",
   completed: "green",
   canceled: "neutral",
@@ -205,7 +205,7 @@ export function LinearIssueView({
             {/* Copy prompt */}
             <div className="mt-4 rounded-sm border border-line bg-panel-2">
               <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
-                <span className="text-2xs font-semibold tracking-label text-violet uppercase">
+                <span className="text-2xs font-semibold tracking-label text-accent uppercase">
                   ⚡ Copy prompt
                 </span>
                 {issue.copyPrompt && (
@@ -247,7 +247,7 @@ export function LinearIssueView({
                         onClick={() => setOpenExec(openExec === e.id ? null : e.id)}
                         className={`flex w-full items-center gap-2 rounded-sm border px-2 py-1.5 text-left transition-colors ${
                           openExec === e.id
-                            ? "border-violet bg-violet/10"
+                            ? "border-accent bg-accent/10"
                             : "border-line bg-panel-2 hover:border-line-2"
                         }`}
                       >
@@ -317,7 +317,7 @@ export function LinearIssueView({
               </PropRow>
               {issue.copyPrompt && (
                 <PropRow label="Prompt">
-                  <span className="text-violet">⚡ listo</span>
+                  <span className="text-accent">⚡ listo</span>
                 </PropRow>
               )}
             </dl>

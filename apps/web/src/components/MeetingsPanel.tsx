@@ -337,7 +337,7 @@ export function MeetingsPanel({
           </p>
         )}
         {busy && (
-          <p className="text-2xs tracking-label text-violet pulse-dot">
+          <p className="text-2xs tracking-label text-accent pulse-dot">
             ◈ Transcribiendo y resumiendo la reunión…
           </p>
         )}
@@ -371,7 +371,7 @@ export function MeetingsPanel({
                 key={m.id}
                 type="button"
                 onClick={() => setSelected(m.id)}
-                className="flex w-full items-center justify-between gap-2 rounded-sm border border-line bg-violet/5 px-2.5 py-2 text-left transition-colors hover:border-violet"
+                className="flex w-full items-center justify-between gap-2 rounded-sm border border-line bg-accent/5 px-2.5 py-2 text-left transition-colors hover:border-accent"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs text-text">
@@ -381,7 +381,7 @@ export function MeetingsPanel({
                     {m.fecha.slice(0, 10)} · {m.accionables_count} accionables
                   </span>
                 </span>
-                <span className="text-2xs text-violet">
+                <span className="text-2xs text-accent">
                   →
                 </span>
               </button>

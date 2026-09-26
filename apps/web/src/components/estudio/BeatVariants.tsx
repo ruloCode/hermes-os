@@ -84,7 +84,7 @@ export function BeatVariants({
         <button
           onClick={() => setOpen(!open)}
           className={`text-2xs tracking-label uppercase ${
-            open || list.length ? "text-violet" : "text-text-faint hover:text-text-dim"
+            open || list.length ? "text-accent" : "text-text-faint hover:text-text-dim"
           }`}
         >
           {open ? "▴" : "▾"} Versiones{list.length ? ` · ${list.length}` : ""}
@@ -93,7 +93,7 @@ export function BeatVariants({
           onClick={() => void generate()}
           disabled={generating}
           title="Hermes genera 3-5 versiones con ángulos distintos (se agregan, nada se pisa)"
-          className="text-2xs tracking-label text-text-faint uppercase hover:text-violet disabled:opacity-50"
+          className="text-2xs tracking-label text-text-faint uppercase hover:text-accent disabled:opacity-50"
         >
           {generating ? "◌ generando…" : "✦ generar"}
         </button>
@@ -130,7 +130,7 @@ export function BeatVariants({
                     onClick={() => void apply(v)}
                     disabled={dirty}
                     title={dirty ? "Guarda el guion primero (⌘S)" : "Reescribir el guion con esta versión"}
-                    className="shrink-0 rounded-xs border border-line-2 px-1.5 py-0.5 text-2xs tracking-label text-text-dim uppercase hover:border-violet hover:text-violet disabled:opacity-35"
+                    className="shrink-0 rounded-xs border border-line-2 px-1.5 py-0.5 text-2xs tracking-label text-text-dim uppercase hover:border-accent hover:text-accent disabled:opacity-35"
                   >
                     Usar
                   </button>
@@ -155,7 +155,7 @@ export function BeatVariants({
             onChange={(e) => setManual(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void addManual()}
             placeholder="+ escribe tu versión (Enter guarda al pool)"
-            className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-violet focus:outline-none"
+            className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
           />
         </div>
       )}

@@ -24,7 +24,7 @@ export function Panel({
   className = "",
   delay = 0,
   variant = "default",
-  tone = "violet",
+  tone = "accent",
   padding = "md",
   scroll = false,
 }: {

@@ -30,7 +30,7 @@ export function VoicePanel() {
     ? "N/A"
     : connected
       ? action
-        ? "EJECUTANDO"
+        ? "Ejecutando"
         : isSpeaking
           ? "HABLANDO"
           : "ESCUCHANDO"
@@ -43,7 +43,7 @@ export function VoicePanel() {
       ? action
         ? "text-cyan"
         : isSpeaking
-          ? "text-violet-hot"
+          ? "text-accent-hot"
           : "text-green"
       : connecting
         ? "text-amber"
@@ -79,7 +79,7 @@ export function VoicePanel() {
           ) : transcript.length ? (
             transcript.map((l, i) => (
               <div key={i} className="flex gap-1.5">
-                <b className={`shrink-0 ${l.who === "TÚ" ? "text-cyan" : "text-violet"}`}>
+                <b className={`shrink-0 ${l.who === "TÚ" ? "text-cyan" : "text-accent"}`}>
                   {l.who}
                 </b>
                 <span className="text-text">{l.text}</span>

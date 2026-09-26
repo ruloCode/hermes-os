@@ -15,7 +15,7 @@ import { pieceBeats, recordedCount } from "@/lib/script-beats";
 import { PILLARS, STATUSES, STATUS_ORDER, fmtDays, fmtPublish } from "./labels";
 
 const btnCls =
-  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-violet";
+  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent";
 
 export function EstudioRail() {
   const { board, patchSession, createSession, buildBatch, setSelectedId, setRecording } =
@@ -66,7 +66,7 @@ export function EstudioRail() {
   return (
     <>
       {listas.length > 0 && (
-        <Panel title="Listas para grabar" delay={100} tone="violet" className="shrink-0">
+        <Panel title="Listas para grabar" delay={100} tone="accent" className="shrink-0">
           <div className="flex flex-col">
             {listas.map((p) => (
               <button
@@ -109,13 +109,13 @@ export function EstudioRail() {
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               placeholder="Batch #N"
-              className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-violet focus:outline-none"
+              className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
             />
             <input
               type="datetime-local"
               value={newAt}
               onChange={(e) => setNewAt(e.target.value)}
-              className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text tabular-nums focus:border-violet focus:outline-none"
+              className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text tabular-nums focus:border-accent focus:outline-none"
               aria-label="Fecha de la sesión"
             />
             <button

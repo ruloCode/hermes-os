@@ -173,7 +173,7 @@ export function MeetingDetail({
                   onClick={() => void bulkToLinear()}
                   disabled={bulkBusy || busy !== null}
                   title="Crear TODOS los accionables sin triar como issues de Linear (pendientes)"
-                  className="rounded-sm border border-violet px-2 py-0.5 text-2xs tracking-label text-violet uppercase opacity-90 transition-opacity hover:opacity-100 disabled:opacity-40"
+                  className="rounded-sm border border-accent px-2 py-0.5 text-2xs tracking-label text-accent uppercase opacity-90 transition-opacity hover:opacity-100 disabled:opacity-40"
                 >
                   {bulkBusy ? "Creando…" : "◫ Todos a Linear"}
                 </button>
@@ -184,9 +184,9 @@ export function MeetingDetail({
               {meeting.actionables.map((a) => (
                 <div
                   key={a.id}
-                  className="rounded-sm border border-line bg-violet/5 p-2.5"
+                  className="rounded-sm border border-line bg-accent/5 p-2.5"
                 >
-                  <p className="text-sm font-medium text-violet-hot">
+                  <p className="text-sm font-medium text-accent-hot">
                     {a.title}
                   </p>
                   {a.one_liner && (
@@ -207,7 +207,7 @@ export function MeetingDetail({
                       />
                       <TriageBtn
                         label={busy === a.idx ? "…" : "◫ Crear en Linear"}
-                        tone="border-violet text-violet"
+                        tone="border-accent text-accent"
                         disabled={busy !== null || bulkBusy}
                         title="Crea el issue en Linear (pendiente) con el Copy prompt listo"
                         onClick={() => void triage(a, "pendiente")}
@@ -342,7 +342,7 @@ function Section({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-2xs tracking-title text-violet uppercase">▸ {title}</span>
+        <span className="text-2xs tracking-title text-accent uppercase">▸ {title}</span>
         {right}
       </div>
       {children}
@@ -370,7 +370,7 @@ function TriageBtn({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`rounded-sm border bg-violet/5 px-2 py-1 text-2xs tracking-label uppercase opacity-90 transition-opacity hover:opacity-100 disabled:opacity-40 ${tone}`}
+      className={`rounded-sm border bg-accent/5 px-2 py-1 text-2xs tracking-label uppercase opacity-90 transition-opacity hover:opacity-100 disabled:opacity-40 ${tone}`}
     >
       {label}
     </button>

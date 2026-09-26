@@ -124,7 +124,7 @@ export function WeekTimeline({
                   )}
                   <span
                     className={`grid h-5 min-w-5 place-items-center rounded-full px-1 text-2xs tabular-nums ${
-                      today ? "bg-violet font-semibold text-bg" : "text-text"
+                      today ? "bg-accent font-semibold text-bg" : "text-text"
                     }`}
                   >
                     {day.getDate()}

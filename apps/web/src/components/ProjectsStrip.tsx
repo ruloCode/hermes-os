@@ -18,7 +18,7 @@ function plainLine(md: string): string {
 
 // Fila clickable de un proyecto: nombre + pill de estado y descripción
 // (estado_actual del frontmatter) truncada a una línea. El seleccionado
-// lleva borde izquierdo violet + fondo violet/5.
+// lleva borde izquierdo accent + fondo accent/5.
 function ProjectRow({
   project,
   selected,
@@ -37,7 +37,7 @@ function ProjectRow({
       title={selected ? "Quitar foco" : `Enfocar la consola en ${project.name}`}
       className={`block w-full border-l-2 px-2 py-1 text-left transition-colors ${
         selected
-          ? "border-violet bg-violet/5"
+          ? "border-accent bg-accent/5"
           : "border-transparent hover:bg-panel-2"
       }`}
     >
@@ -93,7 +93,7 @@ export function ProjectsStrip({
           <button
             type="button"
             onClick={onNew}
-            className="text-2xs tracking-label uppercase text-text-dim transition-colors hover:text-violet"
+            className="text-2xs tracking-label uppercase text-text-dim transition-colors hover:text-accent"
           >
             + nuevo
           </button>

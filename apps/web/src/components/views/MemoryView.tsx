@@ -19,7 +19,7 @@ import { CodeGraph3D } from "@/components/CodeGraph3D";
 import type { Tone } from "@/components/ui/tones";
 
 const SOURCE_META: Record<KnowledgeSource, { label: string; tone: Tone }> = {
-  memory: { label: "memoria", tone: "violet" },
+  memory: { label: "memoria", tone: "accent" },
   meeting: { label: "reunión", tone: "cyan" },
   execution: { label: "ejecución", tone: "blue" },
   conversation: { label: "chat", tone: "amber" },
@@ -86,7 +86,7 @@ export function MemoryView({ memories, online }: { memories: Memory[]; online: b
             onClick={() => setMode(id)}
             className={`border px-3 py-1 text-2xs tracking-label uppercase transition-colors ${
               mode === id
-                ? "border-violet text-violet"
+                ? "border-accent text-accent"
                 : "border-line text-text-dim hover:border-line-2 hover:text-text"
             }`}
           >
@@ -122,7 +122,7 @@ export function MemoryView({ memories, online }: { memories: Memory[]; online: b
             />
             <button
               type="submit"
-              className="border border-line px-3 text-2xs tracking-label text-text-dim uppercase transition-colors hover:border-violet hover:text-violet"
+              className="border border-line px-3 text-2xs tracking-label text-text-dim uppercase transition-colors hover:border-accent hover:text-accent"
             >
               {searching ? "···" : "Buscar"}
             </button>
@@ -131,7 +131,7 @@ export function MemoryView({ memories, online }: { memories: Memory[]; online: b
           {/* Conteos reales por fuente */}
           {stats?.available && (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Badge tone="violet">{stats.memories} memorias</Badge>
+              <Badge tone="accent">{stats.memories} memorias</Badge>
               <Badge tone="green">{stats.vaultDocs} notas vault</Badge>
               <Badge tone="cyan">{stats.meetings} reuniones</Badge>
               <Badge tone="blue">{stats.executions} ejecuciones</Badge>
@@ -149,7 +149,7 @@ export function MemoryView({ memories, online }: { memories: Memory[]; online: b
             {hits === null ? (
               <>
                 <div className="mb-2">
-                  <SectionTitle tone="violet">Memorias recientes</SectionTitle>
+                  <SectionTitle tone="accent">Memorias recientes</SectionTitle>
                 </div>
                 {online ? (
                   <RecentInsights memories={memories} />

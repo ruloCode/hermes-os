@@ -36,9 +36,9 @@ const KINDS: { id: ContentRef["kind"]; label: string; hint: string }[] = [
 ];
 
 const inputCls =
-  "rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-violet focus:outline-none";
+  "rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
 const btnCls =
-  "rounded-sm border border-line-2 bg-panel-2 px-2 py-0.5 text-2xs tracking-label text-text-dim uppercase hover:border-violet hover:text-text";
+  "rounded-sm border border-line-2 bg-panel-2 px-2 py-0.5 text-2xs tracking-label text-text-dim uppercase hover:border-accent hover:text-text";
 
 /** "23 jul" en hora de Bogotá — cuándo entró la referencia al radar. */
 function fmtCaptured(iso: string): string {
@@ -90,7 +90,7 @@ export function EstudioRadar() {
               onClick={() => setKind(k.id)}
               title={k.hint}
               className={`flex-1 rounded-xs px-2 py-1 text-2xs tracking-label uppercase ${
-                kind === k.id ? "bg-violet/16 text-violet" : "text-text-faint hover:text-text-dim"
+                kind === k.id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
               }`}
             >
               {k.label} <span className="tabular-nums">{n}</span>
@@ -133,7 +133,7 @@ export function EstudioRadar() {
           <button
             onClick={() => void submit()}
             disabled={!draft.trim() || saving}
-            className={`${btnCls} border-violet text-violet disabled:opacity-40`}
+            className={`${btnCls} border-accent text-accent disabled:opacity-40`}
           >
             {saving ? "guardando…" : "＋ Guardar"}
           </button>
@@ -196,7 +196,7 @@ function RefCard({
   return (
     <div
       className={`min-w-0 rounded-sm border transition-colors ${
-        open ? "col-span-2 border-violet/40 bg-panel-2/40" : "border-line hover:border-line-2"
+        open ? "col-span-2 border-accent/40 bg-panel-2/40" : "border-line hover:border-line-2"
       }`}
     >
       <button onClick={onToggle} className="block w-full text-left" aria-expanded={open}>
@@ -258,7 +258,7 @@ function RefCard({
             <span className="shrink-0">· {fmtCaptured(r.created_at)}</span>
             <span className="flex-1" />
             {derived.length > 0 && (
-              <span className="shrink-0 text-violet tabular-nums" title="Piezas creadas desde aquí">
+              <span className="shrink-0 text-accent tabular-nums" title="Piezas creadas desde aquí">
                 ✦{derived.length}
               </span>
             )}
@@ -369,7 +369,7 @@ function RefDetail({
             />
           </div>
           <div className="flex gap-1.5">
-            <button onClick={() => void saveEdit()} className={`${btnCls} border-violet text-violet`}>
+            <button onClick={() => void saveEdit()} className={`${btnCls} border-accent text-accent`}>
               Guardar
             </button>
             <button onClick={() => setEditing(false)} className={btnCls}>
@@ -442,7 +442,7 @@ function RefDetail({
         <button
           onClick={() => void createFromRef()}
           disabled={creating}
-          className={`${btnCls} border-violet text-violet`}
+          className={`${btnCls} border-accent text-accent`}
         >
           {creating ? "creando…" : "✦ Crear pieza"}
         </button>
@@ -498,7 +498,7 @@ function HooksConDatos({ onSelectPiece }: { onSelectPiece: (id: number) => void 
           >
             <span className="min-w-0 flex-1 truncate text-xs text-text-dim">«{h.hook}»</span>
             {h.hook_kind && (
-              <Badge tone="violet" variant="solid" size="sm">
+              <Badge tone="accent" variant="solid" size="sm">
                 {h.hook_kind}
               </Badge>
             )}

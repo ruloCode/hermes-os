@@ -70,7 +70,7 @@ export function ClaudeExecBar({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex items-center gap-1.5 text-2xs tracking-[0.18em] text-violet uppercase"
+          className="flex items-center gap-1.5 text-2xs tracking-[0.18em] text-accent uppercase"
           title="Configurar cómo se ejecuta en Claude Code"
         >
           <span>⚡ Claude Code</span>
@@ -96,7 +96,7 @@ export function ClaudeExecBar({
             disabled={disabled}
             onClick={() => onRun("embedded")}
             title="Ejecutar aquí, en el panel embebido"
-            className="rounded-sm bg-violet/15 px-2 py-1 text-2xs tracking-[0.15em] text-violet-hot uppercase transition-colors disabled:opacity-40"
+            className="rounded-sm bg-accent/15 px-2 py-1 text-2xs tracking-[0.15em] text-accent-hot uppercase transition-colors disabled:opacity-40"
           >
             ▣ Panel
           </button>

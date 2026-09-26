@@ -7,7 +7,7 @@ import { readToken } from "@/components/ui/tones";
 /**
  * VoiceWaveform — espectro REAL de la llamada de voz (frecuencias del SDK de
  * ElevenLabs). Una sola implementación compartida por el panel lateral, la
- * vista Voz y el header: dibuja la SALIDA (violeta) cuando habla Hermes y la
+ * vista Voz y el header: dibuja la SALIDA (el acento) cuando habla Hermes y la
  * ENTRADA (cian) cuando escucha. En reposo (sin llamada) queda una línea
  * plana y tenue, sin rAF corriendo. Vive DENTRO del <ConversationProvider>.
  */
@@ -78,7 +78,7 @@ export function VoiceWaveform({
     }
 
     // Llamada activa: frecuencias reales del SDK a 60fps.
-    const violet = readToken("--color-violet-hot", "#c4b5fd");
+    const accent = readToken("--color-accent-hot", "#e89a7d");
     const cyan = readToken("--color-cyan", "#67e8f9");
     const faint = readToken("--color-text-faint", "#6b74a8");
     let raf = 0;
@@ -88,7 +88,7 @@ export function VoiceWaveform({
         ? getOutputByteFrequencyData()
         : getInputByteFrequencyData();
       if (data && data.length) {
-        drawBars(speakingRef.current ? violet : cyan, (t) => {
+        drawBars(speakingRef.current ? accent : cyan, (t) => {
           const idx = Math.min(data.length - 1, Math.floor(t * data.length));
           return data[idx] / 255;
         });

@@ -48,7 +48,7 @@ export function SessionList({
             onClick={() => onSelect(s.id)}
             aria-current={active ? "true" : undefined}
             className={`rounded-sm border px-2 py-1.5 text-left transition-colors ${
-              active ? "border-violet bg-violet/10" : "border-line hover:bg-panel-2"
+              active ? "border-accent bg-accent/10" : "border-line hover:bg-panel-2"
             }`}
           >
             <div className="flex items-baseline justify-between gap-2">

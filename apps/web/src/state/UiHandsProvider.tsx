@@ -232,7 +232,7 @@ export function UiHandsProvider({ children }: { children: ReactNode }) {
       <div
         ref={ringRef}
         aria-hidden
-        className="pointer-events-none fixed z-[190] rounded-md border-2 border-violet/80 opacity-0 shadow-[0_0_14px_rgba(139,92,246,0.35)]"
+        className="pointer-events-none fixed z-[190] rounded-md border-2 border-accent/80 opacity-0 shadow-[0_0_14px_rgba(139,92,246,0.35)]"
         style={{
           transition:
             "left 130ms ease-out, top 130ms ease-out, width 130ms ease-out, height 130ms ease-out, opacity 150ms",

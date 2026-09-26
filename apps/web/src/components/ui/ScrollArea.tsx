@@ -15,7 +15,7 @@ const MASKS: Record<"y" | "x", string> = {
  * El mask-image desvanece el contenido en los extremos del eje de scroll
  * como pista de "hay más"; `fade="none"` lo desactiva.
  *
- * `rail` dibuja un scrollbar PROPIO (hairline + pulgar violeta con auto-hide).
+ * `rail` dibuja un scrollbar PROPIO (hairline + pulgar de acento con auto-hide).
  * No es capricho: desde Chrome 121 la propiedad estándar `scrollbar-width`
  * ANULA los ::-webkit-scrollbar, así que el híbrido no da control real. El riel
  * se inyecta como HERMANO del scrollable — dentro, la máscara de fade lo

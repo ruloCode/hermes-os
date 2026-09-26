@@ -55,13 +55,13 @@ export function SongList() {
       </form>
 
       <div className="flex flex-wrap items-center gap-1">
-        <button onClick={() => setFilter("todas")} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${filter === "todas" ? "bg-violet/16 text-violet" : "text-text-dim hover:text-text"}`}>
+        <button onClick={() => setFilter("todas")} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${filter === "todas" ? "bg-accent/16 text-accent" : "text-text-dim hover:text-text"}`}>
           todas · {songs.length}
         </button>
         {STAGE_ORDER.map((st) => {
           const n = songs.filter((s) => s.stage === st).length;
           return (
-            <button key={st} onClick={() => setFilter(st)} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${filter === st ? "bg-violet/16 text-violet" : "text-text-dim hover:text-text"}`}>
+            <button key={st} onClick={() => setFilter(st)} className={`rounded-sm px-2 py-0.5 text-2xs tracking-label uppercase ${filter === st ? "bg-accent/16 text-accent" : "text-text-dim hover:text-text"}`}>
               {STAGES[st].label} · {n}
             </button>
           );
@@ -75,10 +75,10 @@ export function SongList() {
           const lines = s.sections.reduce((n, sec) => n + sec.lyrics.split("\n").filter((l) => l.trim()).length, 0);
           const pct = songProgress(s);
           return (
-            <button key={s.id} onClick={() => setSelectedId(s.id)} className="hud-panel group flex flex-col gap-2 p-3 text-left transition-colors hover:border-violet/50">
+            <button key={s.id} onClick={() => setSelectedId(s.id)} className="hud-panel group flex flex-col gap-2 p-3 text-left transition-colors hover:border-accent/50">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 className="truncate font-display text-md tracking-title text-text uppercase group-hover:text-violet">{s.title}</h3>
+                  <h3 className="truncate font-display text-md tracking-title text-text uppercase group-hover:text-accent">{s.title}</h3>
                   <p className="mt-0.5 line-clamp-2 text-2xs text-text-dim italic">{s.seed}</p>
                 </div>
                 <Badge tone={st.tone} size="sm">{st.label}</Badge>
@@ -91,7 +91,7 @@ export function SongList() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-1 flex-1 overflow-hidden rounded-full bg-line">
-                  <div className="h-full bg-violet" style={{ width: `${pct}%` }} />
+                  <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
                 </div>
                 <span className="font-mono text-2xs text-text-dim">{pct}%</span>
               </div>

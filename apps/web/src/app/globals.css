@@ -1,19 +1,43 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════════════
-   Design system v3 (2026-09) — "limpio": referencia Claude / ChatGPT.
+   Design system v4 (2026-09) — menos opciones, todas defendibles.
 
-   Qué cambió respecto al HUD cyberpunk (v2):
-   · Superficies planas y opacas: sin nébulas, sin grid, sin scanlines,
-     sin glass ni blur. Tarjetas con borde de 1px y radio suave.
-   · UN acento cálido (terracota) sobre neutros cálidos; los demás tonos
-     (cyan/blue/green/amber/red) quedan como SEMÁNTICA de estado, apagados.
-   · Tipografía sans (Inter) para todo el UI; la monoespaciada queda para
-     números, código y datos tabulares (`font-mono` explícito).
-   · Sin mayúsculas con tracking: las etiquetas van en frase normal.
-   · Dos temas de verdad: `data-theme="dark" | "light"` en <html>. Los
-     tokens conservan su NOMBRE (violet = el acento, por historia) para no
-     tocar cientos de usos: cambia el valor, no la API.
+   Sigue la línea "limpia" de v3 (superficies planas y opacas, un acento
+   cálido, Inter para el UI y mono solo para datos, sin mayúsculas). Lo que
+   v4 cambia es que las escalas dejan de mentir.
+
+   1 · EL ACENTO SE LLAMA COMO ES. `--color-violet` valía terracota desde
+       el rediseño de v3: un token que se llama violeta y pinta naranja es
+       una trampa para quien abra el archivo. Ahora es `--color-accent`
+       (408 usos renombrados). El VALOR no se tocó: sigue siendo #d97757.
+
+   2 · LOS TRES GRISES LLEVAN INFORMACIÓN Y SE LEEN. `text-faint` estaba
+       documentado como "solo decorativo, nunca información" y se usaba 296
+       veces para datos reales del vault. No era solo una regla incumplida:
+       daba 3.86:1 en oscuro y 2.64:1 en claro, contra el 4.5:1 que pide
+       AA. Los tres niveles ahora pasan AA, así que el comentario ya no
+       hace falta: si se lee, puede llevar dato.
+         oscuro (sobre #121110): text 16.2:1 · dim 8.7:1 · faint 5.5:1
+         claro  (sobre #f6f4f0): text 17.1:1 · dim 7.1:1 · faint 5.0:1
+       El acento del tema claro también subía justo por debajo (#c2542d =
+       4.13:1) y bajó a #b34a25 = 4.9:1.
+
+   3 · DIEZ TAMAÑOS DE TEXTO ERAN DOS. Medido: 698 usos de `text-2xs` y 210
+       de `text-xs` — el 90% de la app estaba escrita a 11 y 12px, y el
+       resto de la escala sumaba 53 usos. Los valores se colapsan en SEIS
+       pasos (12·14·16·20·28·40) y el piso sube de 11px a 12px. Los nombres
+       de utilidad siguen todos vivos a propósito: la escala se arregla sin
+       tocar mil call sites, y varios nombres comparten valor hasta que un
+       barrido posterior los unifique.
+
+   4 · CINCO RADIOS ERAN DOS (228 `rounded-sm` + 50 `rounded-xs` de 287).
+       Tres valores: 6 controles · 10 tarjetas · 14 superficies grandes.
+
+   DENSIDAD: una sola, con la rejilla de 4 (gaps 8·12·16·24 = gap-2/3/4/6
+   de Tailwind). Si algún día entra el modo compacto, el sitio es un
+   `:root[data-density="compacto"]` junto a los bloques de tema de abajo —
+   no hay tokens muertos esperándolo.
 
    Cómo funciona el tema: @theme emite las vars en :root (oscuro por
    defecto); `:root[data-theme="light"]` las redefine. Las utilidades de
@@ -23,16 +47,16 @@
    ══════════════════════════════════════════════════════════════════════ */
 @theme {
   /* ── Superficies (oscuro = default) ── */
-  --color-bg: #1f1e1d;
-  --color-panel: #292826;
-  --color-panel-2: #33322f;
-  --color-line: rgb(255 255 255 / 0.09);
-  --color-line-2: rgb(255 255 255 / 0.18);
+  --color-bg: #121110;
+  --color-panel: #1a1917;
+  --color-panel-2: #232120;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-2: rgb(255 255 255 / 0.16);
 
   /* ── Acento + semánticos ──
-     `violet` ES el acento (terracota). El nombre se conserva por la API. */
-  --color-violet: #d97757;
-  --color-violet-hot: #e89a7d;
+     `accent` ES el acento (terracota). El nombre se conserva por la API. */
+  --color-accent: #d97757;
+  --color-accent-hot: #e89a7d;
   --color-cyan: #7fc4d4;
   --color-blue: #8ab4f8;
   --color-green: #6ccb8f;
@@ -40,36 +64,36 @@
   --color-red: #f07070;
 
   /* ── Texto ── */
-  --color-text: #edebe4;
-  --color-text-dim: #a9a59c;
-  --color-text-faint: #7e7a72; /* solo decorativo/disabled, nunca información */
+  --color-text: #f0ede6;
+  --color-text-dim: #b5afa5;
+  --color-text-faint: #8f8a80;
 
   /* ── Tipografía (las vars --font-inter/--font-plex las inyecta next/font) ── */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex), ui-monospace, "SF Mono", Menlo, monospace;
-  --text-2xs: 11px;
+  --text-2xs: 12px;
   --text-2xs--line-height: 1.45;
   --text-xs: 12px;
   --text-xs--line-height: 1.5;
-  --text-sm: 13px;
+  --text-sm: 14px;
   --text-sm--line-height: 1.5;
   --text-base: 14px;
   --text-base--line-height: 1.55;
-  --text-md: 15px;
+  --text-md: 16px;
   --text-md--line-height: 1.55;
-  --text-lg: 17px;
+  --text-lg: 20px;
   --text-xl: 20px;
-  --text-2xl: 26px;
-  --text-3xl: 32px;
+  --text-2xl: 28px;
+  --text-3xl: 28px;
   --text-4xl: 40px;
 
   /* ── Radios (suaves, como Claude) ── */
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 14px;
+  --radius-xl: 14px;
 
   /* ── Tracking: casi neutro. Las clases siguen existiendo, ya no gritan. ── */
   --tracking-label: 0.01em;
@@ -101,23 +125,23 @@
    Neutros cálidos (papel), acento terracota más oscuro para contraste
    AA sobre blanco, semánticos en su versión "tinta". */
 :root[data-theme="light"] {
-  --color-bg: #f5f4ef;
+  --color-bg: #f6f4f0;
   --color-panel: #ffffff;
-  --color-panel-2: #f3f1ea;
-  --color-line: rgb(30 28 24 / 0.1);
+  --color-panel-2: #efede8;
+  --color-line: rgb(30 28 24 / 0.10);
   --color-line-2: rgb(30 28 24 / 0.2);
 
-  --color-violet: #c2542d;
-  --color-violet-hot: #9e4325;
+  --color-accent: #b34a25;
+  --color-accent-hot: #9e4325;
   --color-cyan: #2a7b8c;
   --color-blue: #2f6fe0;
   --color-green: #1f8a4c;
   --color-amber: #b7791f;
   --color-red: #d03a2e;
 
-  --color-text: #1f1e1b;
-  --color-text-dim: #6b675f;
-  --color-text-faint: #9c978d;
+  --color-text: #1a1815;
+  --color-text-dim: #575249;
+  --color-text-faint: #6e6960;
 
   --color-chart-1: #c2542d;
   --color-chart-2: #2a7b8c;
@@ -130,14 +154,14 @@
 }
 
 /* Aliases legacy: el código previo al design system usa
-   style={{ color: "var(--violet)" }} y sigue resolviendo. */
+   style={{ color: "var(--accent)" }} y sigue resolviendo. */
 :root {
   --bg: var(--color-bg);
   --bg-panel: var(--color-panel);
   --line: var(--color-line);
   --line-bright: var(--color-line-2);
-  --violet: var(--color-violet);
-  --violet-hot: var(--color-violet-hot);
+  --accent: var(--color-accent);
+  --accent-hot: var(--color-accent-hot);
   --cyan: var(--color-cyan);
   --blue: var(--color-blue);
   --green: var(--color-green);
@@ -234,7 +258,7 @@ html[data-theme-transition] *::after {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: var(--color-violet);
+  background: var(--color-accent);
 }
 .hud-title-cyan::before { background: var(--color-cyan); }
 .hud-title-green::before { background: var(--color-green); }
@@ -245,23 +269,22 @@ html[data-theme-transition] *::after {
 
 /* Variante hero: mismo panel, sin línea de neón. */
 .hud-panel-hero { background: var(--color-panel); }
-.hud-accent { display: none; }
 
 /* Variante alert: borde teñido por tono */
 .hud-alert-amber { border-color: color-mix(in srgb, var(--color-amber) 45%, transparent); }
 .hud-alert-red { border-color: color-mix(in srgb, var(--color-red) 45%, transparent); }
 
 /* Glows: apagados (las clases quedan por compatibilidad). */
-.glow-violet,
+.glow-accent,
 .glow-cyan,
-.glow-text-violet,
+.glow-text-accent,
 .glow-text-cyan,
 .glow-text-green,
 .glow-text-amber,
 .glow-text-red {
   text-shadow: none;
 }
-.glow-box-violet { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-violet) 35%, transparent); }
+.glow-box-accent { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent); }
 .glow-box-cyan { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-cyan) 35%, transparent); }
 .glow-box-green { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-green) 35%, transparent); }
 .glow-box-amber { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-amber) 35%, transparent); }
@@ -291,7 +314,7 @@ html[data-theme-transition] *::after {
 .cursor-blink::after {
   content: "▍";
   animation: blink 1s steps(1) infinite;
-  color: var(--violet);
+  color: var(--accent);
 }
 
 /* ── Waveform de voz (CSS puro) ─────────────────────────────────── */
@@ -302,7 +325,7 @@ html[data-theme-transition] *::after {
 .wave-bar {
   width: 3px;
   border-radius: 2px;
-  background: var(--violet);
+  background: var(--accent);
   transform-origin: center;
   animation: wave 0.9s ease-in-out infinite;
 }
@@ -325,12 +348,12 @@ html[data-theme-transition] *::after {
 }
 .voice-orb {
   --v: 0;
-  --orb: var(--violet);
+  --orb: var(--accent);
   display: block;
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--violet-hot), transparent 60%), var(--orb);
+  background: radial-gradient(circle at 35% 30%, var(--accent-hot), transparent 60%), var(--orb);
   box-shadow: 0 0 calc(2px + var(--v) * 16px) color-mix(in srgb, var(--orb) 60%, transparent);
   transform: scale(calc(1 + var(--v) * 0.4));
   transition:
@@ -437,7 +460,7 @@ html[data-theme-transition] *::after {
   border-top: 1px solid var(--line);
 }
 .md-link {
-  color: var(--violet);
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -449,9 +472,9 @@ html[data-theme-transition] *::after {
   background: none;
   padding: 0;
   font: inherit;
-  color: var(--violet);
+  color: var(--accent);
   cursor: pointer;
-  border-bottom: 1px dashed color-mix(in srgb, var(--violet) 50%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
   transition: border-color 0.15s;
 }
 .md-ref::before {
@@ -461,7 +484,7 @@ html[data-theme-transition] *::after {
   font-size: 0.85em;
 }
 .md-ref:hover {
-  border-bottom-color: var(--violet);
+  border-bottom-color: var(--accent);
 }
 
 /* ── Visor de documentos del vault: modal tipo Notion (papel siempre claro) ── */
@@ -672,7 +695,7 @@ html[data-theme-transition] *::after {
 
 /* ── Foco visible global (teclado) ─────────────────────────────── */
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-violet) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: 2px;
   border-radius: 4px;
 }

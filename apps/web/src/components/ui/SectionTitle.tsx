@@ -10,7 +10,7 @@ import { toneVar, type Tone } from "./tones";
  */
 export function SectionTitle({
   children,
-  tone = "violet",
+  tone = "accent",
   right,
   as: Heading = "h3",
 }: {

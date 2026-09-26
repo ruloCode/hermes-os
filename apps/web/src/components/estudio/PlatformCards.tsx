@@ -63,12 +63,12 @@ export function PlatformCard({
       aria-pressed={active}
       className={`flex min-w-0 flex-col items-start gap-1 rounded-sm border px-2.5 py-2 text-left transition-colors ${
         active
-          ? "border-violet/60 bg-violet/8"
+          ? "border-accent/60 bg-accent/8"
           : "border-line bg-transparent opacity-55 hover:opacity-100"
       }`}
     >
       <div className="flex w-full items-center gap-1.5">
-        <span className={`shrink-0 ${active ? "text-violet" : "text-text-faint"}`}>
+        <span className={`shrink-0 ${active ? "text-accent" : "text-text-faint"}`}>
           {info.icon}
         </span>
         <span className={`min-w-0 flex-1 truncate text-xs ${active ? "text-text" : "text-text-dim"}`}>
@@ -76,7 +76,7 @@ export function PlatformCard({
         </span>
         <span
           aria-hidden
-          className={`shrink-0 text-2xs ${active ? "text-violet" : "text-text-faint"}`}
+          className={`shrink-0 text-2xs ${active ? "text-accent" : "text-text-faint"}`}
         >
           {active ? "✓" : "＋"}
         </span>
@@ -104,7 +104,7 @@ export function PlatformCard({
 
 /** Clases ESTÁTICAS por tono (Tailwind purga las interpoladas). */
 const TONE_TEXT: Record<string, string> = {
-  violet: "text-violet",
+  accent: "text-accent",
   cyan: "text-cyan",
   green: "text-green",
   amber: "text-amber",

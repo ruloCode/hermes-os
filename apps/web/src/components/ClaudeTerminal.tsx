@@ -273,7 +273,7 @@ export function ClaudeTerminal({
             aria-expanded={menuOpen}
             aria-controls="cc-session-menu"
             title="Sesiones de Claude Code de este proyecto"
-            className="flex min-w-0 items-center gap-1.5 text-2xs tracking-label text-violet"
+            className="flex min-w-0 items-center gap-1.5 text-2xs tracking-label text-accent"
           >
             <span className="shrink-0 text-text-dim opacity-70">⌘</span>
             <span className="max-w-[200px] truncate">{activeTitle}</span>
@@ -305,8 +305,8 @@ export function ClaudeTerminal({
                         selectSession(s.id);
                       }
                     }}
-                    className={`group flex cursor-pointer items-start gap-2 border-b border-line px-2.5 py-2 outline-none transition-colors focus-visible:bg-violet/10 ${
-                      isActive ? "bg-violet/10" : "bg-transparent"
+                    className={`group flex cursor-pointer items-start gap-2 border-b border-line px-2.5 py-2 outline-none transition-colors focus-visible:bg-accent/10 ${
+                      isActive ? "bg-accent/10" : "bg-transparent"
                     }`}
                   >
                     <span
@@ -323,7 +323,7 @@ export function ClaudeTerminal({
                     <div className="min-w-0 flex-1">
                       <p
                         className={`truncate text-xs leading-snug ${
-                          isActive ? "text-violet-hot" : "text-text"
+                          isActive ? "text-accent-hot" : "text-text"
                         }`}
                       >
                         {s.title || "Sin título"}
@@ -372,7 +372,7 @@ export function ClaudeTerminal({
               setMenuOpen(false);
             }}
             title="Empezar una conversación nueva"
-            className="rounded-sm border border-line-2 px-2 py-0.5 text-2xs tracking-label text-violet uppercase transition-colors hover:opacity-100"
+            className="rounded-sm border border-line-2 px-2 py-0.5 text-2xs tracking-label text-accent uppercase transition-colors hover:opacity-100"
           >
             + Nueva
           </button>
@@ -388,12 +388,12 @@ export function ClaudeTerminal({
             }`}
           >
             {status === "running"
-              ? "◌ EJECUTANDO"
+              ? "◌ Ejecutando"
               : status === "done"
                 ? "✓ LISTO"
                 : status === "error"
                   ? "⚠ ERROR"
-                  : "EN ESPERA"}
+                  : "En espera"}
           </span>
         </div>
       </div>
@@ -412,7 +412,7 @@ export function ClaudeTerminal({
               ? "⚠ NO SE PUDO CARGAR EL TRANSCRIPT — ¿AGENTE OFFLINE? VUELVE A ABRIR LA SESIÓN"
               : sessionId
                 ? "SESIÓN VACÍA — ESCRIBE UN PROMPT EN LA PESTAÑA CONSOLA Y EJECUTA CON “▣ PANEL”"
-                : "NUEVA CONVERSACIÓN — DESDE LA PESTAÑA CONSOLA EJECUTA CON “▣ PANEL”, O ABRE ▾ PARA VOLVER A UNA SESIÓN"}
+                : "Nueva conversación — ejecuta con “▣ Panel”, o abre ▾ para volver a una sesión"}
           </p>
         )}
         {lines.map((l, i) => {
@@ -424,7 +424,7 @@ export function ClaudeTerminal({
             </div>
           );
         })}
-        {status === "running" && <div className="cursor-blink mt-1 text-violet">▋</div>}
+        {status === "running" && <div className="cursor-blink mt-1 text-accent">▋</div>}
       </div>
 
       {/* ── Composer: seguir instruyendo como en un chat ── */}
@@ -452,7 +452,7 @@ export function ClaudeTerminal({
             type="button"
             onClick={() => void send()}
             disabled={!draft.trim() || status === "running" || sending}
-            className="cmd-btn !w-auto !border-violet !text-violet disabled:opacity-40"
+            className="cmd-btn !w-auto !border-accent !text-accent disabled:opacity-40"
           >
             {sending ? "…" : "Enviar ↵"}
           </button>

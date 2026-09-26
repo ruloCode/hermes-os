@@ -2,7 +2,12 @@
 
 // Barra de la página AGENDA: navegación ‹ Hoy › + título del rango a la
 // izquierda, selector de vistas (Mes/Semana/Día/Agenda) + slot de estado a la
-// derecha. Estilo Google Calendar sobre el design system de la HUD.
+// derecha. Estilo Google Calendar.
+//
+// Hace de ViewHeader de esta vista (por eso lleva su misma hairline abajo): no
+// se le pone un ViewHeader encima porque serían dos cabeceras diciendo lo
+// mismo. Es la excepción sancionada a la gramática: aquí el título ES un
+// control —cambia con ‹ ›— y no una etiqueta fija.
 
 import { TabBar } from "@/components/ui/TabBar";
 
@@ -39,7 +44,7 @@ export function CalendarToolbar({
   const showNav = mode !== "agenda";
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-0.5">
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-1 pb-3">
       <div className="flex min-w-0 items-center gap-3">
         {showNav && (
           <div className="flex items-center gap-1.5">

@@ -23,11 +23,11 @@ export function KnowledgeMini({
       style={{ animationDelay: `${delay}ms` }}
     >
       <header className="flex items-center gap-1.5">
-        <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-violet" />
+        <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-accent" />
         <h3 className="text-2xs tracking-label uppercase text-text-dim">Conocimiento</h3>
       </header>
       <div className="flex min-h-0 flex-1 flex-col justify-center gap-0.5">
-        <p className="glow-text-violet font-display text-2xl leading-none tabular-nums text-violet">
+        <p className="glow-text-accent font-display text-2xl leading-none tabular-nums text-accent">
           {knowledge.total.toLocaleString("es-CO")}
         </p>
         {/* text-dim y no faint: el desglose es información, no decoración. */}

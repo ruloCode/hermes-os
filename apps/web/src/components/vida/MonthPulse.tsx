@@ -135,7 +135,7 @@ export function MonthPulse({
                 >
                   <div
                     className={`w-full rounded-t-xs transition-opacity ${
-                      future ? "bg-line" : isToday ? "bg-cyan" : "bg-violet"
+                      future ? "bg-line" : isToday ? "bg-cyan" : "bg-accent"
                     }`}
                     style={{
                       height: Math.max(h, v > 0 ? 2 : 1),

@@ -20,20 +20,20 @@ type OrbState = "na" | "off" | "connecting" | "listening" | "speaking" | "exec";
 // Color runtime del orbe (alimenta la var --orb del CSS); no mapeable a clase.
 const COLOR: Record<OrbState, string> = {
   na: "var(--color-text-dim)",
-  off: "var(--color-violet)",
+  off: "var(--color-accent)",
   connecting: "var(--color-amber)",
   listening: "var(--color-green)",
-  speaking: "var(--color-violet-hot)",
+  speaking: "var(--color-accent-hot)",
   exec: "var(--color-cyan)",
 };
 
 // Clase de color del label según estado (mismo tono que el orbe).
 const LABEL_CLASS: Record<OrbState, string> = {
   na: "text-text-dim",
-  off: "text-violet",
+  off: "text-accent",
   connecting: "text-amber",
   listening: "text-green",
-  speaking: "text-violet-hot",
+  speaking: "text-accent-hot",
   exec: "text-cyan",
 };
 
@@ -68,7 +68,7 @@ export function VoiceOrb() {
         : state === "connecting"
           ? "CONECTANDO"
           : state === "exec"
-            ? (action ?? "EJECUTANDO")
+            ? (action ?? "Ejecutando")
             : state === "speaking"
               ? "HABLANDO"
               : "ESCUCHANDO";

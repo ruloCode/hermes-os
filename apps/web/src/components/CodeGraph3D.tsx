@@ -18,7 +18,7 @@ import type { GraphGestureDecision } from "@/lib/gestures/graph-engine";
 
 /**
  * Grafo de código de graphify en WebGL real (three.js, mismas skills y
- * branding que KnowledgeGraph: violeta/cian, bloom contenido, fondo espacial):
+ * branding que KnowledgeGraph: acento/cian, bloom contenido, fondo espacial):
  *  - ~3k nodos como UNA InstancedMesh (un draw call) y ~6k aristas como UN
  *    LineSegments additive — el bloom los enciende sin costo extra.
  *  - Layout determinista por comunidades Louvain: cada comunidad es un
@@ -60,7 +60,7 @@ function spherePoint(i: number, n: number, r: number): [number, number, number] 
   return [Math.cos(theta) * ry * r, y * r, Math.sin(theta) * ry * r];
 }
 
-/** Color de comunidad: paleta cian→violeta del branding, nunca amber/red. */
+/** Color de comunidad: paleta cian→acento del branding, nunca amber/red. */
 function communityColor(key: number): THREE.Color {
   const h = (192 + hash01(`h${key}`, 3) * 92) / 360;
   const s = 0.62 + hash01(`s${key}`, 5) * 0.22;
@@ -200,7 +200,7 @@ export function CodeGraph3D({ project }: { project?: string }) {
     // Tokens del design system (three no resuelve var(--…)).
     const COLOR = {
       bg: readToken("--color-bg", "#05060f"),
-      core: readToken("--color-violet-hot", "#c4b5fd"),
+      core: readToken("--color-accent-hot", "#e89a7d"),
       label: readToken("--color-text", "#e2e7ff"),
       line: "#7a84ff",
     };
@@ -242,7 +242,7 @@ export function CodeGraph3D({ project }: { project?: string }) {
     };
     controls.addEventListener("start", onInteract);
 
-    // Bloom CONTENIDO (branding): acento violeta/cian, nunca white-out.
+    // Bloom CONTENIDO (branding): acento/cian, nunca white-out.
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.38, 0.35, 0.55);
@@ -835,7 +835,7 @@ export function CodeGraph3D({ project }: { project?: string }) {
       {/* Comunidad enfocada */}
       {selComm && (
         <div className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-2 border border-line bg-panel/90 px-3 py-1.5 backdrop-blur">
-          <span className="text-2xs tracking-label text-violet uppercase">{selComm.name}</span>
+          <span className="text-2xs tracking-label text-accent uppercase">{selComm.name}</span>
           <span className="text-2xs text-text-dim tabular-nums">{selComm.count} nodos</span>
           <button
             type="button"

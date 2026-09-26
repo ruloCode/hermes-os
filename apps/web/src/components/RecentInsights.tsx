@@ -11,7 +11,7 @@ const TYPE_COLOR: Record<string, string> = {
   project: "var(--color-blue)",
   reference: "var(--color-green)",
   daily: "var(--color-text-dim)",
-  agent: "var(--color-violet)",
+  agent: "var(--color-accent)",
 };
 
 export function RecentInsights({ memories }: { memories: Memory[] }) {
@@ -28,10 +28,10 @@ export function RecentInsights({ memories }: { memories: Memory[] }) {
         <div
           key={m.id}
           className="border-l-2 pl-2.5"
-          style={{ borderColor: TYPE_COLOR[m.type] ?? "var(--color-violet)" }}
+          style={{ borderColor: TYPE_COLOR[m.type] ?? "var(--color-accent)" }}
         >
           <div className="flex justify-between text-2xs tracking-label uppercase">
-            <span style={{ color: TYPE_COLOR[m.type] ?? "var(--color-violet)" }}>
+            <span style={{ color: TYPE_COLOR[m.type] ?? "var(--color-accent)" }}>
               {m.type}
               {m.project_slug ? ` · ${m.project_slug}` : ""}
             </span>

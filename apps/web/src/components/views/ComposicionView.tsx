@@ -74,7 +74,7 @@ function Inner() {
               }}
               title={s.hint}
               className={`rounded-xs px-3 py-1 text-2xs tracking-label uppercase ${
-                section === s.id && !(selected && s.id !== "canciones") ? "bg-violet/16 text-violet" : "text-text-faint hover:text-text-dim"
+                section === s.id && !(selected && s.id !== "canciones") ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
               }`}
             >
               {s.label} <sup className="text-cyan">{counts[s.id]}</sup>

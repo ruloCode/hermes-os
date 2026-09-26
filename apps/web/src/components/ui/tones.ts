@@ -2,7 +2,7 @@
 // primitivos UI y se resuelve a las CSS vars que emite el @theme de
 // globals.css — nunca a un hex directo.
 
-export type Tone = "violet" | "cyan" | "blue" | "green" | "amber" | "red" | "neutral";
+export type Tone = "accent" | "cyan" | "blue" | "green" | "amber" | "red" | "neutral";
 
 /** Var CSS del tono, para style/stroke/fill en JSX y SVG. */
 export const toneVar = (tone: Tone): string =>
@@ -10,7 +10,7 @@ export const toneVar = (tone: Tone): string =>
 
 /** Variante "hot" (más clara) para extremos de gradientes. */
 export const toneHotVar = (tone: Tone): string =>
-  tone === "violet" ? "var(--color-violet-hot)" : toneVar(tone);
+  tone === "accent" ? "var(--color-accent-hot)" : toneVar(tone);
 
 /** Slots de la paleta categórica de charts (--color-chart-1..N del @theme). */
 export const CHART_SLOTS = 5;
@@ -31,7 +31,7 @@ export function resetTokenCache(): void {
   tokenCache = null;
 }
 
-/** Valor computado de un token CSS (p. ej. "--color-violet") para canvas. */
+/** Valor computado de un token CSS (p. ej. "--color-accent") para canvas. */
 export function readToken(name: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
   if (!tokenCache) tokenCache = new Map();

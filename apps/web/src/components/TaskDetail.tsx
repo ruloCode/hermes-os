@@ -144,7 +144,7 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
           {t.detail && <p className="text-xs leading-snug text-text-dim">{t.detail}</p>}
           {t.exec_prompt && (
             <details className="text-2xs">
-              <summary className="cursor-pointer text-violet">prompt de ejecución</summary>
+              <summary className="cursor-pointer text-accent">prompt de ejecución</summary>
               <p className="mt-1 leading-snug whitespace-pre-wrap text-text-dim">
                 {t.exec_prompt}
               </p>
@@ -344,7 +344,7 @@ function ExecutionsList({
           key={e.id}
           type="button"
           onClick={() => onOpen(e.id)}
-          className="flex w-full items-start justify-between gap-2 rounded-sm border border-line bg-panel-2 px-2.5 py-2 text-left transition-colors hover:border-violet"
+          className="flex w-full items-start justify-between gap-2 rounded-sm border border-line bg-panel-2 px-2.5 py-2 text-left transition-colors hover:border-accent"
         >
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2 text-2xs tracking-label text-text-dim uppercase">
@@ -359,7 +359,7 @@ function ExecutionsList({
               {e.result_snippet || "—"}
             </span>
           </span>
-          <span className="text-2xs text-violet">→</span>
+          <span className="text-2xs text-accent">→</span>
         </button>
       ))}
     </div>
