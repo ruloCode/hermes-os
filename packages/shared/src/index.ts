@@ -9,3 +9,5 @@ export * from "./sala-point.js";
 export * from "./gtfs.js";
 export * from "./estacion.js";
 export * from "./qr.js";
+export * from "./music-theory.js";
+export * from "./lyrics-analysis.js";
