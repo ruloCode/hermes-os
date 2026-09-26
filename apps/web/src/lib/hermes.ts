@@ -1128,6 +1128,25 @@ export async function hermesPost<T>(path: string, body?: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+export async function hermesPut<T>(path: string, body?: unknown): Promise<T> {
+  const res = await hermesFetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    // El agente explica los 400 (validación de señas, etc.): que llegue tal cual.
+    let detail = "";
+    try {
+      detail = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {
+      /* sin cuerpo */
+    }
+    throw new Error(detail || `${path} → ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+
 export async function hermesDelete<T>(path: string): Promise<T> {
   const res = await hermesFetch(path, { method: "DELETE" });
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
@@ -1238,4 +1257,402 @@ export async function probeMachine(
   } catch {
     return { ok: false };
   }
+}
+
+// ── Composición: tablero + Playground (sesiones, pasajes, letras) ──────
+// Contrato de rutas en packages/shared/src/composicion.ts (COMPOSICION_ROUTES_DOC).
+// Todas explican sus errores como `{ error }` con status: el mensaje llega tal
+// cual a la UI ("la SD se desmontó", "sin tablero"), y el status viaja en el
+// error para distinguir un 404 (todavía no existe) de una caída del agente.
+import type {
+  CameraSource,
+  ComposeSession,
+  ComposeSessionSummary,
+  ComposicionBoard,
+  GuideRequest,
+  GuideResult,
+  LyricBoard,
+  LyricRequest,
+  MediaBrowse,
+  MemoRef,
+  Passage,
+  PassageAnalysis,
+  PhraseMold,
+  PrivacyInfo,
+  SessionStage,
+  Song,
+  TakeMeta,
+  Tema,
+  TemaDetail,
+  TemaListItem,
+} from "@hermes/shared";
+
+/** Error del agente con su status (0 = no hubo respuesta: agente caído o sin red). */
+export class ComposeApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+async function composeCall<T>(
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await hermesFetch(path, {
+      method,
+      signal,
+      ...(body instanceof FormData
+        ? { body }
+        : body !== undefined
+          ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+          : {}),
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new ComposeApiError("el agente no responde", 0);
+  }
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {
+      /* sin cuerpo */
+    }
+    throw new ComposeApiError(detail || `${path} → ${res.status}`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+const S = (id: string) => `/composicion/sessions/${encodeURIComponent(id)}`;
+const P = (id: string, pid: string) => `${S(id)}/passages/${encodeURIComponent(pid)}`;
+
+/** Tablero de canciones; null = el agente todavía no tiene tablero (404 → sembrarlo). */
+export async function getComposicionBoard(): Promise<ComposicionBoard | null> {
+  try {
+    return await composeCall<ComposicionBoard>("GET", "/composicion/board");
+  } catch (e) {
+    if (e instanceof ComposeApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * El tablero cambió en el agente desde la versión que vio este cliente (otra
+ * pestaña, otro equipo, o una acción del servidor como "crear canción desde la
+ * sesión"). Trae el tablero VIGENTE para mezclar y reintentar.
+ */
+export class BoardConflictError extends ComposeApiError {
+  constructor(
+    message: string,
+    readonly board: ComposicionBoard | null,
+  ) {
+    super(message, 409);
+  }
+}
+
+/**
+ * Guarda el tablero entero. `baseUpdatedAt` = el `updatedAt` del tablero que
+ * este cliente vio por última vez: si el agente tiene otro, responde 409 con
+ * el vigente (`BoardConflictError`) en vez de pisar lo que otro guardó.
+ */
+export async function putComposicionBoard(
+  board: ComposicionBoard,
+  baseUpdatedAt?: string | null,
+): Promise<ComposicionBoard> {
+  let res: Response;
+  try {
+    res = await hermesFetch("/composicion/board", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(baseUpdatedAt ? { ...board, baseUpdatedAt } : board),
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new ComposeApiError("el agente no responde", 0);
+  }
+  if (res.status === 409) {
+    let body: { error?: string; board?: ComposicionBoard } = {};
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      /* sin cuerpo */
+    }
+    let current: ComposicionBoard | null = body.board && Array.isArray(body.board.songs) ? body.board : null;
+    // Un 409 sin el vigente (agente de otra versión): se lee aparte.
+    if (!current) current = await getComposicionBoard().catch(() => null);
+    throw new BoardConflictError(body.error || "el tablero cambió en otro lado", current);
+  }
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {
+      /* sin cuerpo */
+    }
+    throw new ComposeApiError(detail || `/composicion/board → ${res.status}`, res.status);
+  }
+  return (await res.json()) as ComposicionBoard;
+}
+
+export interface ComposeSources {
+  cameras: CameraSource[];
+  mediaRoot: string;
+  connected: boolean;
+}
+
+export function getComposeSources(): Promise<ComposeSources> {
+  return composeCall<ComposeSources>("GET", "/composicion/sources");
+}
+
+export function browseComposeMedia(dir?: string): Promise<MediaBrowse> {
+  const q = dir ? `?dir=${encodeURIComponent(dir)}` : "";
+  return composeCall<MediaBrowse>("GET", `/composicion/browse${q}`);
+}
+
+export function listComposeSessions(): Promise<ComposeSessionSummary[]> {
+  return composeCall<ComposeSessionSummary[]>("GET", "/composicion/sessions");
+}
+
+export function createComposeSession(input: {
+  path: string;
+  title?: string;
+  language?: ComposeSession["language"];
+  songId?: string;
+}): Promise<ComposeSession> {
+  return composeCall<ComposeSession>("POST", "/composicion/sessions", input);
+}
+
+/** Memo del micrófono: multipart sin Content-Type (el browser pone el boundary). */
+export function recordComposeSession(input: {
+  blob: Blob;
+  title?: string;
+  language?: ComposeSession["language"];
+}): Promise<ComposeSession> {
+  const form = new FormData();
+  form.append("audio", input.blob, `memo.${blobExt(input.blob)}`);
+  if (input.title) form.append("title", input.title);
+  if (input.language) form.append("language", input.language);
+  return composeCall<ComposeSession>("POST", "/composicion/sessions/record", form);
+}
+
+export function getComposeSession(id: string): Promise<ComposeSession> {
+  return composeCall<ComposeSession>("GET", S(id));
+}
+
+export function patchComposeSession(
+  id: string,
+  patch: {
+    title?: string;
+    songId?: string | null;
+    speakers?: { id: string; name?: string; mergedInto?: string | null }[];
+  },
+): Promise<ComposeSession> {
+  return composeCall<ComposeSession>("PATCH", S(id), patch);
+}
+
+export function processComposeSession(id: string, from?: SessionStage): Promise<{ ok: boolean; error?: string }> {
+  return composeCall("POST", `${S(id)}/process`, from ? { from } : {});
+}
+
+export function stopComposeSession(id: string): Promise<{ ok: boolean; error?: string }> {
+  return composeCall("POST", `${S(id)}/stop`, {});
+}
+
+export function revealComposeSession(id: string): Promise<{ ok: boolean; error?: string }> {
+  return composeCall("POST", `${S(id)}/reveal`, {});
+}
+
+export interface ComposeTranscriptLine {
+  speaker: string;
+  start: number;
+  end: number;
+  text: string;
+  sung: boolean;
+}
+
+export function getComposeTranscript(id: string): Promise<{ lines: ComposeTranscriptLine[] }> {
+  return composeCall("GET", `${S(id)}/transcript`);
+}
+
+export function getComposePeaks(id: string): Promise<{ peaks: number[]; durationSec: number }> {
+  return composeCall("GET", `${S(id)}/peaks`);
+}
+
+/**
+ * URL de un archivo de la sesión (ruta RELATIVA a su carpeta) para usar como
+ * `src` de <video>/<audio>: el agente responde con Range/206, así que el
+ * browser pide solo lo que reproduce. Jamás blob: el video de la cámara pesa
+ * varios GB. Va con `?key=` porque un src no puede mandar el Bearer.
+ */
+export function composeFileUrl(id: string, relPath: string): string {
+  return sseUrl(`${S(id)}/file?path=${encodeURIComponent(relPath)}`);
+}
+
+export function createSongFromSession(id: string): Promise<Song> {
+  return composeCall<Song>("POST", `${S(id)}/song`, {});
+}
+
+export function addComposePassage(
+  id: string,
+  body: { start: number; end: number; speaker?: string },
+): Promise<Passage> {
+  return composeCall<Passage>("POST", `${S(id)}/passages`, body);
+}
+
+export function patchComposePassage(
+  id: string,
+  pid: string,
+  patch: Partial<Pick<Passage, "start" | "end" | "label" | "group" | "speaker">>,
+): Promise<Passage> {
+  return composeCall<Passage>("PATCH", P(id, pid), patch);
+}
+
+export function analyzeComposePassage(id: string, pid: string): Promise<{ ok: boolean; error?: string }> {
+  return composeCall("POST", `${P(id, pid)}/analyze`, {});
+}
+
+/** Análisis del pasaje; null = todavía no existe (404: sin analizar o analizando). */
+export async function getPassageAnalysis(id: string, pid: string): Promise<PassageAnalysis | null> {
+  try {
+    return await composeCall<PassageAnalysis>("GET", P(id, pid));
+  } catch (e) {
+    if (e instanceof ComposeApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Corrección humana del molde de una frase (`override: {}` la quita). */
+export function patchPassageMold(
+  id: string,
+  pid: string,
+  body: { phrase: number; override: Partial<Pick<PhraseMold, "syllables" | "ending" | "rhyme">> },
+): Promise<PassageAnalysis> {
+  return composeCall<PassageAnalysis>("PATCH", `${P(id, pid)}/mold`, body);
+}
+
+/** Render transpuesto (archivo NUEVO; el original jamás se pisa). `path` es relativo a la carpeta. */
+export function transposePassage(
+  id: string,
+  pid: string,
+  body: { semitones: number; source: "voz" | "mezcla" },
+): Promise<{ path: string }> {
+  return composeCall("POST", `${P(id, pid)}/transpose`, body);
+}
+
+/** Tablero de letras del pasaje; null = todavía no hay (404). */
+export async function getLyricBoard(id: string, pid: string): Promise<LyricBoard | null> {
+  try {
+    return await composeCall<LyricBoard>("GET", `${P(id, pid)}/lyrics`);
+  } catch (e) {
+    if (e instanceof ComposeApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Genera versiones (síncrono, 30-90 s). `signal` aborta de verdad el turno del agente. */
+export function generateLyrics(
+  id: string,
+  pid: string,
+  req: LyricRequest,
+  signal?: AbortSignal,
+): Promise<LyricBoard> {
+  return composeCall<LyricBoard>("POST", `${P(id, pid)}/lyrics`, req, signal);
+}
+
+export function putLyricBoard(
+  id: string,
+  pid: string,
+  patch: Partial<Pick<LyricBoard, "mine" | "locked" | "brief" | "persona" | "rhyme" | "melismaMode" | "phrasesSig">>,
+): Promise<LyricBoard> {
+  return composeCall<LyricBoard>("PUT", `${P(id, pid)}/lyrics`, patch);
+}
+
+// ── Temas (la máquina de temas; contrato en packages/shared/src/tema.ts) ──
+const T = (id: string) => `/composicion/temas/${encodeURIComponent(id)}`;
+
+/** Lo que el PATCH de un tema acepta (el agente valida el tema completo tras el merge). */
+export type TemaPatchBody = Partial<Pick<Tema, "title" | "stage" | "intent" | "track" | "montage" | "songId">>;
+
+export function listTemas(): Promise<TemaListItem[]> {
+  return composeCall<TemaListItem[]>("GET", "/composicion/temas");
+}
+
+/** Tema nuevo; con `fromPassage` nace de un tarareo de Sesiones (tonalidad medida + bpm aprox.). */
+export function createTema(input: { title?: string; fromPassage?: MemoRef } = {}): Promise<Tema> {
+  return composeCall<Tema>("POST", "/composicion/temas", input);
+}
+
+export function getTema(id: string): Promise<TemaDetail> {
+  return composeCall<TemaDetail>("GET", T(id));
+}
+
+export function patchTema(id: string, patch: TemaPatchBody): Promise<Tema> {
+  return composeCall<Tema>("PATCH", T(id), patch);
+}
+
+/** Borra el tema (sus tomas quedan en disco). */
+export function deleteTema(id: string): Promise<{ ok: boolean; error?: string }> {
+  return composeCall("DELETE", T(id));
+}
+
+/** Sube una toma (WAV) grabada sobre la pista: multipart {audio, meta}. El agente asigna el número. */
+export function uploadTake(temaId: string, wav: Blob, meta: Omit<TakeMeta, "n">): Promise<ComposeSession> {
+  const form = new FormData();
+  form.append("audio", wav, "toma.wav");
+  form.append("meta", JSON.stringify(meta));
+  return composeCall<ComposeSession>("POST", `${T(temaId)}/takes`, form);
+}
+
+/** ★, latencia corregida o pista de texto de una toma (latencia/pista → re-análisis). */
+export function patchTake(
+  temaId: string,
+  sid: string,
+  patch: { favorite?: boolean; latencyMs?: number; hint?: string },
+): Promise<ComposeSession> {
+  return composeCall<ComposeSession>("PATCH", `${T(temaId)}/takes/${encodeURIComponent(sid)}`, patch);
+}
+
+/** Qué sale del equipo y qué no (la pastilla "Privado"). */
+export function getComposicionPrivacy(): Promise<PrivacyInfo> {
+  return composeCall<PrivacyInfo>("GET", "/composicion/privacy");
+}
+
+// ── Guía cantada (TTS con timestamps + PSOLA en el agente) ──
+
+/** Una voz GENÉRICA de ElevenLabs para la guía (las clonadas no cantan guías). */
+export interface GuideVoice {
+  id: string;
+  name: string;
+  gender?: string;
+  accent?: string;
+}
+
+/**
+ * Renderiza (o sirve de caché) la guía cantada de unas líneas sobre la melodía
+ * del pasaje. Síncrona (~1-2 s por línea nueva) y abortable: `signal` corta el
+ * TTS en vuelo. El WAV queda en la carpeta de la sesión (`path`, relativo: se
+ * baja con `composeFileUrl`). Errores con su status: 503 sin clave o clave
+ * rechazada, 402 sin cuota, 400 "elige una voz" (el agente no tiene voz por
+ * defecto), 409 sin análisis, 502 ElevenLabs falló — el mensaje del agente
+ * llega tal cual.
+ */
+export function renderGuide(
+  sessionId: string,
+  passageId: string,
+  req: GuideRequest,
+  signal?: AbortSignal,
+): Promise<GuideResult> {
+  return composeCall<GuideResult>("POST", `${P(sessionId, passageId)}/guide`, req, signal);
+}
+
+/** Voces genéricas para la guía (el agente las cachea 1 h). 503 = falta la clave de ElevenLabs. */
+export async function listGuideVoices(signal?: AbortSignal): Promise<GuideVoice[]> {
+  return (await composeCall<{ voices: GuideVoice[] }>("GET", "/composicion/guide/voices", undefined, signal)).voices;
 }

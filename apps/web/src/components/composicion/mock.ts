@@ -6,7 +6,11 @@
  */
 import type { ChatTurn, NotebookEntry, Reference, Song } from "./types";
 
-const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+// Un solo "ahora" para todo el mock: con Date.now() por llamada, dos canciones
+// de "hoy" empataban por milisegundos y el orden de la lista era lotería.
+const NOW = Date.now();
+const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
 
 export const MOCK_SONGS: Song[] = [
   {
@@ -333,6 +337,9 @@ export const RHYME_BANK = [
   "luz", "cruz", "nadie", "aire", "baile",
   "vidrio", "silencio", "tiempo", "viento", "cuento", "lento", "momento", "intento", "aliento",
   "mar", "hogar", "lugar", "volar", "quedar", "mirar", "cantar", "pasar",
+  "madrugada", "nada", "llamada", "almohada", "escribiendo", "esperando", "borrando", "borrado",
+  "mandar", "hablar", "pantalla", "calla", "falla", "mensaje", "coraje", "viaje", "techo", "pecho", "hecho",
+  "visto", "escrito", "listo", "borrador", "corrector", "amor", "dolor", "enviar", "pensar", "esperar", "decir",
 ];
 
 export const MOCK_CHAT: Record<string, ChatTurn[]> = {

@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // El .env vive en la raíz del monorepo para compartirlo entre apps.
@@ -108,6 +108,51 @@ export const env = {
   LEARNING_MODEL: process.env.HERMES_LEARNING_MODEL || "claude-haiku-4-5",
   // Zona horaria por defecto de las tareas programadas (cron en hora local).
   SCHEDULED_TZ: process.env.HERMES_SCHEDULED_TZ || process.env.GOOGLE_CALENDAR_TZ || "America/Bogota",
+  // Composición (/composicion): "off" apaga /composicion/* con 404.
+  COMPOSICION_ENABLED: (process.env.HERMES_COMPOSICION || "").toLowerCase() !== "off",
+  // Carpeta madre de las sesiones grabadas (video de la cámara / memos): cada
+  // sesión vive en <root>/<slug>/{crudos,assets,analisis}. Vacío o disco sin
+  // montar = fallback local en ~/Movies/composicion/sesiones (como el Estudio:
+  // importar nunca se bloquea por un cable).
+  COMPOSICION_MEDIA_ROOT: process.env.COMPOSICION_MEDIA_ROOT || "",
+  // Estado liviano (board.json + JSON por sesión). HERMES_HOME se lee aquí y no
+  // desde home.ts porque ese módulo se evalúa ANTES de cargar el .env.
+  COMPOSICION_DIR:
+    process.env.HERMES_COMPOSICION_DIR ||
+    join(process.env.HERMES_HOME || join(homedir(), ".hermes-os"), "composicion"),
+  // Python del venv de audio-separator (trae torch con MPS + librosa). Ruta
+  // absoluta: launchd no tiene ~/.local en PATH, y NO uvx en runtime.
+  COMPOSICION_PYTHON:
+    process.env.COMPOSICION_PYTHON ||
+    resolve(homedir(), ".local/share/uv/tools/audio-separator/bin/python"),
+  // Modelos de separación en una carpeta FIJA (el default del paquete es /tmp,
+  // que se borra y obliga a bajar 900 MB otra vez).
+  AUDIO_SEPARATOR_MODELS:
+    process.env.AUDIO_SEPARATOR_MODELS ||
+    join(process.env.HERMES_HOME || join(homedir(), ".hermes-os"), "models", "audio-separator"),
+  COMPOSICION_SEPARATOR_MODEL:
+    process.env.COMPOSICION_SEPARATOR_MODEL || "vocals_mel_band_roformer.ckpt",
+  // Letras sobre molde: modelo y esfuerzo PROPIOS. Con el modelo por defecto de
+  // la cuenta y razonamiento extendido, 4 versiones de un coro tardaban 11 min
+  // (medido); escribir contra un molde medido no pide razonamiento profundo.
+  COMPOSICION_LYRICS_MODEL: process.env.COMPOSICION_LYRICS_MODEL || "claude-sonnet-5",
+  COMPOSICION_LYRICS_EFFORT: (["low", "medium", "high", "xhigh", "max"] as const).find(
+    (e) => e === process.env.COMPOSICION_LYRICS_EFFORT,
+  ) ?? "medium",
+  // Sin razonamiento extendido por defecto: el conteo de sílabas lo hace el
+  // verificador determinista (lineFit) y la reparación corrige; el modelo solo
+  // escribe. Medido sobre un coro real (1 versión, 4 frases): 36 s sin
+  // razonamiento contra 207–379 s con él. "adaptive" lo vuelve a encender.
+  COMPOSICION_LYRICS_THINKING:
+    (process.env.COMPOSICION_LYRICS_THINKING || "off").toLowerCase() === "adaptive" ? "adaptive" : "off",
+  // Composición es una herramienta interna: /composicion/* rechaza lo que llega
+  // por el túnel cloudflared (solo red local / Tailscale). "off" lo permite.
+  COMPOSICION_LAN_ONLY: (process.env.COMPOSICION_LAN_ONLY || "").toLowerCase() !== "off",
+  // Guía cantada (TTS con timestamps de ElevenLabs + PSOLA local). El modelo
+  // multilingüe lee español; la voz vacía obliga a la UI a elegir de la lista
+  // real (GET /composicion/guide/voices). Usa la misma ELEVENLABS_API_KEY.
+  COMPOSICION_TTS_MODEL: process.env.COMPOSICION_TTS_MODEL || "eleven_multilingual_v2",
+  COMPOSICION_GUIDE_VOICE: process.env.COMPOSICION_GUIDE_VOICE || "",
 };
 
 export const REPO_ROOT = root;

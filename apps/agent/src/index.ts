@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import type {
+  AgentActivityEvent,
   Currency,
   GoalStatus,
   HabitCadence,
@@ -15,6 +16,7 @@ import type {
 import { env } from "./env.js";
 import { verifySupabaseToken } from "./auth.js";
 import { activityHourly, emit, recentEvents, subscribe } from "./events.js";
+import { viaTunnel } from "./composicion/privacy.js";
 import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence.js";
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
 import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
@@ -233,6 +235,8 @@ import { homedir } from "node:os";
 import { join as joinPath } from "node:path";
 import { Readable } from "node:stream";
 import { OWNER } from "./owner.js";
+import { mountComposicionRoutes } from "./composicion/routes.js";
+import { reconcileComposicion } from "./composicion/pipeline.js";
 
 const app = new Hono();
 const startedAt = Date.now();
@@ -1666,6 +1670,12 @@ app.delete("/content/refs/:id", async (c) => {
   return c.json({ ok }, ok ? 200 : 500);
 });
 
+// ── Composición ────────────────────────────────────────────────────────
+// Tablero de canciones + playground de sesiones grabadas (pasajes cantados →
+// melodía → molde → letras). Las rutas viven en composicion/routes.ts (contrato
+// en packages/shared/src/composicion.ts); HERMES_COMPOSICION=off las apaga.
+mountComposicionRoutes(app);
+
 // ── Hábitos y metas (desarrollo personal) ──────────────────────────────
 
 app.get("/habits", async (c) => c.json(await listHabits(!c.req.query("all"))));
@@ -2369,12 +2379,15 @@ app.get("/elevenlabs/token", async (c) => {
 // ── Stream de actividad en vivo (dashboard) ────────────────────────────
 app.get("/events", (c) =>
   streamSSE(c, async (stream) => {
-    for (const ev of recentEvents().slice(-30)) {
+    // Los eventos privados (Composición) no salen por el túnel: solo red local.
+    const remote = viaTunnel((h) => c.req.header(h));
+    const visible = (ev: AgentActivityEvent) => !(remote && ev.private);
+    for (const ev of recentEvents().slice(-30).filter(visible)) {
       await stream.writeSSE({ data: JSON.stringify(ev) });
     }
     let open = true;
     const unsubscribe = subscribe((ev) => {
-      if (open) void stream.writeSSE({ data: JSON.stringify(ev) });
+      if (open && visible(ev)) void stream.writeSSE({ data: JSON.stringify(ev) });
     });
     stream.onAbort(() => {
       open = false;
@@ -2799,6 +2812,8 @@ void ensurePlugin(); // plugin local de skills (~/.hermes-os/plugin) listo antes
 void readProjects(); // primer parse + sync a projects_cache
 void reconcileRunningTasks(); // arregla tareas 'running' huérfanas de un reinicio
 void recoverOrphanLiveMeetings(); // ingesta juntas en vivo que un reinicio dejó a medias
+// Sesiones de composición que un reinicio dejó "procesando": error con el motivo.
+void reconcileComposicion().catch((err) => console.error("[composicion] reconciliar:", err));
 
 // Jobs periódicos con estado observable (GET /jobs → panel AUTOMATIZACIONES).
 // Presencia: latido para que otras Macs sepan que estamos vivos.

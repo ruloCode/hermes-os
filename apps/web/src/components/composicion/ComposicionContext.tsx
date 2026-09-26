@@ -5,8 +5,9 @@ import { useComposicionState, type ComposicionState } from "./useComposicionStat
 
 const Ctx = createContext<ComposicionState | null>(null);
 
-export function ComposicionProvider({ children }: { children: ReactNode }) {
-  const state = useComposicionState();
+/** `offline`: solo el mock en memoria, sin hablarle al agente (página de QA). */
+export function ComposicionProvider({ children, offline }: { children: ReactNode; offline?: boolean }) {
+  const state = useComposicionState({ offline });
   return <Ctx.Provider value={state}>{children}</Ctx.Provider>;
 }
 

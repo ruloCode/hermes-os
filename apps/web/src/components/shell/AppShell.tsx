@@ -128,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <EstudioView />
             </div>
             <div className={`min-h-0 flex-1 ${view === "composicion" ? "flex flex-col" : "hidden"}`}>
-              <ComposicionView />
+              <ComposicionView active={view === "composicion"} />
             </div>
           </div>
         </main>

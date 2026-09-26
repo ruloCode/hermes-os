@@ -273,6 +273,11 @@ export interface AgentActivityEvent {
   detail?: string;
   machine?: string;
   ts: string;
+  /**
+   * Evento de una herramienta confidencial (Composición): no se espeja en
+   * Supabase y no sale por el túnel en /events. Solo lo ve la red local.
+   */
+  private?: boolean;
 }
 
 /**

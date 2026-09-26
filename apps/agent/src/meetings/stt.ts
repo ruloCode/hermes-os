@@ -117,6 +117,65 @@ async function transcribeScribe(file: Blob, filename: string): Promise<Transcrip
   };
 }
 
+/** Palabra cruda de Scribe con su tiempo (lo que `transcribe()` descarta). */
+export interface ScribeTimedWord {
+  text: string;
+  start: number;
+  end: number;
+  type: "word" | "spacing" | "audio_event";
+  speaker_id?: string;
+  logprob?: number;
+}
+
+/**
+ * Scribe con las palabras CON TIEMPO (diarizado + eventos de audio como
+ * "[canta]"). Composición lo necesita para anclar sílabas a notas; las juntas
+ * siguen usando `transcribe()`, que solo arma texto por hablante.
+ * `language` = código ISO ("es"/"en"); sin él Scribe lo detecta.
+ */
+export async function scribeWords(
+  file: Blob,
+  filename: string,
+  opts: { language?: string; signal?: AbortSignal } = {},
+): Promise<{ words: ScribeTimedWord[]; language?: string; durationSec?: number }> {
+  if (!env.ELEVENLABS_API_KEY) throw new Error("falta ELEVENLABS_API_KEY");
+  const form = new FormData();
+  form.append("file", file, filename);
+  form.append("model_id", "scribe_v2");
+  form.append("diarize", "true");
+  form.append("tag_audio_events", "true");
+  form.append("timestamps_granularity", "word");
+  if (opts.language) form.append("language_code", opts.language);
+
+  const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+    method: "POST",
+    headers: { "xi-api-key": env.ELEVENLABS_API_KEY }, // NO Content-Type manual
+    body: form,
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+  const json = (await res.json()) as ScribeResponse & {
+    words?: (ScribeWord & { start?: number; end?: number; logprob?: number })[];
+    audio_duration_secs?: number;
+  };
+  const words: ScribeTimedWord[] = [];
+  for (const w of json.words ?? []) {
+    if (typeof w.start !== "number" || typeof w.end !== "number") continue;
+    const type = w.type === "spacing" || w.type === "audio_event" ? w.type : "word";
+    words.push({
+      text: w.text ?? "",
+      start: w.start,
+      end: w.end,
+      type,
+      speaker_id: w.speaker_id,
+      logprob: w.logprob,
+    });
+  }
+  return { words, language: json.language_code, durationSec: json.audio_duration_secs };
+}
+
 /**
  * Reconstruye un transcript atribuido por hablante desde words[] con speaker_id.
  * Si no hay diarización utilizable, devuelve el texto plano.

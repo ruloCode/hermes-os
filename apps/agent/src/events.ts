@@ -37,8 +37,9 @@ export function emit(event: Omit<AgentActivityEvent, "ts" | "machine">): void {
       /* listener roto: lo ignoramos */
     }
   }
-  // Espejo asíncrono en Supabase (fire and forget)
-  if (supabase) {
+  // Espejo asíncrono en Supabase (fire and forget). Los privados no salen del
+  // equipo: agent_activity es visible a todo usuario autenticado.
+  if (supabase && !full.private) {
     void supabase
       .from("agent_activity")
       .insert({
