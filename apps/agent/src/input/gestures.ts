@@ -11,7 +11,16 @@ import {
   syncActiveDisplayToCursor,
   tapAction,
 } from "./mouse.js";
-import { getDisplays } from "./windows.js";
+import {
+  dragGrabbed,
+  getDisplays,
+  grabWindowUnderCursor,
+  releaseGrabbed,
+  releaseGrabIfAny,
+  type ThrowDir,
+} from "./windows.js";
+import { runSystemSignAction } from "./sign-actions.js";
+import { isSystemSignAction } from "@hermes/shared";
 
 /**
  * Sesión de control por gestos: UN cliente a la vez (el dashboard). El
@@ -34,7 +43,11 @@ type GestureClientMessage =
   | { t: "move"; x: number; y: number }
   | { t: "pinch"; down: boolean }
   | { t: "scroll"; dy: number }
-  | { t: "key"; action: string };
+  | { t: "key"; action: string }
+  | { t: "sign"; action: string }
+  | { t: "grab"; x: number; y: number }
+  | { t: "drag"; x: number; y: number }
+  | { t: "release"; mode: "drop" | "throw"; dir?: ThrowDir };
 
 const KEY_ACTION_LABEL: Record<string, string> = {
   copy: "copiar (⌘C)",
@@ -109,6 +122,7 @@ export function detachGestureClient(ws: WSContext): void {
   session = null;
   stopTimers();
   releaseAll();
+  releaseGrabIfAny();
   if (wasArmed) emit({ kind: "gestures", detail: "control por gestos desconectado" });
 }
 
@@ -145,6 +159,7 @@ export async function handleGestureMessage(ws: WSContext, raw: string): Promise<
     case "disarm":
       session.armed = false;
       releaseAll();
+      releaseGrabIfAny();
       send(ws, { t: "status", armed: false, accessibility: null });
       emit({ kind: "gestures", detail: "control por gestos desarmado" });
       break;
@@ -165,5 +180,53 @@ export async function handleGestureMessage(ws: WSContext, raw: string): Promise<
         emit({ kind: "gestures", detail: `gesto: ${KEY_ACTION_LABEL[msg.action] ?? msg.action}` });
       }
       break;
+    // ── Agarrar con el puño: grab (ventana bajo el cursor) → drag (palma
+    // normalizada) → release drop/throw. El agente responde grab_result y
+    // release_result para que el HUD diga qué ventana y qué pasó.
+    case "grab": {
+      if (!session.armed || !Number.isFinite(msg.x) || !Number.isFinite(msg.y)) break;
+      const r = await grabWindowUnderCursor(msg.x, msg.y);
+      if (!session || session.ws !== ws) break;
+      send(ws, { t: "grab_result", ok: !("error" in r), detail: "error" in r ? r.error : r.app });
+      if (!("error" in r)) emit({ kind: "gestures", detail: `ventana agarrada: ${r.app}` });
+      break;
+    }
+    case "drag":
+      if (session.armed && Number.isFinite(msg.x) && Number.isFinite(msg.y)) dragGrabbed(msg.x, msg.y);
+      break;
+    case "release": {
+      if (!session.armed) break;
+      const mode = msg.mode === "throw" ? "throw" : "drop";
+      const dir = ["left", "right", "up", "down"].includes(msg.dir ?? "") ? msg.dir : undefined;
+      const r = await releaseGrabbed(mode, dir);
+      if (!session || session.ws !== ws) break;
+      send(ws, {
+        t: "release_result",
+        ok: !("error" in r),
+        detail: "error" in r ? r.error : `${r.app}: ${r.detail}`,
+      });
+      if (!("error" in r)) emit({ kind: "gestures", detail: `ventana ${r.app}: ${r.detail}` });
+      break;
+    }
+    case "sign": {
+      // Seña configurable → acción de SISTEMA del catálogo compartido (las
+      // de browser nunca llegan aquí). El resultado vuelve al cliente para
+      // que el HUD diga qué pasó — "no hay ventana bajo el cursor" es
+      // información, no un fallo silencioso.
+      if (!session.armed || typeof msg.action !== "string" || !isSystemSignAction(msg.action)) break;
+      const result = await runSystemSignAction(msg.action);
+      if (!session || session.ws !== ws) break;
+      send(ws, {
+        t: "sign_result",
+        action: msg.action,
+        ok: result.ok,
+        detail: result.ok ? result.detail : result.error,
+      });
+      emit({
+        kind: "gestures",
+        detail: result.ok ? `seña: ${result.detail}` : `seña ${msg.action}: ${result.error}`,
+      });
+      break;
+    }
   }
 }

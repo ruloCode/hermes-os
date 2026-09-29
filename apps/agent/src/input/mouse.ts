@@ -121,6 +121,11 @@ export interface DisplayRect {
   w: number;
   h: number;
   main: boolean;
+  /** Área VISIBLE (sin menubar ni Dock), si el helper la reporta. */
+  vx?: number;
+  vy?: number;
+  vw?: number;
+  vh?: number;
 }
 
 let displays: DisplayRect[] = [];
@@ -226,6 +231,15 @@ const KEY_ACTIONS = {
   mission_control: { key: "up", modifiers: ["control"] },
   space_left: { key: "left", modifiers: ["control"] },
   space_right: { key: "right", modifiers: ["control"] },
+  // Señas configurables (gesture-signs): más acciones semánticas, mismo
+  // principio — nada de teclas crudas y nada destructivo (cerrar, borrar,
+  // bloquear la sesión quedan fuera a propósito).
+  spotlight: { key: "space", modifiers: ["command"] },
+  screenshot_area: { key: "4", modifiers: ["command", "shift"] },
+  play_pause: { key: "audio_play", modifiers: [] },
+  volume_up: { key: "audio_vol_up", modifiers: [] },
+  volume_down: { key: "audio_vol_down", modifiers: [] },
+  mute: { key: "audio_mute", modifiers: [] },
 } as const;
 
 export type KeyAction = keyof typeof KEY_ACTIONS;

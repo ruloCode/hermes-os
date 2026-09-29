@@ -19,10 +19,6 @@ import { activityHourly, emit, recentEvents, subscribe } from "./events.js";
 import { viaTunnel } from "./composicion/privacy.js";
 import { getPresence, listPresence, pushPresence, selfBaseUrl } from "./presence.js";
 import { readProjects, resolveProjectRoot } from "./vault/projects.js";
-import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
-import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
-import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
-import { SalaValidationError } from "@hermes/shared";
 import { readProjectContext } from "./vault/project-context.js";
 import { resolveVaultDoc } from "./vault/doc.js";
 import { memoriesCount, recentMemories, saveMemory, hasSupabase } from "./memory.js";
@@ -97,6 +93,11 @@ import {
 } from "./input/gestures.js";
 import { mouseStatus } from "./input/mouse.js";
 import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
+import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
+import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
+import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
+import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
+import { SalaValidationError } from "@hermes/shared";
 import {
   openInBrowser,
   listTabs,
@@ -692,7 +693,33 @@ app.post("/input/windows/teleport", async (c) => {
   return c.json(result);
 });
 
-// WS de control: JSON ↑ (arm/disarm/move/pinch/scroll/key) · JSON ↓ (hello/status/ping).
+// Señas de mano configurables: forma/muestras → acción. Viven en
+// ~/.hermes-os/gesture-signs.json (de esta máquina); el browser las carga al
+// armar el control por gestos y las edita desde el panel "Señas de mano".
+app.get("/input/gestures/signs", async (c) => {
+  if (!env.GESTURES_ENABLED) return c.json({ error: "gestos desactivados" }, 404);
+  return c.json(await readSignsConfig());
+});
+
+app.put("/input/gestures/signs", async (c) => {
+  if (!env.GESTURES_ENABLED) return c.json({ error: "gestos desactivados" }, 404);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON inválido" }, 400);
+  }
+  try {
+    const config = await writeSignsConfig(body);
+    emit({ kind: "gestures", detail: `señas guardadas (${config.signs.length})` });
+    return c.json(config);
+  } catch (err) {
+    if (err instanceof SignsValidationError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
+});
+
+// WS de control: JSON ↑ (arm/disarm/move/pinch/scroll/key/sign) · JSON ↓ (hello/status/ping/sign_result).
 // Auth global en el upgrade (?key=, igual que la junta). Cliente único.
 app.get(
   "/input/gestures/ws",

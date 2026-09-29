@@ -37,6 +37,8 @@ export interface CommandContext {
   gesturesActive: boolean;
   /** Enciende/apaga el control por gestos (webcam → cursor del sistema). */
   toggleGestures: () => void;
+  /** Abre el panel de señas de mano (forma sostenida → acción configurable). */
+  openSigns: () => void;
   /** Manos sobre la UI activas (cursor de mano + clic + scroll en la web). */
   uiHandsActive: boolean;
   /** Enciende/apaga las manos sobre la UI. */
@@ -203,6 +205,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.toggleGestures(),
   },
   {
+    id: "senas-mano",
+    label: "Señas de mano",
+    slash: "/señas",
+    hint: "Configura qué hace cada seña: hablar con Hermes, mover ventanas, comandos…",
+    run: (ctx) => ctx.openSigns(),
+  },
+  {
     id: "manos-ui",
     label: "Manos sobre la UI",
     slash: "/manos",
@@ -314,6 +323,7 @@ export function useCommandContext(): CommandContext {
       if (gestures.active) gestures.stop();
       else void gestures.start();
     },
+    openSigns: gestures.openSigns,
     uiHandsActive: uiHands.active,
     toggleUiHands: () => {
       if (uiHands.active) uiHands.stop();

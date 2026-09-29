@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { DataRow } from "@/components/ui/DataRow";
+import { shapeGlyph } from "@hermes/shared";
 import { useGestureControl, type GestureFrame } from "@/state/GestureControlProvider";
 
 // Conexiones esqueléticas de la mano (índices de los 21 landmarks).
@@ -26,7 +27,14 @@ export default function GesturesQA() {
   const g = useGestureControl();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [frame, setFrame] = useState<GestureFrame>({ landmarks: null, decision: null, fps: 0 });
+  const [frame, setFrame] = useState<GestureFrame>({
+    landmarks: null,
+    decision: null,
+    fps: 0,
+    shape: null,
+    sign: null,
+    vector: null,
+  });
 
   // Preview: mismo stream que usa el tracking (no abre otra cámara).
   useEffect(() => {
@@ -133,6 +141,13 @@ export default function GesturesQA() {
           >
             {g.active ? "Apagar" : "Encender control por gestos"}
           </button>
+          <button
+            type="button"
+            onClick={g.openSigns}
+            className="rounded-sm border border-line px-3 py-1.5 text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-text"
+          >
+            Señas de mano
+          </button>
           {g.active && g.hudSupported && !g.hudOpen && (
             <button
               type="button"
@@ -181,6 +196,16 @@ export default function GesturesQA() {
             value={lastAction ? lastAction.label : "—"}
           />
           <DataRow label="HUD FLOTANTE" value={g.hudOpen ? "ABIERTO" : g.hudSupported ? "disponible" : "no soportado"} />
+          <DataRow label="DEDOS" value={frame.shape ? shapeGlyph(frame.shape) : "—"} />
+          <DataRow
+            label="SEÑA"
+            tone={frame.sign?.candidate ? "cyan" : "neutral"}
+            value={
+              frame.sign?.candidate
+                ? `${frame.sign.candidate} · ${Math.round(frame.sign.progress * 100)}%`
+                : "—"
+            }
+          />
         </div>
         <div className="mt-4 flex flex-col gap-1 text-2xs leading-relaxed text-text-dim">
           <p>· Mano abierta = mover cursor (zona activa central del encuadre).</p>
@@ -189,7 +214,9 @@ export default function GesturesQA() {
           <p>· Índice+medio = scroll vertical · swipe horizontal rápido = cambiar Space.</p>
           <p>· Palma abierta empujando hacia la cámara = Mission Control.</p>
           <p>· Empujar el cursor contra el borde ~300ms = cruzar al otro monitor.</p>
-          <p>· Puño sostenido 1.2s = apagar todo (kill switch).</p>
+          <p>· Puño QUIETO 1.2s = apagar todo (kill switch).</p>
+          <p>· Puño + mover = agarrar la ventana bajo el cursor; abrir la mano con impulso la lanza (←→ mitad/otro monitor · ↑ maximizar · ↓ centrar); sin impulso se queda.</p>
+          <p>· Señas configurables (🤙 voz · 🤟 ventana al otro monitor · 🤫 mute · pulgar+índice+medio maximizar): botón "Señas de mano".</p>
           <p>· Umbral pinzas: cierra &lt;0.28 · abre &gt;0.42 (histéresis).</p>
         </div>
       </Panel>

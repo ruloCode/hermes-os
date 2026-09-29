@@ -17,6 +17,9 @@
  *  - índice+medio          → scroll vertical · swipe horizontal = Spaces
  *  - palma empujando (z)   → Mission Control (crece la escala de la mano)
  *  - puño sostenido        → kill switch (lo temporiza el provider)
+ *  - puño + mover          → agarrar la ventana bajo el cursor (provider:
+ *                            sigue a `palm`; al abrir la mano con velocidad
+ *                            se "lanza": ←→ mitad/monitor, ↑ maximizar, ↓ centrar)
  */
 
 export interface Landmark {
@@ -45,6 +48,9 @@ export interface FrameDecision {
   pinchRatio: number;
   /** Acción discreta disparada ESTE frame (edge-trigger), o null. */
   action: GestureAction | null;
+  /** Centro de la palma en coords de PANTALLA (espejado, zona activa): es lo
+   *  que sigue la ventana agarrada con el puño — la pinza no existe ahí. */
+  palm: { x: number; y: number };
 }
 
 // Las pinzas se miden relativas al tamaño de la mano (muñeca→nudillo medio)
@@ -107,6 +113,14 @@ export class GestureEngine {
     const pinkyUp = extended(lm, 20, 18);
 
     let action: GestureAction | null = null;
+    const palmRaw = {
+      x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
+      y: (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5,
+    };
+    const palm = {
+      x: mapZone(1 - palmRaw.x, ZONE.left, ZONE.right),
+      y: mapZone(palmRaw.y, ZONE.top, ZONE.bottom),
+    };
 
     // ── Pinza índice: prioridad absoluta (un drag en curso no se interrumpe).
     if (this.pinchDown) {
@@ -143,7 +157,7 @@ export class GestureEngine {
     // mano es un gesto natural — no lo confundas con el kill switch).
     if (!indexUp && !middleUp && !ringUp && !pinkyUp && !this.pinchDown) {
       this.resetTemporal();
-      return { pose: "fist", pinching: false, cursor: null, pinchRatio: rIndex, action: null };
+      return { pose: "fist", pinching: false, cursor: null, pinchRatio: rIndex, action: null, palm };
     }
 
     // ── Scroll (índice+medio, resto plegado): vertical lo maneja el
@@ -163,7 +177,7 @@ export class GestureEngine {
       }
       this.lastSwipe = { mx, t: tMs };
       this.lastScale = null;
-      return { pose: "scroll", pinching: false, cursor: null, pinchRatio: rIndex, action };
+      return { pose: "scroll", pinching: false, cursor: null, pinchRatio: rIndex, action, palm };
     }
     this.lastSwipe = null;
 
@@ -200,7 +214,7 @@ export class GestureEngine {
             x: mapZone(1 - mid.x, ZONE.left, ZONE.right),
             y: mapZone(mid.y, ZONE.top, ZONE.bottom),
           };
-    return { pose: "pointer", pinching: this.pinchDown, cursor, pinchRatio: rIndex, action };
+    return { pose: "pointer", pinching: this.pinchDown, cursor, pinchRatio: rIndex, action, palm };
   }
 
   private resetTemporal(): void {

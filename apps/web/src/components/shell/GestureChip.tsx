@@ -28,6 +28,12 @@ export function GestureChip() {
   } else if (!g.handVisible) {
     label = "Gestos · sin mano";
   }
+  // Última seña ejecutada, unos segundos: que se vea qué disparó la mano.
+  const ev = g.lastSignEvent;
+  if (g.phase === "tracking" && ev && Date.now() - ev.at < 4000) {
+    label = `${ev.ok ? "✓" : "✕"} ${ev.text}`;
+    if (!ev.ok) cls = "border-amber/60 bg-amber/10 text-amber";
+  }
 
   return (
     <button

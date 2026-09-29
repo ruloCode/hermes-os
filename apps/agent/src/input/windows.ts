@@ -188,3 +188,200 @@ export async function teleportWindowUnderCursor(): Promise<
   }
   return { app: win.app, title: win.title, display: to.id };
 }
+
+export type WindowArrangeOp = "snap_left" | "snap_right" | "maximize" | "center";
+
+/**
+ * Acomoda la ventana bajo el cursor dentro del área VISIBLE de su display
+ * (sin menubar ni Dock): mitad izquierda/derecha, toda la pantalla (sin
+ * entrar en fullscreen) o centrada conservando el tamaño. Es lo que las
+ * señas configurables usan para "mover ventanas" sin arrastrar.
+ */
+export async function arrangeWindowUnderCursor(
+  op: WindowArrangeOp,
+): Promise<{ app: string; title: string; op: WindowArrangeOp } | { error: string }> {
+  const ctx = await pointerContext();
+  if (!ctx.window) return { error: "no hay ventana bajo el cursor" };
+  const display = ctx.display ?? (await getDisplays())[0];
+  if (!display) return { error: "sin displays (¿helper nativo sin compilar?)" };
+  const vis = {
+    x: display.vx ?? display.x,
+    y: display.vy ?? display.y,
+    w: display.vw ?? display.w,
+    h: display.vh ?? display.h,
+  };
+  const win = ctx.window;
+  const half = Math.round(vis.w / 2);
+  let frame: { x: number; y: number; w: number; h: number };
+  switch (op) {
+    case "snap_left":
+      frame = { x: vis.x, y: vis.y, w: half, h: vis.h };
+      break;
+    case "snap_right":
+      frame = { x: vis.x + half, y: vis.y, w: vis.w - half, h: vis.h };
+      break;
+    case "maximize":
+      frame = { ...vis };
+      break;
+    case "center": {
+      const w = Math.min(win.w, vis.w);
+      const h = Math.min(win.h, vis.h);
+      frame = {
+        x: Math.round(vis.x + (vis.w - w) / 2),
+        y: Math.round(vis.y + (vis.h - h) / 2),
+        w,
+        h,
+      };
+      break;
+    }
+  }
+  const ok = await request("setFrame", { pid: win.pid, fromX: win.x, fromY: win.y, ...frame });
+  if (!ok) {
+    return {
+      error:
+        "AX no pudo acomodar la ventana (¿permiso Accessibility? ¿helper viejo? — scripts/build-window-helper.sh)",
+    };
+  }
+  await request("focus", { pid: win.pid, x: frame.x, y: frame.y });
+  return { app: win.app, title: win.title, op };
+}
+
+// ── Agarrar con el puño ─────────────────────────────────────────────────
+// El browser manda la palma normalizada (0-1 del display activo, espejada)
+// mientras el puño está cerrado; la ventana se desplaza el mismo delta en
+// píxeles. Al abrir la mano: `drop` la deja donde quedó; `throw` con
+// dirección la manda al monitor de ese lado (si existe) o a esa mitad,
+// arriba = maximizar, abajo = centrar. Un solo agarre a la vez.
+
+export type ThrowDir = "left" | "right" | "up" | "down";
+
+interface Grab {
+  handle: number;
+  win: WindowInfo;
+  display: DisplayRect;
+  start: { nx: number; ny: number };
+  /** Posición actual de la ventana (la última que mandamos). */
+  cur: { x: number; y: number };
+  busy: boolean;
+}
+
+let grab: Grab | null = null;
+
+export async function grabWindowUnderCursor(
+  nx: number,
+  ny: number,
+): Promise<{ app: string; title: string } | { error: string }> {
+  if (grab) await releaseGrabbed("drop");
+  const ctx = await pointerContext();
+  if (!ctx.window) return { error: "no hay ventana bajo el cursor" };
+  const display = ctx.display ?? (await getDisplays())[0];
+  if (!display) return { error: "sin displays (¿helper nativo sin compilar?)" };
+  const handle = (await request("grab", { pid: ctx.window.pid, x: ctx.window.x, y: ctx.window.y })) as
+    | number
+    | null;
+  if (typeof handle !== "number") {
+    return { error: "AX no pudo agarrar la ventana (¿permiso Accessibility? ¿helper viejo?)" };
+  }
+  grab = {
+    handle,
+    win: ctx.window,
+    display,
+    start: { nx, ny },
+    cur: { x: ctx.window.x, y: ctx.window.y },
+    busy: false,
+  };
+  return { app: ctx.window.app, title: ctx.window.title };
+}
+
+/** Frame de arrastre: si el anterior aún no terminó, se descarta (no se encolan). */
+export function dragGrabbed(nx: number, ny: number): void {
+  const g = grab;
+  if (!g || g.busy) return;
+  const x = Math.round(g.win.x + (nx - g.start.nx) * g.display.w);
+  const y = Math.round(g.win.y + (ny - g.start.ny) * g.display.h);
+  if (x === g.cur.x && y === g.cur.y) return;
+  g.busy = true;
+  g.cur = { x, y };
+  void request("drag", { grab: g.handle, x, y }).finally(() => {
+    g.busy = false;
+  });
+}
+
+function displayToward(from: DisplayRect, dir: "left" | "right", all: DisplayRect[]): DisplayRect | null {
+  const cx = from.x + from.w / 2;
+  const candidates = all.filter((d) => d.id !== from.id && (dir === "left" ? d.x + d.w / 2 < cx : d.x + d.w / 2 > cx));
+  candidates.sort((a, b) => Math.abs(a.x + a.w / 2 - cx) - Math.abs(b.x + b.w / 2 - cx));
+  return candidates[0] ?? null;
+}
+
+export async function releaseGrabbed(
+  mode: "drop" | "throw",
+  dir?: ThrowDir,
+): Promise<{ app: string; detail: string } | { error: string }> {
+  const g = grab;
+  if (!g) return { error: "no hay ventana agarrada" };
+  grab = null;
+  const win = { ...g.win, x: g.cur.x, y: g.cur.y };
+  // El display donde quedó la ventana (pudo cruzar arrastrando).
+  const displays = await getDisplays();
+  const at =
+    displays.find((d) => {
+      const cx = win.x + win.w / 2;
+      const cy = win.y + win.h / 2;
+      return cx >= d.x && cx < d.x + d.w && cy >= d.y && cy < d.y + d.h;
+    }) ?? g.display;
+
+  let detail = "soltada";
+  let frame: { x: number; y: number; w: number; h: number } | null = null;
+  if (mode === "throw" && dir) {
+    const vis = { x: at.vx ?? at.x, y: at.vy ?? at.y, w: at.vw ?? at.w, h: at.vh ?? at.h };
+    if (dir === "left" || dir === "right") {
+      const other = displayToward(at, dir, displays);
+      if (other) {
+        // Al otro monitor conservando la posición relativa (como el teleport).
+        const relX = Math.min(Math.max((win.x - at.x) / at.w, 0), 0.9);
+        const relY = Math.min(Math.max((win.y - at.y) / at.h, 0), 0.9);
+        frame = { x: Math.round(other.x + relX * other.w), y: Math.round(other.y + relY * other.h), w: win.w, h: win.h };
+        detail = `→ display ${other.id}`;
+      } else {
+        const half = Math.round(vis.w / 2);
+        frame =
+          dir === "left"
+            ? { x: vis.x, y: vis.y, w: half, h: vis.h }
+            : { x: vis.x + half, y: vis.y, w: vis.w - half, h: vis.h };
+        detail = dir === "left" ? "mitad izquierda" : "mitad derecha";
+      }
+    } else if (dir === "up") {
+      frame = { ...vis };
+      detail = "maximizada";
+    } else {
+      const w = Math.min(win.w, vis.w);
+      const h = Math.min(win.h, vis.h);
+      frame = { x: Math.round(vis.x + (vis.w - w) / 2), y: Math.round(vis.y + (vis.h - h) / 2), w, h };
+      detail = "centrada";
+    }
+  }
+  await request("release", { grab: g.handle });
+  if (frame) {
+    const ok = await request("setFrame", { pid: win.pid, fromX: win.x, fromY: win.y, ...frame });
+    if (!ok) return { error: "AX no pudo acomodar la ventana al soltarla" };
+  }
+  const fin = frame ?? { x: win.x, y: win.y, w: win.w, h: win.h };
+  await request("focus", { pid: win.pid, x: fin.x, y: fin.y });
+  // El cursor gestual aterriza sobre la ventana, donde sea que haya quedado.
+  const target =
+    displays.find((d) => {
+      const cx = fin.x + fin.w / 2;
+      return cx >= d.x && cx < d.x + d.w;
+    }) ?? at;
+  setActiveDisplay(target.id);
+  if (getActiveDisplay()) {
+    moveTo((fin.x + fin.w / 2 - target.x) / target.w, (fin.y + fin.h / 2 - target.y) / target.h);
+  }
+  return { app: win.app, detail };
+}
+
+/** Red de seguridad al desconectar: nada queda "agarrado" en el helper. */
+export function releaseGrabIfAny(): void {
+  if (grab) void releaseGrabbed("drop");
+}

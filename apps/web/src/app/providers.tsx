@@ -14,6 +14,8 @@ import { LiveMeetingProvider } from "@/state/LiveMeetingProvider";
 import { GestureControlProvider } from "@/state/GestureControlProvider";
 import { UiHandsProvider } from "@/state/UiHandsProvider";
 import { DocViewerProvider } from "@/components/DocViewer";
+import { SignActionsBridge } from "@/components/gestures/SignActionsBridge";
+import { SignsPanel } from "@/components/gestures/SignsPanel";
 import { AppShell } from "@/components/shell/AppShell";
 import { BootGate } from "@/components/boot/BootGate";
 
@@ -32,6 +34,7 @@ import { BootGate } from "@/components/boot/BootGate";
  *  - GestureControlProvider→ control por gestos (webcam → cursor del sistema)
  *  - UiHandsProvider       → manos sobre la UI (cursor de mano + clic + scroll)
  *  - DocViewerProvider     → visor global de docs .md del vault
+ *  - SignActionsBridge + SignsPanel → señas de mano (acciones de dashboard + panel)
  *  - BootGate              → cortina de arranque (BootLoader) sobre el AppShell;
  *                            lee online/snapshot/connected y se desmonta al cargar
  * AppShell monta header + vistas (Orquestador·Finanzas·Hábitos·Inglés·Agenda)
@@ -53,6 +56,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
                       <GestureControlProvider>
                         <UiHandsProvider>
                           <DocViewerProvider>
+                            {/* Señas de mano: ejecutor de acciones de dashboard +
+                                panel de configuración, para TODAS las rutas. */}
+                            <SignActionsBridge />
+                            <SignsPanel />
                             <BootGate>
                               <AppShell>{children}</AppShell>
                             </BootGate>

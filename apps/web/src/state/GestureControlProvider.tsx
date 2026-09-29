@@ -16,9 +16,15 @@
 //
 // Seguridad operativa:
 //  - Nunca arranca solo: siempre lo enciende un comando explícito (⌘K).
-//  - Kill switch físico: puño cerrado sostenido ~1.2s apaga todo.
+//  - Kill switch físico: puño cerrado sostenido ~1.2s QUIETO apaga todo
+//    (puño + mover = agarrar la ventana bajo el cursor; ver grabRef).
 //  - Sin PiP y pestaña oculta => rAF congelado => el watchdog del agente
 //    suelta el botón: quedarse "agarrado" no es un estado posible.
+//
+// Señas configurables (packages/shared/gesture-signs.ts): formas estáticas
+// sostenidas ~650ms → acción de sistema (WS `sign` → agente) o de dashboard
+// (handler de SignActionsBridge). La config vive en el agente
+// (GET/PUT /input/gestures/signs) y se edita en el panel SignsPanel.
 
 import {
   createContext,
@@ -31,7 +37,7 @@ import {
   type ReactNode,
 } from "react";
 import type { HandLandmarker } from "@mediapipe/tasks-vision";
-import { gesturesWsUrl } from "@/lib/hermes";
+import { gesturesWsUrl, hermesGet } from "@/lib/hermes";
 import {
   GestureEngine,
   type FrameDecision,
@@ -39,6 +45,21 @@ import {
   type Landmark,
 } from "@/lib/gestures/engine";
 import { OneEuroFilter } from "@/lib/gestures/one-euro";
+import {
+  BROWSER_SIGN_ACTIONS,
+  SIGN_HOLD_DEFAULT_MS,
+  SIGN_STILL_MAX,
+  SYSTEM_SIGN_ACTIONS,
+  SignClassifier,
+  SignDetector,
+  defaultSignsConfig,
+  fingerShape,
+  isSystemSignAction,
+  normalizeLandmarks,
+  type FingerShape,
+  type SignProgress,
+  type SignsConfig,
+} from "@hermes/shared";
 
 // Document PiP aún no está en lib.dom de TS.
 interface DocumentPip {
@@ -56,7 +77,25 @@ export interface GestureFrame {
   landmarks: Landmark[] | null;
   decision: FrameDecision | null;
   fps: number;
+  /** Forma de dedos del frame (null sin mano). */
+  shape: FingerShape | null;
+  /** Estado de la seña en curso (candidata + carga + disparo de este frame). */
+  sign: SignProgress | null;
+  /** Vector canónico de la mano (para enseñar señas; null sin mano). */
+  vector: number[] | null;
 }
+
+/** Resultado de ejecutar una acción de seña (agente o dashboard). */
+export interface SignEvent {
+  at: number;
+  signId: string;
+  action: string | null;
+  ok: boolean;
+  text: string;
+}
+
+/** Ejecuta una acción de DASHBOARD (`voice_toggle`, `palette`, `command:<id>`…). */
+export type SignActionHandler = (action: string) => { ok: boolean; text: string };
 
 interface GestureControlValue {
   phase: GesturePhase;
@@ -80,6 +119,21 @@ interface GestureControlValue {
   getStream: () => MediaStream | null;
   /** Frames con landmarks para el overlay de debug (rAF-rate). */
   subscribeFrame: (cb: (f: GestureFrame) => void) => () => void;
+  // ── Señas configurables ──
+  /** Config vigente (de fábrica hasta que el agente responda). */
+  signs: SignsConfig;
+  /** Reemplaza la config en caliente (tras guardarla en el agente). */
+  applySigns: (config: SignsConfig) => void;
+  /** Pausa el disparo de señas (mientras se enseña una nueva). */
+  setSignsPaused: (paused: boolean) => void;
+  /** Registra quién ejecuta las acciones de dashboard (SignActionsBridge). */
+  setSignActionHandler: (handler: SignActionHandler | null) => void;
+  /** Última seña ejecutada (chip/HUD/panel). */
+  lastSignEvent: SignEvent | null;
+  /** Panel "Señas de mano" (takeover). */
+  signsOpen: boolean;
+  openSigns: () => void;
+  closeSigns: () => void;
 }
 
 const GestureControlContext = createContext<GestureControlValue | null>(null);
@@ -87,6 +141,13 @@ const GestureControlContext = createContext<GestureControlValue | null>(null);
 // La cámara chica basta (el modelo trabaja a 224px) y ahorra GPU.
 const VIDEO_CONSTRAINTS = { width: 640, height: 360, frameRate: 30 };
 const FIST_KILL_MS = 1200;
+// Agarre con el puño: cerrar y MOVER más de esto (fracción de pantalla)
+// agarra la ventana bajo el cursor; cerrar y quedarse quieto sigue siendo
+// el kill switch. Al abrir la mano, velocidad (fracción de pantalla / s)
+// sobre el umbral = lanzar en la dirección dominante.
+const GRAB_START = 0.03;
+const THROW_VELOCITY = 1.2;
+const THROW_WINDOW_MS = 140;
 const SCROLL_GAIN = 60; // unidades robotjs por frame de movimiento vertical
 const WASM_LOCAL = "/mediapipe/wasm";
 const WASM_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
@@ -112,6 +173,14 @@ const ACTION_LABEL: Record<GestureAction, string> = {
   mission_control: "MISSION CONTROL",
 };
 
+function signActionLabel(action: string | null): string {
+  if (!action) return "sin acción";
+  const def =
+    SYSTEM_SIGN_ACTIONS.find((a) => a.id === action) ??
+    BROWSER_SIGN_ACTIONS.find((a) => a.id === action);
+  return def?.label ?? action.replace(/^command:/, "⌘K ");
+}
+
 export function GestureControlProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<GesturePhase>("idle");
   const [armed, setArmed] = useState(false);
@@ -120,6 +189,9 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
   const [handVisible, setHandVisible] = useState(false);
   const [pinching, setPinching] = useState(false);
   const [hudOpen, setHudOpen] = useState(false);
+  const [signs, setSigns] = useState<SignsConfig>(() => defaultSignsConfig());
+  const [lastSignEvent, setLastSignEvent] = useState<SignEvent | null>(null);
+  const [signsOpen, setSignsOpen] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -140,6 +212,24 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
   const lastTickRef = useRef(0);
   const lastActionRef = useRef<{ label: string; at: number } | null>(null);
   const subscribersRef = useRef(new Set<(f: GestureFrame) => void>());
+  // Señas: clasificador (forma/muestras) + detector de sostén + despacho.
+  const signsRef = useRef<SignsConfig>(defaultSignsConfig());
+  const classifierRef = useRef<SignClassifier>(new SignClassifier(signsRef.current.signs));
+  const detectorRef = useRef(new SignDetector());
+  const signsPausedRef = useRef(false);
+  const signHandlerRef = useRef<SignActionHandler | null>(null);
+  const signStateRef = useRef<SignProgress | null>(null);
+  const pendingSignRef = useRef<{ signId: string; action: string } | null>(null);
+  // Agarre de ventana con el puño.
+  const grabRef = useRef<{
+    x0: number;
+    y0: number;
+    active: boolean;
+    app: string | null;
+    hist: { x: number; y: number; t: number }[];
+  } | null>(null);
+  // Dónde arrancó a cargar la seña candidata (para exigir mano quieta).
+  const signAnchorRef = useRef<{ id: string; x: number; y: number } | null>(null);
   // HUD flotante (Document PiP).
   const pipRef = useRef<Window | null>(null);
   const hudCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -193,6 +283,12 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
     fistSinceRef.current = null;
     scrollLastYRef.current = null;
     lastActionRef.current = null;
+    detectorRef.current.reset();
+    signStateRef.current = null;
+    pendingSignRef.current = null;
+    signAnchorRef.current = null;
+    if (grabRef.current?.active) send({ t: "release", mode: "drop" });
+    grabRef.current = null;
     setArmed(false);
     setHandVisible(false);
     setPinching(false);
@@ -253,6 +349,26 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
           ctx.fill();
         }
       }
+      // Anillo de carga de la seña candidata (abajo-izquierda) + su nombre.
+      const sign = signStateRef.current;
+      if (sign?.candidate) {
+        const def = signsRef.current.signs.find((x) => x.id === sign.candidate);
+        const cx = 22;
+        const cy = H - 22;
+        ctx.strokeStyle = "rgba(255,255,255,0.25)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = sign.progress >= 1 ? "#22c55e" : "#d97757";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * sign.progress);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.font = "12px ui-monospace, monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(`${def?.emoji ?? "✋"} ${def?.name ?? sign.candidate}`, cx + 18, cy + 4);
+      }
       // Flash de acción (COPIAR/PEGAR/…) durante 900ms.
       const act = lastActionRef.current;
       if (act && now - act.at < 900) {
@@ -263,9 +379,12 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
       }
       const status = hudStatusRef.current;
       if (status) {
+        const grabbing = grabRef.current?.active;
         const state = !armedRef.current
           ? "SIN PERMISO"
-          : decision?.pinching
+          : grabbing
+            ? `AGARRADA${grabRef.current?.app ? ` · ${grabRef.current.app}` : ""}`
+            : decision?.pinching
             ? "PINZA"
             : decision?.pose === "scroll"
               ? "SCROLL"
@@ -332,6 +451,43 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
     rafRef.current = w.requestAnimationFrame(cb);
   }, []);
 
+  // Una seña cumplió su sostén: acción de SISTEMA → WS al agente (responde
+  // con sign_result); acción de DASHBOARD → handler registrado por
+  // SignActionsBridge. Sin acción asignada, el HUD lo dice y no pasa nada.
+  const fireSign = useCallback(
+    (signId: string, now: number) => {
+      const def = signsRef.current.signs.find((x) => x.id === signId);
+      const action = def?.action ?? null;
+      const name = `${def?.emoji ?? ""} ${def?.name ?? signId}`.trim();
+      const report = (ok: boolean, text: string) => {
+        lastActionRef.current = { label: ok ? text : `✕ ${text}`, at: now };
+        setLastSignEvent({ at: Date.now(), signId, action, ok, text });
+      };
+      if (!action) {
+        report(false, `${name}: sin acción`);
+        return;
+      }
+      if (isSystemSignAction(action)) {
+        if (!armedRef.current) {
+          report(false, "agente sin permiso de Accessibility");
+          return;
+        }
+        pendingSignRef.current = { signId, action };
+        send({ t: "sign", action });
+        lastActionRef.current = { label: signActionLabel(action), at: now };
+        return;
+      }
+      const handler = signHandlerRef.current;
+      if (!handler) {
+        report(false, "el dashboard no está montado para esta acción");
+        return;
+      }
+      const r = handler(action);
+      report(r.ok, r.text);
+    },
+    [send],
+  );
+
   const processFrame = useCallback(() => {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
@@ -354,14 +510,20 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         filterY.current.reset();
         fistSinceRef.current = null;
         scrollLastYRef.current = null;
+        // Mano perdida a mitad de un agarre: la ventana se queda donde está.
+        if (grabRef.current?.active) send({ t: "release", mode: "drop" });
+        grabRef.current = null;
+        signAnchorRef.current = null;
         if (handVisibleRef.current) {
           handVisibleRef.current = false;
           setHandVisible(false);
           setPinching(false);
           pinchingRef.current = false;
         }
+        detectorRef.current.reset();
+        signStateRef.current = null;
         drawHud(null, null, now);
-        emitFrame({ landmarks: null, decision: null, fps: fpsRef.current });
+        emitFrame({ landmarks: null, decision: null, fps: fpsRef.current, shape: null, sign: null, vector: null });
       } else {
         if (!handVisibleRef.current) {
           handVisibleRef.current = true;
@@ -369,15 +531,50 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         }
         const decision = engineRef.current.decide(lm, now);
 
-        // Kill switch: puño sostenido apaga el control entero.
+        // ── Puño: agarrar (si se mueve) o kill switch (si se queda quieto).
         if (decision.pose === "fist") {
-          if (fistSinceRef.current === null) fistSinceRef.current = now;
-          else if (now - fistSinceRef.current > FIST_KILL_MS) {
+          const palm = decision.palm;
+          let gr = grabRef.current;
+          if (!gr) {
+            gr = { x0: palm.x, y0: palm.y, active: false, app: null, hist: [] };
+            grabRef.current = gr;
+          }
+          if (!gr.active && Math.hypot(palm.x - gr.x0, palm.y - gr.y0) > GRAB_START) {
+            gr.active = true;
+            fistSinceRef.current = null;
+            send({ t: "grab", x: gr.x0, y: gr.y0 });
+          }
+          if (gr.active) {
+            send({ t: "drag", x: palm.x, y: palm.y });
+            gr.hist.push({ x: palm.x, y: palm.y, t: now });
+            while (gr.hist.length > 2 && now - gr.hist[0].t > THROW_WINDOW_MS * 2) gr.hist.shift();
+          } else if (fistSinceRef.current === null) {
+            fistSinceRef.current = now;
+          } else if (now - fistSinceRef.current > FIST_KILL_MS) {
             stop();
             return;
           }
         } else {
           fistSinceRef.current = null;
+          const gr = grabRef.current;
+          if (gr?.active) {
+            // Mano abierta: ¿la lanzó o la soltó? Velocidad de los últimos ~140ms.
+            const last = gr.hist[gr.hist.length - 1];
+            const ref = [...gr.hist].reverse().find((h) => last.t - h.t >= THROW_WINDOW_MS) ?? gr.hist[0];
+            const dt = (last.t - ref.t) / 1000;
+            const vx = dt > 0 ? (last.x - ref.x) / dt : 0;
+            const vy = dt > 0 ? (last.y - ref.y) / dt : 0;
+            const speed = Math.hypot(vx, vy);
+            if (speed > THROW_VELOCITY) {
+              const dir = Math.abs(vx) >= Math.abs(vy) ? (vx > 0 ? "right" : "left") : vy > 0 ? "down" : "up";
+              send({ t: "release", mode: "throw", dir });
+              lastActionRef.current = { label: { left: "◀ LANZAR", right: "LANZAR ▶", up: "▲ MAXIMIZAR", down: "▼ CENTRAR" }[dir], at: now };
+            } else {
+              send({ t: "release", mode: "drop" });
+              lastActionRef.current = { label: "SOLTADA", at: now };
+            }
+          }
+          grabRef.current = null;
         }
 
         // Acciones discretas (copiar/pegar/Spaces/Mission Control).
@@ -402,7 +599,35 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
           scrollLastYRef.current = null;
         }
 
-        if (decision.cursor) {
+        // ── Señas configurables: solo con la mano en pose de puntero y sin
+        // pinza (las formas del cursor/scroll/puño están reservadas y el
+        // clasificador las rechaza de todos modos). Mientras una seña
+        // "carga", el cursor se CONGELA — sostener 🤙 no debe pasearlo.
+        const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+        const shape = fingerShape(lm, aspect);
+        const eligible =
+          decision.pose === "pointer" && !decision.pinching && decision.cursor !== null && !signsPausedRef.current;
+        let match = eligible ? classifierRef.current.classify(lm, aspect) : null;
+        // Mano QUIETA para cargar: apuntar con un dedo y mover no es 🤫.
+        if (match) {
+          const anchor = signAnchorRef.current;
+          if (!anchor || anchor.id !== match.id) {
+            signAnchorRef.current = { id: match.id, x: decision.palm.x, y: decision.palm.y };
+          } else if (Math.hypot(decision.palm.x - anchor.x, decision.palm.y - anchor.y) > SIGN_STILL_MAX) {
+            signAnchorRef.current = { id: match.id, x: decision.palm.x, y: decision.palm.y };
+            match = null;
+          }
+        } else {
+          signAnchorRef.current = null;
+        }
+        const holdMs = match
+          ? (signsRef.current.signs.find((x) => x.id === match.id)?.holdMs ?? SIGN_HOLD_DEFAULT_MS)
+          : SIGN_HOLD_DEFAULT_MS;
+        const sign = detectorRef.current.update(match?.id ?? null, holdMs, now);
+        signStateRef.current = sign;
+        if (sign.fired) fireSign(sign.fired, now);
+
+        if (decision.cursor && !sign.candidate) {
           send({
             t: "move",
             x: filterX.current.filter(decision.cursor.x, now),
@@ -418,7 +643,14 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         }
 
         drawHud(lm, decision, now);
-        emitFrame({ landmarks: lm, decision, fps: fpsRef.current });
+        emitFrame({
+          landmarks: lm,
+          decision,
+          fps: fpsRef.current,
+          shape,
+          sign,
+          vector: subscribersRef.current.size > 0 ? normalizeLandmarks(lm, aspect) : null,
+        });
       }
 
       // FPS con media móvil exponencial (HUD + página de QA).
@@ -427,7 +659,7 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
       lastTickRef.current = now;
     }
     scheduleFrame(processFrame);
-  }, [drawHud, emitFrame, scheduleFrame, send, stop]);
+  }, [drawHud, emitFrame, fireSign, scheduleFrame, send, stop]);
 
   const connectWs = useCallback(() => {
     let ws: WebSocket;
@@ -446,6 +678,9 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         available?: boolean;
         accessibility?: boolean | null;
         error?: string | null;
+        action?: string;
+        ok?: boolean;
+        detail?: string;
       };
       try {
         msg = JSON.parse(ev.data);
@@ -463,6 +698,29 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         setArmed(msg.armed === true);
         armedRef.current = msg.armed === true;
         if (msg.accessibility !== undefined) setAccessibility(msg.accessibility);
+      } else if (msg.t === "grab_result") {
+        if (grabRef.current) grabRef.current.app = msg.ok ? (msg.detail ?? null) : null;
+        if (!msg.ok) {
+          lastActionRef.current = { label: `✕ ${msg.detail ?? "sin ventana"}`, at: performance.now() };
+          grabRef.current = null; // nada que arrastrar: el puño vuelve a ser kill switch
+        }
+      } else if (msg.t === "release_result") {
+        const text = msg.detail ?? "";
+        lastActionRef.current = { label: msg.ok ? text : `✕ ${text}`, at: performance.now() };
+        setLastSignEvent({ at: Date.now(), signId: "grab", action: "window_grab", ok: msg.ok === true, text });
+      } else if (msg.t === "sign_result") {
+        // El agente cuenta qué pasó ("no hay ventana bajo el cursor" incluido).
+        const pending = pendingSignRef.current;
+        pendingSignRef.current = null;
+        const text = msg.detail ?? signActionLabel(msg.action ?? null);
+        lastActionRef.current = { label: msg.ok ? text : `✕ ${text}`, at: performance.now() };
+        setLastSignEvent({
+          at: Date.now(),
+          signId: pending?.signId ?? "",
+          action: msg.action ?? null,
+          ok: msg.ok === true,
+          text,
+        });
       }
     };
     ws.onclose = (ev: CloseEvent) => {
@@ -474,6 +732,21 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
       else fail("Se perdió la conexión con el agente.");
     };
   }, [fail, send]);
+
+  const applySigns = useCallback((config: SignsConfig) => {
+    signsRef.current = config;
+    classifierRef.current = new SignClassifier(config.signs);
+    detectorRef.current.reset();
+    setSigns(config);
+  }, []);
+
+  const loadSigns = useCallback(async () => {
+    try {
+      applySigns(await hermesGet<SignsConfig>("/input/gestures/signs"));
+    } catch {
+      /* agente sin señas o apagado: siguen las de fábrica */
+    }
+  }, [applySigns]);
 
   const start = useCallback(
     async (opts?: { hud?: boolean }) => {
@@ -524,8 +797,10 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // 3. WS al agente + loop de inferencia.
+        // 3. WS al agente + loop de inferencia. Las señas se cargan en
+        // paralelo: hasta que lleguen rigen las de fábrica.
         connectWs();
+        void loadSigns();
         setPhase("tracking");
         scheduleFrame(processFrame);
       } catch (err) {
@@ -537,7 +812,7 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         );
       }
     },
-    [connectWs, fail, openHud, processFrame, scheduleFrame, teardown],
+    [connectWs, fail, loadSigns, openHud, processFrame, scheduleFrame, teardown],
   );
 
   // Desmontaje del provider (recarga de la app): apagar todo.
@@ -562,8 +837,36 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         subscribersRef.current.add(cb);
         return () => subscribersRef.current.delete(cb);
       },
+      signs,
+      applySigns,
+      setSignsPaused: (paused) => {
+        signsPausedRef.current = paused;
+        if (paused) detectorRef.current.reset();
+      },
+      setSignActionHandler: (handler) => {
+        signHandlerRef.current = handler;
+      },
+      lastSignEvent,
+      signsOpen,
+      openSigns: () => setSignsOpen(true),
+      closeSigns: () => setSignsOpen(false),
     }),
-    [phase, armed, accessibility, error, handVisible, pinching, hudOpen, start, stop, openHud],
+    [
+      phase,
+      armed,
+      accessibility,
+      error,
+      handVisible,
+      pinching,
+      hudOpen,
+      start,
+      stop,
+      openHud,
+      signs,
+      applySigns,
+      lastSignEvent,
+      signsOpen,
+    ],
   );
 
   return <GestureControlContext.Provider value={value}>{children}</GestureControlContext.Provider>;
