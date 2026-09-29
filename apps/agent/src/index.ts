@@ -108,6 +108,7 @@ import {
   type BrowserCommand,
 } from "./browser.js";
 import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
+import { avatarProvider, terminatorAvatar } from "./avatar.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
 import {
@@ -817,6 +818,22 @@ app.post("/lights/command", async (c) => {
 });
 
 app.get("/lights/state", async (c) => c.json(await lightsCommand("status")));
+
+// ── Avatar Terminator (demo) ───────────────────────────────────────────
+// Foto de la cámara (multipart `photo`) → avatar T-800 de esa persona.
+// Proveedor: Higgsfield si hay keys, si no gpt-image (ver avatar.ts).
+// Contrato { ok, image (data URL), provider, ms | error }, 200 siempre que la
+// petición sea válida — el error se relata, no se esconde en un 500.
+app.get("/avatar/provider", (c) => c.json({ provider: avatarProvider() }));
+
+app.post("/avatar/terminator", bodyLimit({ maxSize: 20 * 1024 * 1024 }), async (c) => {
+  const body = await c.req.parseBody();
+  const photo = body.photo;
+  if (!photo || typeof photo === "string") {
+    return c.json({ ok: false, error: "photo (imagen de la cámara) requerida" }, 400);
+  }
+  return c.json(await terminatorAvatar(photo));
+});
 
 // Historial de reuniones de un proyecto.
 app.get("/meetings/:project", async (c) => c.json(await listMeetings(c.req.param("project"))));

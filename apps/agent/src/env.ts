@@ -24,6 +24,10 @@ export const env = {
   SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  // Avatar Terminator (demo, avatar.ts): con estas dos manda Higgsfield
+  // (console.higgsfield.ai → API keys); sin ellas cae a gpt-image con OPENAI.
+  HIGGSFIELD_API_KEY_ID: process.env.HIGGSFIELD_API_KEY_ID || "",
+  HIGGSFIELD_API_KEY_SECRET: process.env.HIGGSFIELD_API_KEY_SECRET || "",
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || "",
   // Agente de voz de ElevenLabs. Comparte el valor con el dashboard web
   // (NEXT_PUBLIC_…) para que la app móvil obtenga el token del mismo agente.
