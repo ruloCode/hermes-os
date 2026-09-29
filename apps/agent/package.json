@@ -16,7 +16,7 @@
     "test": "node --test --import tsx 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.247",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.274",
     "@hermes/shared": "workspace:*",
     "@hono/node-server": "^2.1.1",
     "@jitsi/robotjs": "^0.6.24",

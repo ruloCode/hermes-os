@@ -53,10 +53,31 @@ u = json.load(open("/tmp/hermes-api-check.json")).get("usage", {})
 print(f"✓ Key válida. Prueba: {u.get('input_tokens',0)} in / {u.get('output_tokens',0)} out tokens.")
 PY
 
+cd "$(dirname "$0")/.."
+
+# La API acepta el modelo, pero Hermes no le habla directo: el Agent SDK
+# spawnea el `claude` que trae EMPAQUETADO, y la API rechaza los modelos
+# nuevos si esa versión del CLI es vieja ("does not support this model").
+# Sin esta prueba el choque aparece a los minutos, dentro de una junta.
+CLI=$(ls -d "$PWD"/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-darwin-arm64@*/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude 2>/dev/null | tail -1)
+if [[ -n "$CLI" ]]; then
+  echo "→ Probando $MODEL con el CLI del SDK ($("$CLI" --version 2>/dev/null | cut -d' ' -f1))…"
+  # Desde $HOME: sin settings ni plugins del repo de por medio.
+  if ! OUT=$(cd "$HOME" && ANTHROPIC_API_KEY="$KEY" "$CLI" -p --model "$MODEL" "di: listo" < /dev/null 2>&1); then
+    echo "✕ El CLI que trae el Agent SDK rechazó $MODEL:" >&2
+    echo "   ${OUT}" >&2
+    echo "  Si dice 'does not support this model', el SDK está viejo:" >&2
+    echo "    pnpm --filter @hermes/agent up @anthropic-ai/claude-agent-sdk@latest" >&2
+    exit 1
+  fi
+  echo "✓ El CLI del SDK corre $MODEL."
+else
+  echo "⚠ No encontré el CLI del SDK en node_modules (¿falta pnpm install?)." >&2
+fi
+
 echo "→ Deteniendo el Hermes de producción (suscripción)…"
 launchctl bootout "gui/$UID/com.hermes-os.agent" 2>/dev/null || true
 
-cd "$(dirname "$0")/.."
 echo "→ Levantando Hermes con $MODEL contra los créditos de la API."
 echo "  Al terminar: Ctrl-C y luego  ./hermes install  (vuelve a la suscripción)."
 echo
