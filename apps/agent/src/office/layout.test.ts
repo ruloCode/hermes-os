@@ -62,7 +62,7 @@ describe("buildOfficeLayout", () => {
   });
 
   it("un pod crece de dos en dos sin mover sus escritorios anteriores", () => {
-    assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 9].map(podDeskCount), [2, 2, 4, 4, 6, 6, 6, 6]);
+    assert.deepEqual([0, 1, 2, 3, 4, 5, 9].map(podDeskCount), [2, 2, 4, 4, 4, 4, 4]);
     const small = buildOfficeLayout(PROJECTS, { p0: 1 });
     const big = buildOfficeLayout(PROJECTS, { p0: 3 });
     const pod = (l: typeof small) => l.pods.find((p) => p.project === "p0")!.desks;
@@ -116,11 +116,11 @@ describe("assignSeats", () => {
   it("proyecto sin pod → general; pod lleno → general y luego cualquiera", () => {
     const { seats } = assignSeats([{ id: "x", project: "desconocido" }], layout.desks);
     assert.equal(seats.get("x"), "desk:general:0");
-    const tiny = buildOfficeLayout([{ slug: "p0", name: "P0" }]);
-    const many = Array.from({ length: 5 }, (_, i) => ({ id: `w${i}`, project: "p0" }));
-    const r = assignSeats(many, tiny.desks);
-    assert.equal(r.seats.size, 4);
-    assert.deepEqual(r.unseated, ["w4"]);
+    // p0 lleno (4) + general (2) = 6 escritorios para 7 personajes.
+    const many = Array.from({ length: 7 }, (_, i) => ({ id: `w${i}`, project: "p0" }));
+    const r = assignSeats(many, buildOfficeLayout([{ slug: "p0", name: "P0" }], { p0: 7 }).desks);
+    assert.equal(r.seats.size, 6);
+    assert.deepEqual(r.unseated, ["w6"]);
     assert.ok([...r.seats.values()].some((d) => d.startsWith("desk:general:")));
   });
 });

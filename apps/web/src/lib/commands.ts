@@ -178,6 +178,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/composicion"),
   },
   {
+    id: "ver-oficina",
+    label: "Oficina de agentes",
+    slash: "/oficina",
+    hint: "Oficina 3D: cada run de Claude es un personaje en su escritorio, por proyecto",
+    run: (ctx) => ctx.navigate("/oficina"),
+  },
+  {
     id: "ver-sala",
     label: "Sala de agentes",
     slash: "/sala",

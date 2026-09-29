@@ -6,6 +6,7 @@
 // SDK. Las sparklines son deltas reales de toolCalls entre polls (un run
 // recién visto no tiene curva todavía — nunca se dibuja una falsa).
 
+import Link from "next/link";
 import type { Stats } from "@/hooks/useHermesData";
 import { useOrchestrator } from "@/state/OrchestratorProvider";
 import { Panel } from "@/components/ui/Panel";
@@ -31,7 +32,12 @@ export function ActiveAgentsList({ stats, online }: { stats: Stats | null; onlin
       title="Agentes activos"
       delay={110}
       right={
-        <span className="font-display text-xs tabular-nums text-accent">{count}</span>
+        <span className="flex items-center gap-2">
+          <Link href="/oficina" className="text-xs text-text-dim hover:text-accent" title="Oficina 3D de agentes">
+            ver oficina ↗
+          </Link>
+          <span className="font-display text-xs tabular-nums text-accent">{count}</span>
+        </span>
       }
     >
       <div className="space-y-2">

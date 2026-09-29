@@ -26,7 +26,7 @@ const HARD_MS = 6500;  // tope: dispara aunque el agente esté offline
 // /dev): ahí la cortina de arranque del dashboard no pinta nada — un viajero
 // frente a una pantalla de estación no tiene por qué ver cargar un tablero de
 // proyectos. Son las mismas rutas que no usan el AppShell.
-const STANDALONE = ["/sala", "/estacion", "/m/", "/dev/"];
+const STANDALONE = ["/sala", "/oficina", "/estacion", "/m/", "/dev/"];
 
 export function BootGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

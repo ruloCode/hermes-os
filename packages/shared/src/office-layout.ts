@@ -13,12 +13,12 @@ import { GENERAL_PROJECT } from "./office.js";
 export const DESK_SIZE = { width: 2.2, depth: 1.1, height: 0.78 } as const;
 /** Escritorios de un pod vacío (una pareja espalda con espalda). */
 export const POD_BASE_DESKS = 2;
-/** Tope de un pod: tres parejas. */
-export const POD_MAX_DESKS = 6;
+/** Tope de un pod: dos parejas (los que no caben van al pod general, luego a cualquiera). */
+export const POD_MAX_DESKS = 4;
 /** Columnas fijas de la grilla de pods (fijas = agregar proyectos no re-acomoda). */
-export const POD_COLUMNS = 4;
+export const POD_COLUMNS = 3;
 /** Distancia entre centros de pods: cabe un pod lleno con sus sillas y un pasillo. */
-export const POD_PITCH = { x: DESK_SIZE.width * 3 + 2.2, z: 6.2 } as const;
+export const POD_PITCH = { x: DESK_SIZE.width * 3, z: 6 } as const;
 /** Anclas locales (en el marco del escritorio). */
 export const SEAT_ANCHOR = { x: 0, y: 0.4, z: 0.93, rotY: Math.PI, scale: 0.82 } as const;
 export const LAPTOP_ANCHOR = { x: 0, y: DESK_SIZE.height, z: -0.06, scale: 1.3 } as const;
@@ -33,7 +33,7 @@ export interface OfficeProjectRef {
 export interface OfficeDesk {
   id: string;
   project: string;
-  /** Número del escritorio dentro del pod (0 = pareja central, lado frontal). */
+  /** Número del escritorio dentro del pod (0 = pareja central, el que mira a la cámara). */
   n: number;
   x: number;
   z: number;
@@ -63,29 +63,30 @@ export function deskId(project: string, n: number): string {
 
 /**
  * Escritorios que necesita un pod con `workers` personajes: siempre queda uno
- * libre para contratar mientras haya lugar, de dos en dos, entre 2 y 6.
+ * libre para contratar mientras haya lugar, de dos en dos, entre 2 y 4.
  */
 export function podDeskCount(workers: number): number {
   const want = Math.max(POD_BASE_DESKS, workers + 1);
   return Math.min(POD_MAX_DESKS, Math.ceil(want / 2) * 2);
 }
 
-/** Desplazamiento x de cada pareja: centro, izquierda, derecha (crecer no mueve las anteriores). */
-const PAIR_OFFSETS = [0, -DESK_SIZE.width, DESK_SIZE.width];
+/** Desplazamiento x de cada pareja: la primera y la de su izquierda (crecer no mueve la primera). */
+const PAIR_OFFSETS = [0, -DESK_SIZE.width];
 
 function podDesks(project: string, cx: number, cz: number, count: number): OfficeDesk[] {
   const desks: OfficeDesk[] = [];
   for (let n = 0; n < count; n++) {
     const pair = Math.floor(n / 2);
-    const back = n % 2 === 1;
+    // Los pares (0, 2, 4) se llenan primero y su personaje mira a +z, hacia
+    // donde está la cámara por defecto: se le ve la cara y la tarjeta.
+    const facing = n % 2 === 0;
     desks.push({
       id: deskId(project, n),
       project,
       n,
       x: cx + PAIR_OFFSETS[pair],
-      // Frontal: lado +z con el personaje mirando a -z; trasero: al revés.
-      z: cz + (back ? -DESK_SIZE.depth / 2 : DESK_SIZE.depth / 2),
-      rotY: back ? Math.PI : 0,
+      z: cz + (facing ? -DESK_SIZE.depth / 2 : DESK_SIZE.depth / 2),
+      rotY: facing ? Math.PI : 0,
     });
   }
   return desks;
