@@ -266,7 +266,9 @@ export interface AgentActivityEvent {
     | "lights"
     | "metro"
     | "scheduled"
-    | "learning";
+    | "learning"
+    /** Estado de un personaje de la Oficina (detail = OfficeWorker en JSON). */
+    | "office";
   taskId?: string;
   sessionId?: string;
   toolName?: string;

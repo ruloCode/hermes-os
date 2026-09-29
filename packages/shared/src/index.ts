@@ -23,3 +23,6 @@ export * from "./lyric-angles.js";
 export * from "./guide-plan.js";
 export * from "./psola.js";
 export * from "./composicion-apply.js";
+export * from "./office-actions.js";
+export * from "./office.js";
+export * from "./office-layout.js";

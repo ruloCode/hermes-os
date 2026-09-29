@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import type { ChatToolStep, HermesTask } from "@hermes/shared";
+import { toolTarget } from "@hermes/shared";
 import { env } from "../env.js";
 import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
@@ -98,30 +99,7 @@ export interface RunTurnOptions {
   onTool?: (step: ChatToolStep) => void;
 }
 
-/**
- * Campo del input que mejor describe QUÉ tocó la tool, en orden de preferencia
- * (Read→file_path, Grep→pattern, WebFetch→url…). Solo extrae el dato; la UI
- * decide el verbo y cómo lo acorta.
- */
-const TARGET_KEYS = [
-  "file_path",
-  "pattern",
-  "url",
-  "command",
-  "query",
-  "slug",
-  "title",
-  "name",
-  "content",
-];
-
-function toolTarget(input: Record<string, unknown>): string {
-  for (const key of TARGET_KEYS) {
-    const v = input[key];
-    if (typeof v === "string" && v.trim()) return v.trim().slice(0, 120);
-  }
-  return "";
-}
+// toolTarget (qué tocó cada tool) vive en @hermes/shared: lo usa también la Oficina.
 
 export interface RunTurnResult {
   sdkSessionId?: string;
