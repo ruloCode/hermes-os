@@ -27,6 +27,55 @@ El dueño es un personaje dentro de la oficina, un humano portado del `Person` d
 
 La lista **Equipo** lleva al dueño junto al agente que elijas (en aérea, la cámara va a él). Escribir en un diálogo no mueve al personaje.
 
+## Jugar con el control (Xbox Wireless Controller)
+
+La oficina se juega con un control Bluetooth por la Gamepad API del navegador (mapeo "standard"). Está probada con el **Xbox Wireless Controller** de Microsoft (vendor `045e`, producto `02fd`, el modelo One S) en Chrome sobre macOS. El mapeo es puro y tiene pruebas (`packages/shared/src/gamepad.ts`).
+
+| Control | Acción |
+| --- | --- |
+| Stick izquierdo | Caminar; más inclinado, más rápido |
+| RT | Correr |
+| Stick derecho | Mover la cámara (en vista aérea, orbitar) |
+| Cruceta ↑ ↓ | Acercar / alejar |
+| LT | Recentrar la cámara |
+| **A** | Hablar con el agente o contratar en el escritorio cercano · en la conversación: escuchar, parar y enviar |
+| X | Saltar · en la conversación: volver a hablar |
+| B | Cancelar / cerrar |
+| Y | Llamar a Hermes por voz (ElevenLabs) y colgar |
+| LB / RB (o cruceta ← →) | Ir al agente anterior / siguiente |
+| View | Vista aérea / explorar |
+| Menu | Ayuda de controles |
+
+El control vibra al interactuar y cuando un agente te responde. El HUD muestra "🎮 Xbox Wireless Controller" y los atajos pasan a los botones del control apenas lo usas.
+
+**Ojo con Chrome:** el navegador no expone el control hasta que se presiona un botón con la página enfocada (regla de privacidad). Por eso el HUD pide "presiona cualquier botón".
+
+## Hablarle a un agente con la voz
+
+1. **Abrir**: acércate a un agente o a un escritorio libre y presiona **A** (o E, o haz clic). Se abre la conversación con el micrófono ya escuchando.
+2. **Hablar**: dices la instrucción y la ves en vivo. Al callarte (1,6 s) se detiene sola.
+3. **Enviar**: **A** envía, **X** vuelve a grabar y **B** cancela. Antes de enviar se puede corregir el texto a mano.
+4. **Destino**:
+   - Con un agente que es un run de Claude, la instrucción **continúa su misma sesión**: el nuevo run hereda su escritorio y su nombre (`continues` en el modelo).
+   - Con un agente que sigue trabajando, espera a que termine o detenlo.
+   - En un escritorio libre, contrata uno nuevo.
+5. **Respuesta**: cuando el agente termina, su resumen se lee en voz alta con la síntesis del sistema (🔊 en el HUD la apaga). Si sigues en su panel, el micrófono vuelve a escucharte: una conversación de ida y vuelta.
+
+El dictado usa dos motores:
+
+| Motor | Cuándo | Detalle |
+| --- | --- | --- |
+| Reconocedor del navegador | Por defecto | Web Speech en `es-CO`, texto en vivo |
+| Transcripción de Hermes | Si el navegador falla (sin red, sin permiso) | Graba hasta el silencio y usa `POST /office/dictate`, la misma cadena STT de las juntas: Scribe, Whisper y local. Unos 1,6 s en la prueba |
+
+**Y** llama a Hermes, el agente de voz de ElevenLabs. Sus tools se montan en la página, así que un "pon a alguien a revisar X en hermes-os" lanza `work_on_project` y el personaje aparece en su pod.
+
+**Antes del taller:**
+
+- Da permiso de micrófono una vez en `localhost:31415`.
+- Empareja el control y presiona un botón con la página abierta.
+- Sube el volumen para la respuesta hablada.
+
 ## La sala
 
 `lib/oficina/room.ts` recrea a nuestra manera la oficina de agent-office. Tiene piso de tablones, paredes con ventanas y un frente abierto con muro bajo de vidrio y entrada, para que la cámara siempre vea adentro. La cocina tiene mesón, cafetera, nevera, dispensador y mesa con bancos. El lounge tiene sofá, mesa, pufs y TV. Completan la sala una estantería, plantas y lámparas con luz cálida.
@@ -104,7 +153,16 @@ scripts/oficina-demo.sh --cost      # costo (4 runs de prueba ≈ $0,80)
 scripts/oficina-demo.sh --kill      # detener lo que siga corriendo
 ```
 
-**Guion sugerido:**
+**Guion con el control (el del jueves):**
+
+1. Control emparejado y página abierta en `localhost:31415/oficina`. Presiona cualquier botón: aparece "🎮 Xbox Wireless Controller".
+2. Camina con el stick hasta el escritorio de General, presiona **A** y di: "Cuenta cuántos archivos markdown hay en docs". Cambia el proyecto si hace falta y presiona **A** para enviar.
+3. El agente nace en su pod y lee. Al terminar, el control vibra y escuchas su respuesta.
+4. Sin soltar el control, dile la siguiente instrucción: "¿Cuál es el más largo?". Presiona **A**: continúa la misma sesión en el mismo escritorio.
+5. Presiona **Y**: "Hermes, pon a alguien a revisar los tests de hermes-os". Aparece otro agente.
+6. Presiona **View** para la vista aérea y **RB** para recorrer el equipo.
+
+**Guion sugerido (teclado):**
 
 1. Abre `http://localhost:31415/oficina` (en localhost, no por IP ni túnel). Apareces en la entrada; la oficina solo tiene el pod General.
 2. Camina hasta el escritorio de General, presiona **E**, elige un proyecto y contrata. Aparece un pod nuevo con su personaje, que empieza a leer. Muéstrales la TV y la pizarra: se actualizan solas.
@@ -124,6 +182,9 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaFocus(hit)` | Lleva la cámara a un escritorio o personaje (vista aérea) |
 | `__hermesOficinaMode("explore" \| "aerial")` | Cambia de vista |
 | `__hermesOficinaWalkTo(hit)` | Pone al dueño junto a un escritorio o personaje |
+| `__hermesOficinaDictate(text)` | Deja `text` como lo dictado, listo para enviar (QA sin micrófono) |
+
+QA del control sin control físico: `apps/web/scripts/oficina-pad-qa.py` inyecta un Xbox simulado en `navigator.getGamepads()`, con el mismo id y mapeo que entrega Chrome, y recorre la ruta real con 26 comprobaciones.
 
 ## Pendiente (stretch)
 
