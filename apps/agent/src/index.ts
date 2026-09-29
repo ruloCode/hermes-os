@@ -109,6 +109,7 @@ import {
 } from "./browser.js";
 import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
 import { avatarProvider, terminatorAvatar } from "./avatar.js";
+import { officeState, startOffice, subscribeOffice } from "./office/state.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
 import {
@@ -2468,6 +2469,42 @@ app.get("/stats", async (c) => {
 });
 
 app.get("/projects", async (c) => c.json(await readProjects()));
+
+// ── Oficina de agentes (/oficina) ───────────────────────────────────────
+// Un personaje por sesión viva del SDK o run de claude -p (office/state.ts).
+// /office/state es el snapshot (curl, QA); /office/events es el canal vivo:
+// un snapshot al conectar y luego un mensaje por personaje que cambia. Los
+// privados (Composición) no salen por el túnel, igual que en /events.
+startOffice();
+
+app.get("/office/state", async (c) => {
+  const remote = viaTunnel((h) => c.req.header(h));
+  const state = await officeState();
+  return c.json(remote ? { ...state, workers: state.workers.filter((w) => !w.private) } : state);
+});
+
+app.get("/office/events", (c) =>
+  streamSSE(c, async (stream) => {
+    const remote = viaTunnel((h) => c.req.header(h));
+    const state = await officeState();
+    const snapshot = remote ? { ...state, workers: state.workers.filter((w) => !w.private) } : state;
+    await stream.writeSSE({ data: JSON.stringify({ type: "snapshot", state: snapshot }) });
+    let open = true;
+    const unsubscribe = subscribeOffice((u) => {
+      if (!open) return;
+      if (remote && u.type === "worker" && u.worker.private) return;
+      void stream.writeSSE({ data: JSON.stringify(u) });
+    });
+    stream.onAbort(() => {
+      open = false;
+      unsubscribe();
+    });
+    while (open) {
+      await new Promise((r) => setTimeout(r, 15000));
+      if (open) await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+    }
+  }),
+);
 
 // ── Sala de Agentes 3D (/sala del dashboard) ───────────────────────────
 // Los personajes viven en ~/.hermes-os/sala.json (ningún nombre propio en el

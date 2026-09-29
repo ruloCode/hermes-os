@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ScheduledTask } from "@hermes/shared";
 import { env } from "../env.js";
 import { emit } from "../events.js";
+import { registerOfficeWorker } from "../office/state.js";
 import { notifyMac } from "../notify.js";
 import { saveMemory } from "../memory.js";
 import { supabase } from "../supabase.js";
@@ -62,6 +63,7 @@ export interface RunOutcome {
 /** Corre UNA tarea ahora mismo (el barrido y el botón "▶ Correr" usan esto). */
 export async function runScheduledTask(task: ScheduledTask, attempt = 1): Promise<RunOutcome> {
   const startedAt = Date.now();
+  registerOfficeWorker({ id: task.id, source: "scheduled", project: task.project ?? undefined, title: task.title });
   emit({ kind: "scheduled", taskId: task.id, detail: `▶ ${task.title}` });
 
   const cwd = task.project ? await resolveChatCwd(task.project) : undefined;

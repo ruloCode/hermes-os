@@ -31,6 +31,7 @@ import type {
 import { latestVoTakes, voBaseOf } from "@hermes/shared";
 import { checkTool } from "../agent/guardrails.js";
 import { emit } from "../events.js";
+import { registerOfficeWorker } from "../office/state.js";
 import { env } from "../env.js";
 import { getPiece, updatePiece } from "./store.js";
 import { OWNER } from "../owner.js";
@@ -287,6 +288,7 @@ export async function startEditRun(
 
   const abort = new AbortController();
   runningEdits.set(pieceId, abort);
+  registerOfficeWorker({ id: `content-edit-${pieceId}`, source: "content-edit", title: `Edita ${piece.title}` });
   emit({
     kind: "task_start",
     taskId: `content-edit-${pieceId}`,

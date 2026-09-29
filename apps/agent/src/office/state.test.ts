@@ -61,10 +61,9 @@ describe("reduceOfficeEvent: ciclo de un run", () => {
     assert.equal(w?.project, "general");
   });
 
-  it("eventos sin taskId, los del propio bus de la oficina y los cierres huérfanos no crean nada", () => {
+  it("eventos sin taskId y los cierres huérfanos no crean nada", () => {
     const m = office();
     assert.equal(reduceOfficeEvent(m, ev("tool_call", T0, { taskId: undefined, toolName: "Read" })), null);
-    assert.equal(reduceOfficeEvent(m, ev("office", T0, { detail: "{}" })), null);
     assert.equal(reduceOfficeEvent(m, ev("task_done", T0, { taskId: "nadie" })), null);
     assert.equal(m.size, 0);
   });
@@ -126,6 +125,18 @@ describe("reduceOfficeEvent: ciclo de un run", () => {
     reduceOfficeEvent(m, ev("scheduled", T0 + 5, { taskId: "s1", detail: "✕ Resumen del lunes" }));
     assert.equal(m.get("s1")?.status, "error");
     assert.equal(reduceOfficeEvent(office(), ev("scheduled", T0, { taskId: "s2", detail: "✓ huérfana" })), null);
+  });
+
+  it("una programada que re-corre dentro de la gracia es un personaje nuevo", () => {
+    const m = office();
+    reduceOfficeEvent(m, ev("scheduled", T0, { taskId: "s1", detail: "▶ Resumen" }));
+    reduceOfficeEvent(m, ev("scheduled", T0 + 5, { taskId: "s1", detail: "✓ Resumen" }));
+    registerWorker(m, { id: "s1", source: "scheduled", project: "hermes-os", title: "Resumen" }, T0 + 10);
+    assert.equal(m.get("s1")?.status, "starting");
+    assert.equal(m.get("s1")?.finishedAt, undefined);
+    reduceOfficeEvent(m, ev("scheduled", T0 + 20, { taskId: "s1", detail: "✓ Resumen" }));
+    reduceOfficeEvent(m, ev("scheduled", T0 + 30, { taskId: "s1", detail: "▶ Resumen" }));
+    assert.equal(m.get("s1")?.status, "starting");
   });
 
   it("la laptop guarda solo las últimas líneas", () => {

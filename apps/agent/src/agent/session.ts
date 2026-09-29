@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import type { ChatToolStep, HermesTask } from "@hermes/shared";
 import { toolTarget } from "@hermes/shared";
+import { registerOfficeWorker } from "../office/state.js";
 import { env } from "../env.js";
 import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
@@ -324,6 +325,7 @@ export function startTask(prompt: string): HermesTask {
     toolCalls: 0,
   };
   tasks.set(task.id, task);
+  registerOfficeWorker({ id: task.id, source: "task", title: prompt });
   emit({ kind: "task_start", taskId: task.id, detail: prompt.slice(0, 200) });
 
   void (async () => {

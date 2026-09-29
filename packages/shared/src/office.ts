@@ -56,6 +56,15 @@ export interface OfficeProject {
   estado?: string;
 }
 
+/**
+ * Lo que viaja por GET /office/events (canal propio: no se mezcla con el bus de
+ * actividad, que tiene un búfer corto y alimenta el feed del dashboard).
+ */
+export type OfficeUpdate =
+  | { type: "snapshot"; state: OfficeState }
+  | { type: "worker"; worker: OfficeWorker }
+  | { type: "removed"; id: string };
+
 export interface OfficeState {
   workers: OfficeWorker[];
   projects: OfficeProject[];
@@ -229,7 +238,10 @@ export function registerWorker(
   now = Date.now(),
 ): OfficeWorker {
   const at = new Date(now).toISOString();
-  const w = workers.get(reg.id) ?? newWorker(reg.id, at, reg.machine ?? "");
+  // Un id terminado que vuelve a arrancar (una programada re-corre dentro de la
+  // gracia) es una sesión nueva: se reemplaza, no se revive.
+  const prev = workers.get(reg.id);
+  const w = prev && !isTerminal(prev.status) ? prev : newWorker(reg.id, at, reg.machine ?? "");
   w.source = reg.source;
   if (reg.project) w.project = reg.project;
   if (reg.machine) w.machine = reg.machine;
@@ -253,9 +265,11 @@ export function reduceOfficeEvent(
   ev: AgentActivityEvent,
   now = Date.parse(ev.ts) || Date.now(),
 ): OfficeWorker | null {
-  if (ev.kind === "office" || !ev.taskId) return null;
+  if (!ev.taskId) return null;
   const at = new Date(now).toISOString();
   let w = workers.get(ev.taskId);
+  const restart = ev.kind === "scheduled" && ev.detail?.startsWith("▶");
+  if (w && restart && isTerminal(w.status)) w = undefined;
   if (!w) {
     if (!BIRTH.has(ev.kind)) return null;
     if (ev.kind === "scheduled" && !ev.detail?.startsWith("▶")) return null;

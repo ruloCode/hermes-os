@@ -24,6 +24,7 @@ import { notifyMac } from "../notify.js";
 import { emit } from "../events.js";
 import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
 import { childEnv } from "./child-env.js";
+import { registerOfficeWorker } from "../office/state.js";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
 const MODELS = new Set([
@@ -273,6 +274,34 @@ function eventToLines(ev: Record<string, unknown>): ClaudeLine[] {
   return out;
 }
 
+/**
+ * Lo mismo que eventToLines, pero al bus de actividad: cada tool, texto y
+ * resultado del run sale como evento con taskId = run.id. Antes un run de
+ * claude -p solo avisaba al empezar y al terminar; ahora el feed, las
+ * sparklines y la Oficina lo ven trabajar tool por tool.
+ */
+function emitRunActivity(run: ClaudeRun, ev: Record<string, unknown>) {
+  const type = ev.type as string;
+  if (type !== "assistant" && type !== "user") return;
+  const msg = (ev.message as Record<string, unknown>) ?? {};
+  const content = (msg.content as Array<Record<string, unknown>>) ?? [];
+  for (const block of Array.isArray(content) ? content : []) {
+    if (type === "assistant" && block.type === "text" && block.text) {
+      emit({ kind: "text", taskId: run.id, detail: String(block.text).slice(0, 200) });
+    } else if (type === "assistant" && block.type === "tool_use") {
+      emit({
+        kind: "tool_call",
+        taskId: run.id,
+        toolName: String(block.name ?? "tool"),
+        detail: JSON.stringify(block.input ?? {}).slice(0, 300),
+      });
+    } else if (type === "user" && block.type === "tool_result") {
+      const raw = typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+      emit({ kind: "tool_result", taskId: run.id, detail: raw.slice(0, 200) });
+    }
+  }
+}
+
 export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
   const s = sanitize(opts);
   const bin = resolveClaudeBin();
@@ -297,6 +326,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     persistedCount: 0,
   };
   runs.set(run.id, run);
+  registerOfficeWorker({ id: run.id, source: "run", project: projectSlug, title: s.prompt });
 
   pushLine(run, {
     t: Date.now(),
@@ -390,6 +420,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
           }
         }
         for (const line of eventToLines(ev)) pushLine(run, line);
+        emitRunActivity(run, ev);
       } catch {
         pushLine(run, { t: Date.now(), kind: "raw", text: raw.slice(0, 200) });
       }
