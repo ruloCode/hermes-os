@@ -15,6 +15,19 @@ try {
 }
 
 const nextConfig: NextConfig = {
+  // `next dev` y `next start` comparten .next/ — y el dev lo SOBRESCRIBE.
+  //
+  // Producción corre `next start` desde este mismo directorio (launchd
+  // com.hermes-os.web, :31415) sirviendo el build de .next/. Levantar un dev
+  // aquí para QA, aunque sea en otro puerto, pisa ese directorio con artefactos
+  // de desarrollo: el proceso de producción se queda sirviendo un árbol a
+  // medias (señal inconfundible: .next/ SIN BUILD_ID) y el dashboard "no carga
+  // bien" sin un solo error en los logs. Recuperarlo exige build + kickstart.
+  //
+  // Por eso el dev escribe en .next-dev/ y no toca producción. El QA en el
+  // navegador ahora es seguro con producción arriba.
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
+
   // /orquestador se fusionó al dashboard (tab TAREAS); los links viejos siguen
   // vivos vía redirect permanente.
   redirects: async () => [{ source: "/orquestador", destination: "/", permanent: true }],

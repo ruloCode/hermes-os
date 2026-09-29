@@ -23,6 +23,7 @@ import { addRunCost } from "../usage.js";
 import { notifyMac } from "../notify.js";
 import { emit } from "../events.js";
 import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
+import { childEnv } from "./child-env.js";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
 const MODELS = new Set([
@@ -333,7 +334,10 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
   let proc: ChildProcess;
   try {
     // stdin cerrado ('ignore') → claude -p no espera 3s por datos por tubería.
-    proc = spawn(bin, args, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    // env saneado (child-env.ts): un run corre con permisos de escritura sobre
+    // ~/dev, así que heredar el .env entero le daría al modelo las llaves de
+    // Supabase, Linear y ElevenLabs con solo ejecutar `env`.
+    proc = spawn(bin, args, { cwd, env: childEnv(), stdio: ["ignore", "pipe", "pipe"] });
   } catch (err) {
     run.status = "error";
     pushLine(run, { t: Date.now(), kind: "error", text: `no se pudo iniciar claude: ${String(err)}` });
