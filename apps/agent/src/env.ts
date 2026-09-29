@@ -91,6 +91,16 @@ export const env = {
   // Grafo de código (graphify). launchd corre con PATH mínimo (sin ~/.local/bin),
   // por eso el binario se resuelve por ruta absoluta.
   GRAPHIFY_BIN: process.env.GRAPHIFY_BIN || resolve(homedir(), ".local/bin/graphify"),
+  // Memoria de código (codebase-memory-mcp): el mismo criterio de ruta absoluta.
+  CBM_BIN: process.env.CBM_BIN || resolve(homedir(), ".local/bin/codebase-memory-mcp"),
+  // Puerto de la UI del daemon de cbm: de ahí sale el grafo 3D (/api/layout).
+  CBM_UI_PORT: Number(process.env.CBM_UI_PORT || 9749),
+  // Tope de nodos que se le piden al layout (el render 3D no lee más).
+  CBM_MAX_NODES: Number(process.env.CBM_MAX_NODES || 6000),
+  // Proveedor del grafo de código: "auto" (cbm si está instalado, si no
+  // graphify), "cbm" o "graphify". graphify sigue siendo el que indexa el
+  // vault y material que no es código, así que no se va.
+  CODE_MEMORY: (process.env.HERMES_CODE_MEMORY || "auto").toLowerCase(),
   // Repo indexado que responde query_code_graph (piloto: este monorepo).
   CODE_GRAPH_ROOT: process.env.CODE_GRAPH_ROOT || root,
   // STT local (whisper.cpp) — la red de seguridad cuando los proveedores de

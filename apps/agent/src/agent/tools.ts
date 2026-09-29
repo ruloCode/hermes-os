@@ -319,7 +319,7 @@ const analyzeYouTubeTool = tool(
 
 const queryCodeGraphTool = tool(
   "query_code_graph",
-  `Responde preguntas sobre la ESTRUCTURA del código de los proyectos de ${OWNER} usando su grafo de dependencias (graphify, local). Por defecto consulta hermes-os; pasa 'project' (slug del vault: zylen, ternium, careways, teker, video-edit…) para consultar otro. mode=query: pregunta libre ('¿qué conecta el checkout con el pago?'); mode=explain: explica un símbolo/módulo y sus conexiones ('explícame registerJob'); mode=path: ruta de dependencias entre dos símbolos/archivos (requiere target). Úsala para '¿dónde vive X?', '¿qué depende de Y?', '¿cómo se conectan A y B?' — nunca adivines arquitectura.`,
+  `Responde preguntas sobre la ESTRUCTURA del código de los proyectos de ${OWNER} usando su grafo de dependencias (local, indexado con tree-sitter: no cuesta tokens ni sale de la máquina). Por defecto consulta hermes-os; pasa 'project' (slug del vault: zylen, ternium, careways, teker, video-edit…) para consultar otro. mode=query: pregunta libre ('¿qué conecta el checkout con el pago?'); usa términos que de verdad aparezcan en el código o en los docs del repo; mode=explain: explica un símbolo/módulo y sus conexiones ('explícame registerJob'); mode=path: ruta de dependencias entre dos símbolos/archivos (requiere target). Úsala para '¿dónde vive X?', '¿qué depende de Y?', '¿cómo se conectan A y B?' — nunca adivines arquitectura.`,
   {
     mode: z.enum(["query", "path", "explain"]).describe("query=pregunta libre, explain=explicar un símbolo, path=ruta entre dos nodos"),
     query: z.string().describe("La pregunta (query), el símbolo a explicar (explain) o el nodo origen (path)"),

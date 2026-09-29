@@ -1166,6 +1166,7 @@ export async function hermesPatch<T>(path: string, body?: unknown): Promise<T> {
 // ── Capa de datos del rediseño (dashboard/strip + memoria) ─────────────
 import type {
   CodeGraph3D,
+  CodeGraphProject,
   DashboardSnapshot,
   KnowledgeHit,
   KnowledgeSource,
@@ -1174,10 +1175,16 @@ import type {
   UpcomingCalendar,
 } from "@hermes/shared";
 
-/** Grafo de código de graphify (nodos+aristas+comunidades) para el render 3D. */
+/** Grafo de código (nodos+aristas+agrupación) para el render 3D. */
 export function getCodeGraph3D(project?: string): Promise<CodeGraph3D> {
   const q = project ? `?project=${encodeURIComponent(project)}` : "";
   return hermesGet<CodeGraph3D>(`/code-graph/graph${q}`);
+}
+
+/** Carpetas con grafo en la máquina del agente (selector del tab MEMORIA). */
+export async function getCodeGraphProjects(): Promise<CodeGraphProject[]> {
+  const r = await hermesGet<{ projects: CodeGraphProject[] }>("/code-graph/projects");
+  return r.projects ?? [];
 }
 
 /** Búsqueda semántica unificada (memorias+reuniones+ejecuciones+chats+vault). */

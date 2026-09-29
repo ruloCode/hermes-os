@@ -7,8 +7,8 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import type { CodeGraph3D as CodeGraphData } from "@hermes/shared";
-import { getCodeGraph3D } from "@/lib/hermes";
+import type { CodeGraph3D as CodeGraphData, CodeGraphProject } from "@hermes/shared";
+import { getCodeGraph3D, getCodeGraphProjects } from "@/lib/hermes";
 import { readToken } from "@/components/ui/tones";
 import { PanelState } from "@/components/ui/PanelState";
 import { useGraphHands } from "@/hooks/useGraphHands";
@@ -17,13 +17,14 @@ import { claimHands, releaseHands } from "@/lib/gestures/hand-owner";
 import type { GraphGestureDecision } from "@/lib/gestures/graph-engine";
 
 /**
- * Grafo de código de graphify en WebGL real (three.js, mismas skills y
- * branding que KnowledgeGraph: acento/cian, bloom contenido, fondo espacial):
+ * Grafo de código en WebGL real (three.js, mismas skills y branding que
+ * KnowledgeGraph: acento/cian, bloom contenido, fondo espacial):
  *  - ~3k nodos como UNA InstancedMesh (un draw call) y ~6k aristas como UN
  *    LineSegments additive — el bloom los enciende sin costo extra.
- *  - Layout determinista por comunidades Louvain: cada comunidad es un
- *    cúmulo esférico (Fibonacci volumétrico, dios-nodo al centro) y las
- *    comunidades orbitan el núcleo en capas (las grandes más adentro).
+ *  - Layout: si el proveedor manda posiciones (codebase-memory las calcula en
+ *    el daemon) se usan tal cual, solo normalizadas al encuadre de la cámara;
+ *    si no (graphify), se arma uno determinista por comunidades — cúmulo
+ *    esférico por comunidad y las comunidades en capas alrededor del núcleo.
  *  - OrbitControls: arrastrar orbita, scroll hace zoom, auto-rotación en
  *    reposo. Hover = tooltip con archivo/comunidad; clic = enfoca la
  *    comunidad (el resto se apaga); clic al vacío limpia.
@@ -68,12 +69,60 @@ function communityColor(key: number): THREE.Color {
   return new THREE.Color().setHSL(h, s, l, THREE.SRGBColorSpace);
 }
 
+// Radio del encuadre que espera la cámara (las capas del layout propio van de
+// 0.85 a 1.6): las coordenadas del servidor llegan en cientos de unidades, así
+// que se centran y se escalan a este mismo mundo en vez de mover la cámara.
+const WORLD_RADIUS = 1.6;
+
+/**
+ * Posiciones tal como las manda el proveedor, centradas y escaladas. null si
+ * algún nodo no las trae: un layout a medias es peor que ninguno.
+ */
+function servedLayout(data: CodeGraphData): Float32Array | null {
+  const n = data.nodes.length;
+  if (!n) return null;
+  const pos = new Float32Array(n * 3);
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (let i = 0; i < n; i++) {
+    const { x, y, z } = data.nodes[i];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+    pos[i * 3] = x as number;
+    pos[i * 3 + 1] = y as number;
+    pos[i * 3 + 2] = z as number;
+    cx += x as number;
+    cy += y as number;
+    cz += z as number;
+  }
+  cx /= n;
+  cy /= n;
+  cz /= n;
+  let max = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = pos[i * 3] - cx;
+    const dy = pos[i * 3 + 1] - cy;
+    const dz = pos[i * 3 + 2] - cz;
+    max = Math.max(max, Math.hypot(dx, dy, dz));
+  }
+  if (max <= 0) return null; // todos en el mismo punto: no es un layout
+  const k = WORLD_RADIUS / max;
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = (pos[i * 3] - cx) * k;
+    pos[i * 3 + 1] = (pos[i * 3 + 1] - cy) * k;
+    pos[i * 3 + 2] = (pos[i * 3 + 2] - cz) * k;
+  }
+  return pos;
+}
+
 /**
  * Layout determinista: comunidades ordenadas por tamaño sobre capas
  * esféricas (grandes → cerca del núcleo), miembros en relleno volumétrico
  * de Fibonacci con el nodo de mayor grado al centro del cúmulo.
  */
 function computeLayout(data: CodeGraphData): Float32Array {
+  const served = servedLayout(data);
+  if (served) return served;
   const buckets = new Map<number, number[]>();
   data.nodes.forEach((n, i) => {
     const arr = buckets.get(n.community);
@@ -157,6 +206,10 @@ export function CodeGraph3D({ project }: { project?: string }) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<CodeGraphData | null>(null);
   const [failed, setFailed] = useState(false);
+  // Una carpeta = un grafo: el selector sale de los repos indexables de la
+  // máquina del agente, no de una lista escrita a mano.
+  const [projects, setProjects] = useState<CodeGraphProject[]>([]);
+  const [sel, setSel] = useState<string | undefined>(project);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [selComm, setSelComm] = useState<SelComm | null>(null);
@@ -171,18 +224,31 @@ export function CodeGraph3D({ project }: { project?: string }) {
     clickAt: (nx: number, ny: number) => void;
   } | null>(null);
 
+  // ── Carpetas con grafo (una sola vez) ─────────────────────────────────
+  useEffect(() => {
+    let alive = true;
+    getCodeGraphProjects()
+      .then((ps) => alive && setProjects(ps))
+      .catch(() => {
+        /* sin lista: el selector no aparece y se ve el repo por defecto */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // ── Datos (una vez por repo) ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
     setData(null);
     setFailed(false);
-    getCodeGraph3D(project)
+    getCodeGraph3D(sel)
       .then((g) => alive && setData(g))
       .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
     };
-  }, [project]);
+  }, [sel]);
 
   // ── Escena three.js (se construye cuando llega el grafo) ──────────────
   useEffect(() => {
@@ -793,13 +859,18 @@ export function CodeGraph3D({ project }: { project?: string }) {
       <PanelState
         kind="empty"
         title="Sin grafo de código"
-        hint="graphify aún no indexó este repo — corre `graphify extract . --code-only` o espera al job code-graph-update"
+        hint="Esta carpeta aún no está indexada — espera al job code-graph-update o indéxala a mano"
       />
     );
   }
   if (!data) {
     return <PanelState kind="loading" title="Cargando grafo de código" />;
   }
+
+  // Cómo se llama lo que agrupa y colorea: con cbm son paquetes reales del
+  // repo; con graphify, comunidades Louvain. La leyenda no debe mentir.
+  const grouping = data.provider === "cbm" ? "paquetes" : "comunidades";
+  const groupingOne = data.provider === "cbm" ? "paquete" : "comunidad";
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-bg">
@@ -856,11 +927,25 @@ export function CodeGraph3D({ project }: { project?: string }) {
         <span className="text-2xs tracking-label text-text-faint tabular-nums uppercase">
           {data.nodes.length.toLocaleString("es-CO")} nodos ·{" "}
           {data.links.length.toLocaleString("es-CO")} aristas ·{" "}
-          {Object.keys(data.communities).length || "?"} comunidades · color = comunidad · tamaño =
-          conexiones
+          {Object.keys(data.communities).length || "?"} {grouping} · color = {groupingOne} · tamaño
+          = conexiones
         </span>
       </div>
       <div className="pointer-events-none absolute left-2 top-2 z-10 text-2xs leading-relaxed tracking-hero uppercase text-text-dim">
+        {projects.length > 1 && (
+          <select
+            aria-label="Carpeta del grafo"
+            value={sel ?? projects[0]?.slug ?? ""}
+            onChange={(e) => setSel(e.target.value)}
+            className="pointer-events-auto mb-1 max-w-44 border border-line bg-panel px-1.5 py-1 text-2xs text-text-dim transition-colors hover:text-text focus:outline-none"
+          >
+            {projects.map((p) => (
+              <option key={p.slug} value={p.slug} title={p.root}>
+                {p.slug}
+              </option>
+            ))}
+          </select>
+        )}
         <div>arrastra · orbita</div>
         <div>scroll · zoom</div>
         <div>clic · enfoca comunidad</div>

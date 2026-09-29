@@ -896,6 +896,14 @@ export interface CodeGraphNode {
   degree: number;
   /** Archivo de origen (tooltip). */
   file: string | null;
+  /**
+   * Posición ya calculada por el proveedor (codebase-memory la trae del
+   * daemon). Cuando viene, el render la usa tal cual en vez de inventar un
+   * layout: es la estructura real, no una esfera decorativa.
+   */
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 /** Una arista del grafo de código. Índices contra el array `nodes`. */
@@ -906,16 +914,29 @@ export interface CodeGraphLink {
   relation: string;
 }
 
+/** Un repo indexable de esta máquina: una carpeta = un grafo. */
+export interface CodeGraphProject {
+  /** Slug del vault ("zylen", "teker"…); "hermes-os" es este monorepo. */
+  slug: string;
+  /** Raíz del clon EN ESTA máquina (el selector la muestra como subtítulo). */
+  root: string;
+}
+
 /** Grafo de código completo de un repo, listo para el render 3D. */
 export interface CodeGraph3D {
-  /** false = graphify aún no indexó este repo (nodes/links vacíos). */
+  /** false = el repo aún no está indexado (nodes/links vacíos). */
   available: boolean;
   project: string;
+  /** Quién construyó este grafo: "cbm" (codebase-memory) o "graphify". */
+  provider: "cbm" | "graphify";
   /** Commit en el que se construyó el grafo (graph.json). */
   builtAtCommit: string | null;
   nodes: CodeGraphNode[];
   links: CodeGraphLink[];
-  /** Nombres de comunidades (graphify label): id → nombre legible. */
+  /**
+   * Agrupación de nodos: id → nombre legible. Con graphify son comunidades
+   * Louvain; con cbm son los paquetes reales del repo (apps/web, mobile…).
+   */
   communities: Record<string, string>;
 }
 

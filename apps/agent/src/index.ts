@@ -30,7 +30,7 @@ import { getWeather } from "./weather.js";
 import { getUpcomingCalendar, invalidateCalendarCache } from "./calendar.js";
 import * as gcal from "./google-calendar.js";
 import { registerJob, listJobs } from "./jobs.js";
-import { readCodeGraph3D, updateCodeGraph } from "./code-graph.js";
+import { indexableRepos, readCodeGraph3D, updateCodeGraph } from "./code-graph.js";
 import {
   getSdkSession,
   getTask,
@@ -2627,10 +2627,14 @@ app.get("/machines", async (c) => c.json({ machines: await listPresence() }));
 // Conteos reales de la base de conocimiento (panel MEMORIA ACTIVA).
 app.get("/knowledge/stats", async (c) => c.json(await knowledgeStats()));
 
-// Grafo de código de graphify listo para el render 3D (tab MEMORIA).
+// Grafo de código listo para el render 3D (tab MEMORIA).
 app.get("/code-graph/graph", async (c) =>
   c.json(await readCodeGraph3D(c.req.query("project") || undefined)),
 );
+
+// Qué carpetas tienen grafo EN ESTA máquina: alimenta el selector del tab
+// MEMORIA (una carpeta = una representación gráfica).
+app.get("/code-graph/projects", async (c) => c.json({ projects: await indexableRepos() }));
 
 // Conteos del tracker por estado (+ ?project= y ?byProject=1).
 app.get("/tracker/summary", async (c) =>
