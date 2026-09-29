@@ -21,7 +21,7 @@ import {
 import { C, mono, stateColor } from "../theme";
 import { Button, Card, Dim, Empty, Loading, Pill, ScreenTitle } from "../ui";
 import { Markdown } from "../markdown";
-import { useApp } from "../store";
+import { useApp, useBackClose } from "../store";
 import * as api from "../hermes";
 import type { LinearBoardIssue, LinearIssueFull, Task, TaskState } from "../types";
 
@@ -57,6 +57,7 @@ export function TasksScreen() {
   const [loading, setLoading] = useState(true);
   const [onlyFocused, setOnlyFocused] = useState<boolean>(!!app.focused);
   const [open, setOpen] = useState<string | null>(null); // identifier del detalle
+  useBackClose(!!open, () => setOpen(null)); // ATRAS cierra el detalle, no cambia de tab
   const [creating, setCreating] = useState(false);
   // "Último gana": un fetch viejo (toggle rápido de filtros) no pisa al nuevo.
   const reqRef = useRef(0);

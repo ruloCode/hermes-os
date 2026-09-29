@@ -24,7 +24,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
 import { C, stateColor } from "../theme";
 import { Button, Card, Dim, Empty, Loading, Pill, ScreenTitle } from "../ui";
-import { useApp } from "../store";
+import { useApp, useBackClose } from "../store";
 import { useRecording } from "../recording";
 import * as api from "../hermes";
 import { resolveBase } from "../config";
@@ -74,6 +74,9 @@ export function MeetingsScreen() {
   const [pending, setPending] = useState<rec.PendingRecording[]>([]);
   const [tab, setTab] = useState<Tab>("subidas");
   const [selectedPending, setSelectedPending] = useState<string | null>(null);
+  // ATRAS cierra el detalle abierto (primero el de pendientes) antes de tocar tabs.
+  useBackClose(!!selectedPending, () => setSelectedPending(null));
+  useBackClose(!!selected && !selectedPending, () => setSelected(null));
 
   const recording = useRecording();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

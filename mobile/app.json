@@ -2,13 +2,12 @@
   "expo": {
     "name": "Hermes",
     "slug": "mobile",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hermes",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#07070c",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -19,12 +18,13 @@
       "bundleIdentifier": "com.rulocode.hermes",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Hermes usa el micrófono para hablar por voz en tiempo real y grabar reuniones.",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
       "package": "com.rulocode.hermes",
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#07070c",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -41,7 +41,8 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE"
-      ]
+      ],
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -63,7 +64,9 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-font",
+      "expo-asset"
     ]
   }
 }

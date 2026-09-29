@@ -46,6 +46,16 @@ interface Store {
 
   /** Resuelve lo que dice la voz ("careways", "el de salud") a un slug real. */
   resolveSlug: (raw?: string) => string | null;
+
+  /**
+   * Pila del boton ATRAS de Android. Una pantalla con un detalle abierto se
+   * registra aqui y lo cierra ella misma; sin esto, el handler global cambiaria
+   * de tab y el detalle se quedaria abierto detras. Devuelve el de-registro;
+   * gana el ULTIMO registrado (el mas profundo).
+   */
+  pushBack: (handler: () => boolean) => () => void;
+  /** Ejecuta el handler mas profundo. true = alguien se hizo cargo. */
+  handleBack: () => boolean;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -130,6 +140,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setOnline(null);
   }, []);
 
+  const backStack = useRef<(() => boolean)[]>([]);
+  const pushBack = useCallback((handler: () => boolean) => {
+    backStack.current.push(handler);
+    return () => {
+      backStack.current = backStack.current.filter((h) => h !== handler);
+    };
+  }, []);
+  const handleBack = useCallback(() => {
+    for (let i = backStack.current.length - 1; i >= 0; i--) {
+      if (backStack.current[i]()) return true;
+    }
+    return false;
+  }, []);
+
   const resolveSlug = useCallback(
     (raw?: string): string | null => {
       const q = (raw ?? "").trim().toLowerCase();
@@ -164,8 +188,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     settingsOpen,
     setSettingsOpen,
     resolveSlug,
+    pushBack,
+    handleBack,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/**
+ * Registra un cierre en la pila del boton ATRAS mientras `active` sea cierto.
+ * Uso: useBackClose(!!selected, () => setSelected(null)) en la pantalla con el
+ * detalle abierto — asi ATRAS cierra el detalle en vez de cambiar de tab.
+ */
+export function useBackClose(active: boolean, close: () => void): void {
+  const app = useApp();
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!active) return;
+    return app.pushBack(() => {
+      closeRef.current();
+      return true;
+    });
+  }, [active, app]);
 }
 
 export function useApp(): Store {

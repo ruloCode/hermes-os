@@ -17,6 +17,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { C, mono } from "../theme";
 import { Dim } from "../ui";
 import { Markdown } from "../markdown";
@@ -233,9 +234,18 @@ export function HermesScreen() {
               accessibilityLabel="Nueva conversación"
               style={({ pressed }) => [styles.iconBtn, pressed ? { opacity: 0.6 } : null]}
             >
-              <Text style={{ color: C.textDim, fontSize: 16 }}>✎</Text>
+              <Ionicons name="create-outline" size={17} color={C.textDim} />
             </Pressable>
           ) : null}
+          <Pressable
+            onPress={() => app.setSettingsOpen(true)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Ajustes"
+            style={({ pressed }) => [styles.iconBtn, pressed ? { opacity: 0.6 } : null]}
+          >
+            <Ionicons name="settings-outline" size={17} color={C.textDim} />
+          </Pressable>
         </View>
       </View>
 

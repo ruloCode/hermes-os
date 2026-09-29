@@ -12,13 +12,43 @@ import {
   View,
   ViewStyle,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { C } from "./theme";
+import { useApp } from "./store";
 
-export function ScreenTitle({ title, right }: { title: string; right?: React.ReactNode }) {
+/**
+ * Cabecera de pantalla. El engranaje de Ajustes vive AQUI, no en la barra de
+ * tabs: Ajustes es un overlay, no un destino, y mezclarlo con los destinos
+ * dejaba la barra con seis objetivos. `settings={false}` lo oculta en las
+ * pantallas que ya lo ofrecen por su cuenta.
+ */
+export function ScreenTitle({
+  title,
+  right,
+  settings = true,
+}: {
+  title: string;
+  right?: React.ReactNode;
+  settings?: boolean;
+}) {
+  const app = useApp();
   return (
     <View style={styles.titleRow}>
       <Text style={styles.title}>{title}</Text>
-      {right}
+      <View style={styles.titleRight}>
+        {right}
+        {settings ? (
+          <Pressable
+            onPress={() => app.setSettingsOpen(true)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Ajustes"
+            style={({ pressed }) => [styles.gear, pressed ? { opacity: 0.6 } : null]}
+          >
+            <Ionicons name="settings-outline" size={17} color={C.textDim} />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -122,6 +152,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
+  },
+  titleRight: { flexDirection: "row", alignItems: "center", gap: 12 },
+  gear: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: C.line,
   },
   title: {
     color: C.text,
