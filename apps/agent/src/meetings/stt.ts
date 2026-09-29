@@ -12,11 +12,17 @@
  * En ambos: NO fijar Content-Type (fetch pone el boundary) y el `file` DEBE
  * llevar filename con extensión (si no, falla la detección de formato).
  */
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import { env } from "../env.js";
+
+export type SttProvider = "scribe" | "whisper" | "local";
 
 export interface TranscriptResult {
   text: string;
-  provider: "scribe" | "whisper";
+  provider: SttProvider;
   language?: string;
 }
 
@@ -44,12 +50,26 @@ export async function transcribe(file: Blob): Promise<TranscriptResult> {
   const filename = `reunion.${extFor(mime)}`;
   const errors: string[] = [];
 
-  // Orden: por defecto Scribe → Whisper; HERMES_STT=whisper lo invierte.
-  const order: ("scribe" | "whisper")[] =
-    env.STT_PROVIDER === "whisper" ? ["whisper", "scribe"] : ["scribe", "whisper"];
+  // Orden: por defecto Scribe → Whisper → local. `local` (whisper.cpp) va
+  // último porque es el más lento, pero es el único que NUNCA depende de la
+  // red ni de créditos: es la red de seguridad real de una junta larga.
+  // HERMES_STT=whisper|local pone ese proveedor de primero.
+  const order: SttProvider[] =
+    env.STT_PROVIDER === "whisper"
+      ? ["whisper", "scribe", "local"]
+      : env.STT_PROVIDER === "local"
+        ? ["local", "scribe", "whisper"]
+        : ["scribe", "whisper", "local"];
 
   for (const provider of order) {
-    if (provider === "scribe") {
+    if (provider === "local") {
+      try {
+        return await transcribeLocal(file, filename);
+      } catch (err) {
+        errors.push(`local: ${String(err).slice(0, 200)}`);
+        console.error("[meetings] whisper local falló:", err);
+      }
+    } else if (provider === "scribe") {
       if (!env.ELEVENLABS_API_KEY) continue;
       try {
         return await transcribeScribe(file, filename);
@@ -221,4 +241,56 @@ async function transcribeWhisper(file: Blob, filename: string): Promise<Transcri
   const text = (json.text ?? "").trim();
   if (!text) throw new Error("Whisper devolvió transcripción vacía.");
   return { text, provider: "whisper" };
+}
+
+// ── Whisper local (whisper.cpp) ────────────────────────────────────────
+// La red de seguridad: corre en la máquina, sin créditos ni internet, y no
+// tiene el tope de 25 MB de la API de OpenAI. No hace diarización (no separa
+// hablantes), pero una junta sin "quién dijo qué" sigue siendo infinitamente
+// mejor que una junta perdida.
+
+/** Corre un binario y resuelve con su stdout; rechaza con stderr si sale ≠ 0. */
+function run(bin: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args);
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", (e) =>
+      reject(new Error(`no pude ejecutar ${bin}: ${String(e)} (¿instalado? brew install whisper-cpp ffmpeg)`)),
+    );
+    child.on("close", (code) =>
+      code === 0 ? resolve(out) : reject(new Error(`${bin} salió ${code}: ${err.slice(-300)}`)),
+    );
+  });
+}
+
+async function transcribeLocal(file: Blob, filename: string): Promise<TranscriptResult> {
+  const dir = await mkdtemp(joinPath(tmpdir(), "hermes-stt-"));
+  try {
+    const src = joinPath(dir, filename);
+    await writeFile(src, Buffer.from(await file.arrayBuffer()));
+
+    // whisper.cpp solo come WAV PCM 16 kHz mono: ffmpeg normaliza cualquier
+    // cosa que mande el teléfono (m4a/opus/webm) sin re-encodear a un lossy.
+    const wav = joinPath(dir, "audio.wav");
+    await run(env.FFMPEG_BIN, ["-nostdin", "-loglevel", "error", "-y", "-i", src, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav]);
+
+    const outBase = joinPath(dir, "out");
+    await run(env.WHISPER_BIN, [
+      "-m", env.WHISPER_MODEL,
+      "-f", wav,
+      "-l", "auto", // junta en español, pero el code-switching con inglés es real
+      "-otxt",
+      "-of", outBase,
+      "--no-prints",
+    ]);
+
+    const text = (await readFile(`${outBase}.txt`, "utf8")).trim();
+    if (!text) throw new Error("whisper local devolvió transcripción vacía.");
+    return { text, provider: "local" };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }

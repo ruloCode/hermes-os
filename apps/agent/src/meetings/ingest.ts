@@ -311,6 +311,8 @@ export interface MeetingJob {
   error?: string;
   /** true si la transcripción sobrevivió al fallo → se puede reintentar sin audio. */
   retryable?: boolean;
+  /** Copia en disco del audio subido (existe aunque el STT falle). */
+  audioPath?: string;
 }
 
 const jobs = new Map<string, MeetingJob>();
@@ -325,6 +327,31 @@ export function getMeetingJob(id: string): MeetingJob | undefined {
 // la junta: se guarda en disco para poder reintentar sin el audio.
 
 const FAILED_DIR = joinPath(homedir(), ".hermes-os", "transcripciones-pendientes");
+
+// El audio es lo único irrecuperable de una junta: si el STT falla (sin
+// créditos, sin red) no hay transcripción que salvar y, cuando el teléfono ya
+// borró su copia, la junta se pierde entera. Por eso el audio se guarda en
+// disco ANTES de intentar transcribir — nunca después.
+const AUDIO_DIR = joinPath(homedir(), ".hermes-os", "audio-juntas");
+
+/** Extensión a partir del mime, para que el archivo guardado sea reproducible. */
+function audioExt(mime: string): string {
+  const m = (mime || "").toLowerCase();
+  if (m.includes("webm")) return "webm";
+  if (m.includes("mp4") || m.includes("m4a") || m.includes("aac")) return "m4a";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("ogg") || m.includes("opus")) return "ogg";
+  return "m4a";
+}
+
+/** Copia de custodia del audio recién subido. Devuelve la ruta. */
+async function saveAudioBackup(audio: Blob, project: string, id: string, createdAt: string): Promise<string> {
+  await mkdir(AUDIO_DIR, { recursive: true });
+  const path = joinPath(AUDIO_DIR, `${createdAt.slice(0, 10)}-${project}-${id}.${audioExt(audio.type)}`);
+  await writeFile(path, Buffer.from(await audio.arrayBuffer()));
+  return path;
+}
 
 interface FailedTranscript {
   id: string;
@@ -424,6 +451,13 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
     try {
       transcript = input.transcript?.trim() ?? "";
       if (!transcript && input.audio) {
+        // Primero el respaldo: si transcribir falla, el audio ya está a salvo.
+        try {
+          job.audioPath = await saveAudioBackup(input.audio, input.project, id, job.startedAt);
+          console.log(`[meetings] audio a salvo en ${job.audioPath}`);
+        } catch (e) {
+          console.error("[meetings] no pude guardar el audio:", e);
+        }
         emit({ kind: "tool_call", taskId: id, toolName: "transcribir", detail: `${Math.round(input.audio.size / 1024)} KB` });
         const r = await transcribe(input.audio);
         transcript = r.text;
@@ -476,6 +510,7 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
           console.error("[meetings] no pude guardar la transcripción:", e);
         }
       }
+      if (job.audioPath) console.error(`[meetings] el audio de esta junta quedó en ${job.audioPath}`);
       emit({ kind: "error", taskId: id, detail: `reunión falló: ${job.error}` });
       notifyMac(
         "reunión",
