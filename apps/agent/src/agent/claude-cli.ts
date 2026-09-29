@@ -326,7 +326,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     persistedCount: 0,
   };
   runs.set(run.id, run);
-  registerOfficeWorker({ id: run.id, source: "run", project: projectSlug, title: s.prompt });
+  registerOfficeWorker({ id: run.id, source: "run", project: projectSlug, title: s.prompt, sessionId });
 
   pushLine(run, {
     t: Date.now(),

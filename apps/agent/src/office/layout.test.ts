@@ -113,6 +113,12 @@ describe("assignSeats", () => {
     assert.equal(seats.get("a"), "desk:p0:1");
   });
 
+  it("quien continúa una conversación hereda el escritorio del anterior", () => {
+    const prev = new Map([["r1", "desk:p0:1"]]);
+    const { seats } = assignSeats([{ id: "r2", project: "p0", continues: "r1" }], layout.desks, prev);
+    assert.equal(seats.get("r2"), "desk:p0:1");
+  });
+
   it("proyecto sin pod → general; pod lleno → general y luego cualquiera", () => {
     const { seats } = assignSeats([{ id: "x", project: "desconocido" }], layout.desks);
     assert.equal(seats.get("x"), "desk:general:0");

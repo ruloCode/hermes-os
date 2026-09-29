@@ -48,6 +48,10 @@ export interface OfficeWorker {
   lines: string[];
   /** Algún evento de la sesión fue privado (composición): no sale por el túnel. */
   private?: boolean;
+  /** Sesión de Hermes del run (claude -p): hablarle al personaje la continúa. */
+  sessionId?: string;
+  /** Id del personaje al que este continúa (misma sesión): hereda su escritorio. */
+  continues?: string;
 }
 
 export interface OfficeProject {
@@ -79,6 +83,7 @@ export interface OfficeRegistration {
   project?: string;
   title?: string;
   machine?: string;
+  sessionId?: string;
 }
 
 export const GENERAL_PROJECT = "general";
@@ -172,7 +177,7 @@ const TRAILING_STOP = new Set([
 export function nameWorker(seed: string | undefined): string {
   let s = (seed ?? "").replace(/^[❯>\s]+/, "").trim();
   // Etiquetas de origen: "claude -p: …", "tarea: …", "reunión: …".
-  for (let i = 0; i < 2; i++) s = s.replace(/^[a-záéíóúñü]+(?: -?[a-z]+)?:\s+/i, "");
+  for (let i = 0; i < 2; i++) s = s.replace(/^[a-záéíóúñü]+(?: -?[a-z]+)?(?: \([a-z ]+\))?:\s+/i, "");
   s = s.split(/(?<=[.!?¿¡:])\s|\n/)[0]?.replace(/[.!?¿¡:;,]+$/g, "").trim() ?? "";
   const words = s.split(/\s+/).filter(Boolean).slice(0, 4);
   while (words.length > 1 && TRAILING_STOP.has(words[words.length - 1].toLowerCase())) words.pop();
@@ -241,12 +246,17 @@ function setName(w: OfficeWorker, seed: string | undefined) {
   w.task.name = name;
 }
 
-/** Registra lo que sabe el punto de arranque (proyecto, título). Crea o completa el personaje. */
+/**
+ * Registra lo que sabe el punto de arranque (proyecto, título, sesión). Crea o
+ * completa el personaje. Si otro personaje tenía la MISMA sesión (una
+ * conversación que continúa), este lo reemplaza: se marca `continues` para que
+ * herede el escritorio y el viejo sale del mapa (`replaced`).
+ */
 export function registerWorker(
   workers: Map<string, OfficeWorker>,
   reg: OfficeRegistration,
   now = Date.now(),
-): OfficeWorker {
+): OfficeWorker & { replaced?: string } {
   const at = new Date(now).toISOString();
   // Un id terminado que vuelve a arrancar (una programada re-corre dentro de la
   // gracia) es una sesión nueva: se reemplaza, no se revive.
@@ -259,8 +269,22 @@ export function registerWorker(
     setName(w, reg.title);
     if (!w.lines.length) pushLine(w, `❯ ${oneLine(reg.title.replace(/^❯\s*/, ""))}`);
   }
+  let replaced: string | undefined;
+  if (reg.sessionId) {
+    w.sessionId = reg.sessionId;
+    for (const [id, other] of workers) {
+      if (id === reg.id || other.sessionId !== reg.sessionId) continue;
+      // La conversación sigue: mismo proyecto y mismo nombre, nuevo run.
+      w.continues = id;
+      w.project = other.project;
+      w.name = other.name;
+      w.task.name = other.name;
+      workers.delete(id);
+      replaced = id;
+    }
+  }
   workers.set(reg.id, w);
-  return w;
+  return replaced ? Object.assign(w, { replaced }) : w;
 }
 
 /** Eventos que pueden hacer nacer un personaje (los de cierre solo actualizan). */
@@ -293,7 +317,8 @@ export function reduceOfficeEvent(
 
   switch (ev.kind) {
     case "task_start":
-      setName(w, ev.detail);
+      // Una conversación que continúa conserva el nombre de su personaje.
+      if (!w.continues) setName(w, ev.detail);
       if (!isTerminal(w.status)) w.status = "starting";
       return w;
     case "session_start":

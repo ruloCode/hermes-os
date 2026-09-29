@@ -152,7 +152,7 @@ export function deskToWorld(desk: OfficeDesk, local: { x: number; z: number }): 
  * dos en el mismo escritorio. Los que no caben quedan en `unseated`.
  */
 export function assignSeats(
-  workers: { id: string; project: string }[],
+  workers: { id: string; project: string; continues?: string }[],
   desks: OfficeDesk[],
   previous: ReadonlyMap<string, string> = new Map(),
 ): { seats: Map<string, string>; unseated: string[] } {
@@ -162,7 +162,8 @@ export function assignSeats(
   const pending: { id: string; project: string }[] = [];
 
   for (const w of workers) {
-    const prev = previous.get(w.id);
+    // Quien continúa una conversación hereda el escritorio del anterior.
+    const prev = previous.get(w.id) ?? (w.continues ? previous.get(w.continues) : undefined);
     const desk = prev ? byId.get(prev) : undefined;
     if (desk && !taken.has(desk.id)) {
       seats.set(w.id, desk.id);

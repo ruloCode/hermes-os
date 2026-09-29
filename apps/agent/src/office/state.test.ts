@@ -176,6 +176,31 @@ describe("registerWorker", () => {
   });
 });
 
+describe("conversación que continúa", () => {
+  it("un run con la misma sesión reemplaza al anterior y lo marca como continuación", () => {
+    const m = office();
+    registerWorker(m, { id: "r1", source: "run", project: "hermes-os", title: "Revisa los tests", sessionId: "s-1" }, T0);
+    reduceOfficeEvent(m, ev("task_done", T0 + 5));
+    const w = registerWorker(m, { id: "r2", source: "run", project: "general", title: "Ahora arréglalos", sessionId: "s-1" }, T0 + 10);
+    assert.equal(w.continues, "r1");
+    assert.equal(w.replaced, "r1");
+    assert.equal(w.project, "hermes-os");
+    assert.equal(w.name, "Revisa los tests");
+    assert.equal(w.status, "starting");
+    assert.equal(m.has("r1"), false);
+    reduceOfficeEvent(m, ev("task_start", T0 + 11, { taskId: "r2", detail: "claude -p (resume): Ahora arréglalos" }));
+    assert.equal(m.get("r2")?.name, "Revisa los tests");
+  });
+
+  it("sesiones distintas no se tocan", () => {
+    const m = office();
+    registerWorker(m, { id: "r1", source: "run", title: "a", sessionId: "s-1" }, T0);
+    const w = registerWorker(m, { id: "r2", source: "run", title: "b", sessionId: "s-2" }, T0);
+    assert.equal(w.continues, undefined);
+    assert.equal(m.size, 2);
+  });
+});
+
 describe("tickOffice", () => {
   it("un personaje callado pasa a pensando; un evento lo devuelve a trabajar", () => {
     const m = office();
@@ -222,6 +247,7 @@ describe("nombres y líneas", () => {
     assert.equal(nameWorker("claude -p: lee el README y resume"), "Lee el README");
     assert.equal(nameWorker("❯ arregla el login. Luego corre los tests"), "Arregla el login");
     assert.equal(nameWorker("Lee el README: resume la arquitectura"), "Lee el README");
+    assert.equal(nameWorker("claude -p (resume): revisa el login"), "Revisa el login");
     assert.equal(nameWorker(""), "Agente");
     assert.equal(nameWorker(undefined), "Agente");
     assert.ok(nameWorker("Supercalifragilisticoespialidoso extraordinariamente largo").length <= 28);

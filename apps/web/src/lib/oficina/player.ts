@@ -58,6 +58,9 @@ export class PlayerController {
   /** Donde la cámara no debe salir (la sala; el frente queda abierto). */
   bounds = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
   private keys = new Set<string>();
+  /** Control de juego: stick izquierdo (x derecha, y abajo), correr con RT, salto pedido por botón. */
+  private pad = { x: 0, y: 0, run: false };
+  private jumpWanted = false;
   private readonly camPos = new THREE.Vector3();
   private readonly target = new THREE.Vector3();
   private snapped = false;
@@ -80,6 +83,27 @@ export class PlayerController {
   };
 
   private onBlur = () => this.keys.clear();
+
+  /** Entrada del control, cada frame. El stick manda sobre el teclado si está inclinado. */
+  setPad(x: number, y: number, run: boolean) {
+    this.pad = this.enabled ? { x, y, run } : { x: 0, y: 0, run: false };
+  }
+
+  /** Stick derecho: gira y levanta la cámara (rad/s a tope). */
+  padLook(x: number, y: number, dt: number) {
+    this.camYaw -= x * 2.6 * dt;
+    this.camPitch = THREE.MathUtils.clamp(this.camPitch + y * 1.5 * dt, 0.08, 1.25);
+  }
+
+  jump() {
+    if (this.enabled) this.jumpWanted = true;
+  }
+
+  /** La cámara vuelve detrás del personaje. */
+  recenter() {
+    this.camYaw = this.facing + Math.PI;
+    this.camPitch = 0.42;
+  }
 
   /** Deja de responder (vista aérea, diálogo abierto) y suelta las teclas apretadas. */
   setEnabled(on: boolean) {
@@ -131,8 +155,16 @@ export class PlayerController {
     if (k.has("KeyS") || k.has("ArrowDown")) iz += 1;
     if (k.has("KeyA") || k.has("ArrowLeft")) ix -= 1;
     if (k.has("KeyD") || k.has("ArrowRight")) ix += 1;
+    // El stick analógico manda si está inclinado: su magnitud es la velocidad.
+    let throttle = 1;
+    const padMag = Math.hypot(this.pad.x, this.pad.y);
+    if (padMag > 0.01) {
+      ix = this.pad.x;
+      iz = this.pad.y;
+      throttle = Math.min(1, padMag);
+    }
     const steering = ix !== 0 || iz !== 0;
-    const running = k.has("ShiftLeft") || k.has("ShiftRight");
+    const running = k.has("ShiftLeft") || k.has("ShiftRight") || this.pad.run;
     if (steering) {
       const len = Math.hypot(ix, iz);
       ix /= len;
@@ -142,20 +174,21 @@ export class PlayerController {
       const cos = Math.cos(this.camYaw);
       const dx = ix * cos + iz * sin;
       const dz = -ix * sin + iz * cos;
-      const v = (running ? RUN : WALK) * dt;
+      const v = (running ? RUN : WALK) * throttle * dt;
       this.tryMove(this.pos.x + dx * v, this.pos.z);
       this.tryMove(this.pos.x, this.pos.z + dz * v);
       const want = Math.atan2(dx, dz);
       const diff = Math.atan2(Math.sin(want - this.facing), Math.cos(want - this.facing));
       this.facing += diff * Math.min(1, dt * 14);
     }
-    this.speed += ((steering ? (running ? RUN / WALK : 1) : 0) - this.speed) * Math.min(1, dt * 12);
+    this.speed += ((steering ? (running ? RUN / WALK : 1) * throttle : 0) - this.speed) * Math.min(1, dt * 12);
 
     const ground = this.groundAt();
-    if (k.has("Space") && this.grounded) {
+    if ((k.has("Space") || this.jumpWanted) && this.grounded) {
       this.vy = JUMP_V;
       this.grounded = false;
     }
+    this.jumpWanted = false;
     this.vy -= GRAVITY * dt;
     this.pos.y += this.vy * dt;
     if (this.pos.y <= ground) {

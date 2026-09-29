@@ -30,6 +30,8 @@ interface Props {
   board: BoardStat[];
   /** Texto del aviso sobre lo que el dueño tiene al alcance ("Contratar aquí", "Ver a X"). */
   nearLabel: string | null;
+  /** Tecla que muestra el aviso: "E" (teclado) o "A" (control). */
+  nearKey: "E" | "A";
   inputEnabled: boolean;
   onClick: (hit: OfficeHit | null) => void;
   onNear: (hit: OfficeHit | null) => void;
@@ -47,7 +49,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, inputEnabled, onClick, onNear, onMode },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -151,9 +153,13 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
           className="absolute top-0 left-0 flex items-center gap-2 rounded-lg border border-line bg-panel/95 py-1 pr-3 pl-1 text-sm whitespace-nowrap text-text opacity-0 shadow-lg"
           style={{ willChange: "transform", display: nearLabel ? "flex" : "none" }}
         >
-          <kbd className="grid h-6 w-6 place-items-center rounded-md border border-line-2 bg-panel-2 font-mono text-xs font-semibold text-accent">
-            E
-          </kbd>
+          {nearKey === "A" ? (
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-[#5cb85c] font-mono text-xs font-bold text-white">A</span>
+          ) : (
+            <kbd className="grid h-6 w-6 place-items-center rounded-md border border-line-2 bg-panel-2 font-mono text-xs font-semibold text-accent">
+              E
+            </kbd>
+          )}
           {nearLabel}
         </div>
       </div>

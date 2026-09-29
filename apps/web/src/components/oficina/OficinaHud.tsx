@@ -10,6 +10,7 @@ import { useState } from "react";
 import type { OfficeWorker, OfficeWorkerStatus } from "@hermes/shared";
 import type { OfficeMode } from "@/lib/oficina/office-world";
 import { HAIR_COLORS, HAIR_STYLES, SHIRT_COLORS, SKIN_TONES, type OwnerLook } from "@/lib/oficina/look";
+import { PadGlyph } from "./VoiceComposer";
 
 export type Feed = "connecting" | "live" | "offline";
 
@@ -123,6 +124,11 @@ export function Toolbar({
   onLook,
   themeIcon,
   onTheme,
+  pad,
+  replyVoice,
+  onReplyVoice,
+  hermesCall,
+  onHermesCall,
 }: {
   mode: OfficeMode;
   onMode: (m: OfficeMode) => void;
@@ -133,9 +139,29 @@ export function Toolbar({
   onLook: () => void;
   themeIcon: string;
   onTheme: () => void;
+  pad: { connected: boolean; label: string };
+  replyVoice: boolean;
+  onReplyVoice: () => void;
+  hermesCall: "off" | "connecting" | "on" | "unavailable";
+  onHermesCall: () => void;
 }) {
   return (
     <nav className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
+      {pad.connected ? (
+        <span className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-text ${glass}`} title="Control conectado (Gamepad API)">
+          <span className="h-2 w-2 rounded-full bg-green" />🎮 {pad.label}
+        </span>
+      ) : null}
+      <div className={`flex items-center gap-0.5 rounded-xl p-1 ${glass}`}>
+        {hermesCall !== "unavailable" ? (
+          <ToolButton active={hermesCall === "on"} onClick={onHermesCall} title="Llamar a Hermes por voz (Y en el control)">
+            {hermesCall === "on" ? "📞 Colgar" : hermesCall === "connecting" ? "📞 Conectando…" : "📞 Hermes"}
+          </ToolButton>
+        ) : null}
+        <ToolButton active={replyVoice} onClick={onReplyVoice} title="Leer en voz alta la respuesta del agente al que le hablaste">
+          {replyVoice ? "🔊 Respuestas" : "🔇 Respuestas"}
+        </ToolButton>
+      </div>
       <div className={`flex items-center gap-0.5 rounded-xl p-1 ${glass}`} role="tablist" aria-label="Vista">
         <ToolButton active={mode === "explore"} onClick={() => onMode("explore")} title="Caminar por la oficina (V)">
           🚶 Explorar
@@ -219,9 +245,26 @@ function Key({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function ControlsHint({ mode }: { mode: OfficeMode }) {
-  const items: [React.ReactNode, string][] =
-    mode === "explore"
+export function ControlsHint({ mode, pad, padConnected }: { mode: OfficeMode; pad: boolean; padConnected: boolean }) {
+  const padItems: [React.ReactNode, string][] = [
+    [<Key key="k">stick izq.</Key>, "caminar"],
+    [<PadGlyph key="k" b="RT" />, "correr"],
+    [<PadGlyph key="k" b="A" />, "hablar / contratar"],
+    [<PadGlyph key="k" b="X" />, "saltar"],
+    [<PadGlyph key="k" b="Y" />, "llamar a Hermes"],
+    [
+      <span key="k" className="flex gap-0.5">
+        <PadGlyph b="LB" />
+        <PadGlyph b="RB" />
+      </span>,
+      "otro agente",
+    ],
+    [<PadGlyph key="k" b="View" />, mode === "explore" ? "vista aérea" : "explorar"],
+    [<PadGlyph key="k" b="Menu" />, "ayuda"],
+  ];
+  const items: [React.ReactNode, string][] = pad
+    ? padItems
+    : mode === "explore"
       ? [
           [
             <span key="k" className="flex gap-0.5">
@@ -252,6 +295,53 @@ export function ControlsHint({ mode }: { mode: OfficeMode }) {
           {label}
         </span>
       ))}
+      {!padConnected ? <span className="text-text-faint">· 🎮 ¿control? presiona cualquier botón</span> : null}
+    </div>
+  );
+}
+
+const HELP: [string[], string][] = [
+  [["stick izq."], "Caminar (más inclinado, más rápido)"],
+  [["RT"], "Correr"],
+  [["stick der."], "Mover la cámara"],
+  [["↑", "↓"], "Acercar / alejar la cámara"],
+  [["LT"], "Recentrar la cámara"],
+  [["A"], "Hablar con el agente o contratar en el escritorio cercano · en la conversación: escuchar, parar y enviar"],
+  [["X"], "Saltar · en la conversación: volver a hablar"],
+  [["B"], "Cancelar / cerrar"],
+  [["Y"], "Llamar a Hermes por voz (y colgar)"],
+  [["LB", "RB"], "Ir al agente anterior / siguiente"],
+  [["View"], "Vista aérea / explorar"],
+  [["Menu"], "Esta ayuda"],
+];
+
+export function ControllerHelp({ label, onClose }: { label: string; onClose: () => void }) {
+  return (
+    <div className="absolute inset-0 z-50 grid place-items-center bg-bg/50 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+      <section className={`w-full max-w-xl rounded-2xl p-6 ${glass}`} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">🎮 {label || "Control"}</h2>
+          <span className="flex items-center gap-1.5 text-xs text-text-faint">
+            <PadGlyph b="B" /> cerrar
+          </span>
+        </div>
+        <ul className="mt-4 divide-y divide-line">
+          {HELP.map(([keys, what]) => (
+            <li key={what} className="flex items-center gap-4 py-2 text-sm">
+              <span className="flex w-28 shrink-0 gap-1">
+                {keys.map((k) =>
+                  ["A", "B", "X", "Y", "LB", "RB", "RT", "LT", "View", "Menu"].includes(k) ? (
+                    <PadGlyph key={k} b={k as "A"} />
+                  ) : (
+                    <Key key={k}>{k}</Key>
+                  ),
+                )}
+              </span>
+              <span className="text-text-dim">{what}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }
@@ -316,7 +406,7 @@ export interface Toast {
 
 export function Toasts({ toasts }: { toasts: Toast[] }) {
   return (
-    <div className="pointer-events-none absolute top-3 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
+    <div className="pointer-events-none absolute top-20 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
       {toasts.map((t) => (
         <div key={t.id} className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm text-text ${glass}`}>
           <span className={`h-2 w-2 rounded-full ${t.tone === "done" ? "bg-green" : t.tone === "error" ? "bg-red" : "bg-amber"}`} />

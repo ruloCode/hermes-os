@@ -8,6 +8,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { OfficeWorker, OfficeWorkerStatus } from "@hermes/shared";
 import { claudeKillRun, claudeRunStreamUrl } from "@/lib/hermes";
+import type { OfficeDictation } from "@/hooks/useOfficeDictation";
+import { VoiceComposer } from "./VoiceComposer";
 
 const STATUS_LABEL: Record<OfficeWorkerStatus, string> = {
   starting: "Arrancando",
@@ -93,11 +95,19 @@ export function WorkerDrawer({
   projectName,
   simulated,
   onClose,
+  voice,
+  padConnected,
+  sending,
+  onSend,
 }: {
   worker: OfficeWorker;
   projectName: string;
   simulated: boolean;
   onClose: () => void;
+  voice: OfficeDictation;
+  padConnected: boolean;
+  sending: boolean;
+  onSend: () => void;
 }) {
   const isRun = worker.source === "run" && !simulated;
   const stream = useRunStream(isRun ? worker.id : null);
@@ -179,6 +189,25 @@ export function WorkerDrawer({
           <p className="mt-2 text-text-faint">El run ya salió de memoria del agente: estas son sus últimas líneas.</p>
         ) : null}
       </div>
+
+      {/* Conversación por voz: continúa la sesión del run (o abre uno nuevo en su proyecto). */}
+      <section className="border-t border-line bg-panel-2/40 px-4 py-3">
+        <VoiceComposer
+          voice={voice}
+          padConnected={padConnected}
+          sending={sending}
+          sendLabel={worker.source === "run" && worker.sessionId ? `Seguir con ${worker.name}` : `Nuevo agente en ${projectName}`}
+          blockedReason={
+            simulated
+              ? "Simulación: aquí no se envía nada."
+              : active && worker.source === "run"
+                ? "Sigue trabajando: háblale cuando termine (o detenlo)."
+                : null
+          }
+          placeholder="Ahora corre los tests y arregla lo que falle"
+          onSend={onSend}
+        />
+      </section>
 
       {isRun && active ? (
         <footer className="flex justify-end border-t border-line px-4 py-2.5">

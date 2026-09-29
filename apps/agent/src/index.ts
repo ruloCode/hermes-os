@@ -110,6 +110,7 @@ import {
 import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
 import { avatarProvider, terminatorAvatar } from "./avatar.js";
 import { officeState, startOffice, subscribeOffice } from "./office/state.js";
+import { transcribe } from "./meetings/stt.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
 import {
@@ -2481,6 +2482,23 @@ app.get("/office/state", async (c) => {
   const remote = viaTunnel((h) => c.req.header(h));
   const state = await officeState();
   return c.json(remote ? { ...state, workers: state.workers.filter((w) => !w.private) } : state);
+});
+
+// Dictado de la Oficina: respaldo cuando el reconocedor del navegador falla
+// (sin red, sin permiso). Audio corto (multipart `audio`) → la MISMA cadena STT
+// de las juntas (Scribe → Whisper → local). Contrato { ok, text, provider | error }.
+app.post("/office/dictate", bodyLimit({ maxSize: 15 * 1024 * 1024 }), async (c) => {
+  const body = await c.req.parseBody();
+  const audio = body.audio;
+  if (!audio || typeof audio === "string") return c.json({ ok: false, error: "audio requerido" }, 400);
+  try {
+    const r = await transcribe(audio);
+    // La cadena de juntas marca hablantes ("**Hablante 0:** …"): en un dictado sobran.
+    const text = r.text.replace(/\*\*[^*\n]{1,40}:\*\*\s*/g, "").replace(/\s+/g, " ").trim();
+    return c.json({ ok: true, text, provider: r.provider });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 app.get("/office/events", (c) =>

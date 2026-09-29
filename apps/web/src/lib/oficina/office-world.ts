@@ -132,6 +132,7 @@ export class OfficeWorld {
   private frames = 0;
   private fpsAt = performance.now();
   private clockAt = 0;
+  private padInput = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, run: false, zoom: 0 };
   mode: OfficeMode = "explore";
   fps = 0;
 
@@ -260,12 +261,38 @@ export class OfficeWorld {
     this.room?.setBoard(stats);
   }
 
+  // ── Control de juego (lo alimenta la página cada frame) ────────────────
+
+  /** Sticks y gatillos: mover, cámara, correr y zoom continuo (cruceta ↑↓). */
+  setPad(p: { move: { x: number; y: number }; look: { x: number; y: number }; run: boolean; zoom: number }) {
+    this.padInput = p;
+  }
+
+  /** Lo mismo que E: habla con el agente o contrata en el escritorio al alcance. */
+  interact(): boolean {
+    if (this.mode !== "explore" || !this.near || !this.player.enabled) return false;
+    this.owner.wave();
+    this.hooks.onClick?.(this.near);
+    return true;
+  }
+
+  jump() {
+    if (this.mode === "explore") this.player.jump();
+  }
+
+  recenter() {
+    if (this.mode === "explore") this.player.recenter();
+    else this.frameAll();
+  }
+
   /** Estado para QA (__hermesOficinaDebug). */
   debug() {
     const p = this.player.pos;
     return {
       mode: this.mode,
       player: { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), grounded: this.player.grounded },
+      camYaw: +this.player.camYaw.toFixed(3),
+      camera: { x: +this.camera.position.x.toFixed(2), z: +this.camera.position.z.toFixed(2) },
       near: this.near,
       fps: this.fps,
     };
@@ -665,9 +692,24 @@ export class OfficeWorld {
       this.applyDaylight();
     }
     if (this.mode === "explore") {
+      const pad = this.padInput;
+      this.player.setPad(pad.move.x, pad.move.y, pad.run);
+      if (pad.look.x || pad.look.y) this.player.padLook(pad.look.x, pad.look.y, dt);
+      if (pad.zoom) this.player.zoom(pad.zoom * 900 * dt);
       if (this.player.enabled) this.player.update(dt);
       else this.player.update(0);
     } else {
+      // En vista aérea el stick derecho orbita y la cruceta acerca.
+      const pad = this.padInput;
+      if (pad.look.x || pad.look.y || pad.zoom) {
+        this.focusGoal = null;
+        const offset = this.camera.position.clone().sub(this.controls.target);
+        const sph = new THREE.Spherical().setFromVector3(offset);
+        sph.theta -= pad.look.x * 2 * dt;
+        sph.phi = THREE.MathUtils.clamp(sph.phi + pad.look.y * 1.4 * dt, 0.15, this.controls.maxPolarAngle);
+        sph.radius = THREE.MathUtils.clamp(sph.radius * (1 + pad.zoom * 1.2 * dt), this.controls.minDistance, this.controls.maxDistance);
+        this.camera.position.copy(this.controls.target).add(new THREE.Vector3().setFromSpherical(sph));
+      }
       if (this.focusGoal) {
         // Target y posición se deslizan juntos: el encuadre siempre llega desde el frente abierto.
         const g = this.focusGoal;

@@ -54,6 +54,11 @@ function placeProject(w: OfficeWorker) {
 export function registerOfficeWorker(reg: Omit<OfficeRegistration, "machine">): void {
   const w = registerWorker(workers, { ...reg, machine: env.MACHINE_NAME });
   placeProject(w);
+  // Una conversación que continúa: el personaje anterior se va y el nuevo hereda su escritorio.
+  if (w.replaced) {
+    publish({ type: "removed", id: w.replaced });
+    delete w.replaced;
+  }
   publish({ type: "worker", worker: w });
 }
 
