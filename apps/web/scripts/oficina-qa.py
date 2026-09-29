@@ -1,13 +1,17 @@
 """QA de la Oficina de agentes (/oficina) sin gastar tokens.
 
-Abre la página, inyecta la oficina de demostración (window.__hermesOficinaSim),
-captura los dos temas, hace clic en un personaje (panel), Esc (cierra) y en un
-escritorio libre (diálogo de contratar, sin enviar). Falla si hay errores de
-consola o si algo no aparece.
+Recorre la oficina como un usuario, en los dos temas:
+  1. EXPLORAR (por defecto): camina con W, corre con Shift, salta con Espacio.
+  2. Con la oficina de demostración (window.__hermesOficinaSim("demo")), el
+     dueño va junto a un agente, "E" abre su panel y Esc lo cierra.
+  3. "V" cambia a VISTA AÉREA: clic real en un personaje abre su panel.
+  4. En vivo: clic en un escritorio libre (aérea) y "E" frente a uno libre
+     (explorar) abren "Contratar" — sin enviar nada.
+Captura cada paso en --out. Falla si algo no aparece o hay errores de consola.
 
   ~/.cache/hermes-pw-venv/bin/python apps/web/scripts/oficina-qa.py [--url http://localhost:31999] [--out docs/img]
 
-Nunca espera networkidle: la página tiene un SSE abierto.
+Nunca espera networkidle: la página tiene SSE abiertos.
 """
 
 import argparse
@@ -37,71 +41,124 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not args.headed, args=["--use-gl=angle", "--enable-webgl", "--ignore-gpu-blocklist"])
-        page = browser.new_page(viewport={"width": 1600, "height": 960})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
 
         for theme in ("dark", "light"):
+            tag = "oscuro" if theme == "dark" else "claro"
+            page = browser.new_page(viewport={"width": 1600, "height": 960})
+            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            page.on("pageerror", lambda e: errors.append(str(e)))
             page.add_init_script(f"localStorage.setItem('hermes-theme', '{theme}')")
             page.goto(f"{args.url}/oficina", wait_until="domcontentloaded")
             page.wait_for_function("() => typeof window.__hermesOficinaSim === 'function'", timeout=30000)
             page.wait_for_function("() => document.querySelector('main canvas') !== null", timeout=30000)
             time.sleep(2.5)
-            live = page.evaluate("() => window.__hermesOficinaDebug()")
-            check(live["pods"] >= 1, f"[{theme}] planta con {live['pods']} pods y {live['desks']} escritorios (en vivo: {len(live['workers'])} sesiones)")
+
+            def dbg():
+                return page.evaluate("() => window.__hermesOficinaDebug()")
+
+            d0 = dbg()
+            check(d0["mode"] == "explore", f"[{theme}] arranca en explorar")
+            page.mouse.move(800, 480)
+
+            # 1. Caminar, correr, saltar.
+            page.keyboard.down("w")
+            time.sleep(1.0)
+            page.keyboard.up("w")
+            d1 = dbg()
+            walked = d0["player"]["z"] - d1["player"]["z"]
+            check(walked > 2, f"[{theme}] W camina hacia adelante ({walked:.1f} m)")
+            page.keyboard.down("Shift")
+            page.keyboard.down("a")
+            time.sleep(0.8)
+            page.keyboard.up("a")
+            page.keyboard.up("Shift")
+            d2 = dbg()
+            ran = abs(d2["player"]["x"] - d1["player"]["x"])
+            check(ran > 3.5, f"[{theme}] Shift+A corre de lado ({ran:.1f} m)")
+            page.keyboard.down(" ")
+            time.sleep(0.2)
+            jump = dbg()["player"]["y"]
+            page.keyboard.up(" ")
+            check(jump > 0.3, f"[{theme}] Espacio salta ({jump:.2f} m)")
+            time.sleep(1)
+            page.screenshot(path=str(out / f"oficina-explorar-{tag}.png"))
+
+            # 2. Demo: acercarse a un agente y abrir su panel con E.
             page.evaluate("() => window.__hermesOficinaSim('demo')")
-            time.sleep(3)
-            dbg = page.evaluate("() => window.__hermesOficinaDebug()")
-            check(dbg["simulated"] and len(dbg["workers"]) == 8, f"[{theme}] simulación con 8 personajes")
-            check(len(dbg["seats"]) == 8, f"[{theme}] los 8 tienen escritorio")
-            check(len(set(dbg["seats"].values())) == 8, f"[{theme}] ninguno comparte escritorio")
-            check(dbg["fps"] >= 20, f"[{theme}] fps = {dbg['fps']}")
-            shot = out / f"oficina-{'oscuro' if theme == 'dark' else 'claro'}.png"
-            page.screenshot(path=str(shot))
-            print(f"  captura → {shot}")
-
-        # Clic REAL en un personaje (posición en pantalla por el seam del mundo).
-        wid = page.evaluate("() => window.__hermesOficinaDebug().workers[0]?.id ?? null")
-        check(wid is not None, "hay un personaje para seleccionar")
-        page.evaluate("(id) => window.__hermesOficinaFocus({ kind: 'worker', id })", wid)
-        time.sleep(1.8)
-        xy = page.evaluate("(id) => window.__hermesOficinaScreenOf({ kind: 'worker', id })", wid)
-        check(xy is not None, "el personaje está en cuadro")
-        if xy:
-            page.mouse.click(xy["x"], xy["y"] - 40)
+            time.sleep(2.5)
+            d = dbg()
+            check(len(d["workers"]) == 8 and len(set(d["seats"].values())) == 8, f"[{theme}] simulación: 8 agentes, 8 escritorios")
+            wid = d["workers"][0]["id"]
+            page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'worker', id })", wid)
+            time.sleep(1.2)
+            near = dbg()["near"]
+            check(near is not None and near.get("id") == wid, f"[{theme}] al lado del agente, E lo alcanza ({near})")
+            page.screenshot(path=str(out / f"oficina-cerca-{tag}.png"))
+            page.keyboard.press("e")
             time.sleep(0.6)
-            sel = page.evaluate("() => window.__hermesOficinaDebug().selected")
-            check(sel is not None and sel.get("kind") == "worker", f"clic → seleccionado {sel}")
-            check(page.locator("aside").count() == 1, "se abre el panel del personaje")
-            page.screenshot(path=str(out / "oficina-panel.png"))
+            check(page.locator("aside").count() == 1, f"[{theme}] E abre el panel del agente")
+            page.screenshot(path=str(out / f"oficina-panel-{tag}.png"))
             page.keyboard.press("Escape")
             time.sleep(0.4)
-            check(page.evaluate("() => window.__hermesOficinaDebug().selected") is None, "Esc cierra el panel")
+            check(dbg()["selected"] is None, f"[{theme}] Esc cierra el panel")
 
-        # En vivo: clic en un escritorio libre abre "Contratar" (sin enviar nada).
-        page.evaluate("() => window.__hermesOficinaSim(null)")
-        time.sleep(1.5)
-        free = page.evaluate(
-            """() => {
-              const d = window.__hermesOficinaDebug();
-              const taken = new Set(Object.values(d.seats));
-              for (let i = 0; i < d.freeDesks.length; i++) if (!taken.has(d.freeDesks[i])) return d.freeDesks[i];
-              return null;
-            }"""
-        )
-        if free:
-            page.evaluate("(id) => window.__hermesOficinaFocus({ kind: 'desk', id })", free)
+            # 3. Vista aérea con V y clic real.
+            page.keyboard.press("v")
+            time.sleep(1.5)
+            d = dbg()
+            check(d["mode"] == "aerial", f"[{theme}] V cambia a vista aérea")
+            check(d["fps"] >= 20, f"[{theme}] fps = {d['fps']}")
+            page.screenshot(path=str(out / f"oficina-aerea-{tag}.png"))
+            page.evaluate("(id) => window.__hermesOficinaFocus({ kind: 'worker', id })", wid)
             time.sleep(1.8)
-        xy = page.evaluate("(id) => window.__hermesOficinaScreenOf({ kind: 'desk', id })", free) if free else None
-        check(xy is not None, f"escritorio libre en cuadro ({free})")
-        if xy:
-            page.mouse.click(xy["x"], xy["y"])
-            time.sleep(0.6)
-            check(page.get_by_text("Contratar un agente").count() == 1, "clic en escritorio libre → diálogo de contratar")
-            page.screenshot(path=str(out / "oficina-contratar.png"))
-            page.keyboard.press("Escape")
-            time.sleep(0.4)
-            check(page.get_by_text("Contratar un agente").count() == 0, "Esc cierra el diálogo")
+            xy = page.evaluate("(id) => window.__hermesOficinaScreenOf({ kind: 'worker', id })", wid)
+            if xy:
+                page.mouse.click(xy["x"], xy["y"] - 40)
+                time.sleep(0.6)
+                check(page.locator("aside").count() == 1, f"[{theme}] clic en el agente abre su panel")
+                page.keyboard.press("Escape")
+                time.sleep(0.3)
+            else:
+                check(False, f"[{theme}] el agente está en cuadro")
+
+            # 4. En vivo: contratar (clic en aérea, E en explorar), sin enviar.
+            page.evaluate("() => window.__hermesOficinaSim(null)")
+            time.sleep(1.5)
+            free = page.evaluate(
+                """() => {
+                  const d = window.__hermesOficinaDebug();
+                  const taken = new Set(Object.values(d.seats));
+                  return d.freeDesks.find((x) => !taken.has(x)) ?? null;
+                }"""
+            )
+            check(free is not None, f"[{theme}] hay un escritorio libre ({free})")
+            if free:
+                page.evaluate("(id) => window.__hermesOficinaFocus({ kind: 'desk', id })", free)
+                time.sleep(1.8)
+                xy = page.evaluate("(id) => window.__hermesOficinaScreenOf({ kind: 'desk', id })", free)
+                if xy:
+                    page.mouse.click(xy["x"], xy["y"])
+                    time.sleep(0.6)
+                check(page.get_by_text("Contratar un agente").count() == 1, f"[{theme}] clic en escritorio libre → contratar")
+                page.keyboard.press("Escape")
+                time.sleep(0.4)
+                page.keyboard.press("v")
+                time.sleep(0.6)
+                page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'desk', id })", free)
+                time.sleep(1.2)
+                page.keyboard.press("e")
+                time.sleep(0.6)
+                check(page.get_by_text("Contratar un agente").count() == 1, f"[{theme}] E frente a escritorio libre → contratar")
+                page.screenshot(path=str(out / f"oficina-contratar-{tag}.png"))
+                # Escribir en el diálogo no mueve al personaje.
+                before = dbg()["player"]
+                page.keyboard.type("wasd")
+                time.sleep(0.3)
+                after = dbg()["player"]
+                check(abs(before["x"] - after["x"]) + abs(before["z"] - after["z"]) < 0.01, f"[{theme}] escribir no mueve al personaje")
+                page.keyboard.press("Escape")
+                time.sleep(0.3)
+            page.close()
 
         browser.close()
 

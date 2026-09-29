@@ -125,7 +125,7 @@ export function WorkerDrawer({
   }, [lines.length]);
 
   return (
-    <aside className="absolute top-3 right-3 bottom-3 z-30 flex w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl">
+    <aside className="absolute top-16 right-3 bottom-16 z-30 flex w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl">
       <header className="flex items-start gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">

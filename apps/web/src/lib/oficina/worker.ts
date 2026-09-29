@@ -308,6 +308,14 @@ export class OfficeCharacter {
     this.drawBubble(w.name, w.task.summary);
   }
 
+  private cardScale = 1;
+
+  /** Tamaño y visibilidad de la tarjeta (en explorar se achica y las lejanas se ocultan). */
+  setCard(scale: number, visible: boolean) {
+    this.cardScale = scale;
+    if (this.bubble) this.bubble.visible = visible;
+  }
+
   setSelected(on: boolean) {
     this.selected = on;
     this.skin.emissiveIntensity = on ? 0.28 : 0;
@@ -354,6 +362,7 @@ export class OfficeCharacter {
       dim: p.dim,
       maxWidth: 380,
     });
+    this.bubble.userData.base = this.bubble.scale.clone();
     this.root.add(this.bubble);
   }
 
@@ -422,7 +431,14 @@ export class OfficeCharacter {
     // La bombilla late cuando algo pide atención (bloqueado) y respira cuando trabaja.
     const beat = this.status === "blocked" ? Math.abs(Math.sin(t * 8)) * 0.5 : this.status === "working" ? Math.abs(Math.sin(t * 3)) * 0.12 : 0;
     this.bulbMesh.scale.setScalar(1 + beat + (this.selected ? 0.15 : 0));
-    if (this.bubble) this.bubble.position.y = 1.74 + lift + Math.sin(t * 3) * 0.03;
+    if (this.bubble) {
+      // A un lado: los dos de una pareja espalda con espalda quedan girados 180°, así sus tarjetas no se enciman.
+      this.bubble.position.x = 0.55;
+      if (this.cardScale !== 1 && this.bubble.userData.base === undefined) this.bubble.userData.base = this.bubble.scale.clone();
+      const base = this.bubble.userData.base as THREE.Vector3 | undefined;
+      if (base) this.bubble.scale.copy(base).multiplyScalar(this.cardScale);
+      this.bubble.position.y = 1.74 + lift + Math.sin(t * 3) * 0.03;
+    }
   }
 
   private pose(act: Act, dt: number, t: number): Stance {
