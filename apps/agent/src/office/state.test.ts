@@ -227,6 +227,14 @@ describe("nombres y líneas", () => {
     assert.ok(nameWorker("Supercalifragilisticoespialidoso extraordinariamente largo").length <= 28);
   });
 
+  it("las líneas y resúmenes no traen markdown crudo", () => {
+    const m = office();
+    reduceOfficeEvent(m, ev("task_start", T0, { detail: "x" }));
+    const w = reduceOfficeEvent(m, ev("task_done", T0 + 1, { detail: "$0.26 · 7s · En `docs/` hay **14** archivos" }))!;
+    assert.equal(w.task.summary, "$0.26 · 7s · En docs/ hay 14 archivos");
+    assert.ok(w.lines.at(-1)?.endsWith("En docs/ hay 14 archivos"));
+  });
+
   it("parseToolInput rescata campos de un JSON truncado", () => {
     assert.deepEqual(parseToolInput('{"file_path":"/a/b.ts"}'), { file_path: "/a/b.ts" });
     assert.deepEqual(parseToolInput('{"command":"pnpm test","description":"corre los te'), { command: "pnpm test" });

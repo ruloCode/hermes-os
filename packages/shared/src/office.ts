@@ -192,8 +192,18 @@ export function sourceFromTaskId(id: string): OfficeSource {
   return "task";
 }
 
+/** Quita el markdown que el modelo mete en su texto (**negritas**, `código`, # títulos). */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "");
+}
+
 function oneLine(text: string, max = LINE_MAX): string {
-  const t = text.replace(/\s+/g, " ").trim();
+  const t = stripMarkdown(text).replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 

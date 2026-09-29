@@ -14,6 +14,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { OutlineEffect } from "three/addons/effects/OutlineEffect.js";
 import type { OfficeLayout, OfficeWorker } from "@hermes/shared";
 import { buildDesk, buildPodRug, type DeskView } from "./desk";
+import { Confetti } from "./confetti";
 import { Laptop } from "./laptop";
 import { OfficeCharacter } from "./worker";
 import { setToonFont, toon } from "./toon";
@@ -38,6 +39,7 @@ export interface OfficeWorldHooks {
 }
 
 interface Seated {
+  status?: OfficeWorker["status"];
   character: OfficeCharacter;
   laptop: Laptop;
   deskId: string | null;
@@ -80,6 +82,7 @@ export class OfficeWorld {
   private readonly pointer = new THREE.Vector2();
   private readonly tmp = new THREE.Vector3();
   private readonly floorMesh: THREE.Mesh;
+  private readonly confetti: Confetti;
   private readonly disposables: { dispose(): void }[] = [];
   private raf = 0;
   private running = false;
@@ -157,6 +160,16 @@ export class OfficeWorld {
     grid.position.y = 0.003;
     this.scene.add(grid);
     this.disposables.push(grid.geometry, gridMat);
+    // El confeti cae sobre los escritorios o el piso.
+    this.confetti = new Confetti((x, z) => {
+      for (const v of this.desks.values()) {
+        const dx = x - v.desk.x;
+        const dz = z - v.desk.z;
+        if (Math.abs(dx) < 1.1 && Math.abs(dz) < 0.55) return 0.8;
+      }
+      return 0;
+    }, [palette.accent, ...palette.skins, palette.bulb.working, palette.bulb.done, "#ffffff"]);
+    this.scene.add(this.confetti.mesh);
     noOutline(this.scene);
 
     const el = renderer.domElement;
@@ -320,6 +333,12 @@ export class OfficeWorld {
         desk.laptopAnchor.add(s.laptop.root);
         s.deskId = deskId;
       }
+      // Recién terminado (no al cargar la página con uno ya listo): confeti.
+      if (w.status === "done" && s.status && s.status !== "done") {
+        const at = s.character.root.getWorldPosition(new THREE.Vector3());
+        this.confetti.burst(at.x, at.y + 1.3, at.z, 140);
+      }
+      s.status = w.status;
       s.character.setState(w);
       s.character.setSelected(this.selected?.kind === "worker" && this.selected.id === w.id);
       s.laptop.setLines(w.lines);
@@ -481,6 +500,7 @@ export class OfficeWorld {
       view.vacancy.scale.setScalar(hot ? 1.5 : 1);
     }
 
+    this.confetti.update(dt);
     this.effect.render(this.scene, this.camera);
     this.emitPods();
 
@@ -532,6 +552,7 @@ export class OfficeWorld {
       (r.material as THREE.Material).dispose();
     }
     for (const d of this.disposables) d.dispose();
+    this.confetti.dispose();
     this.renderer.dispose();
     el.remove();
   }
