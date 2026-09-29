@@ -9,7 +9,9 @@ Recorre la oficina como un usuario, en los dos temas:
      (explorar) abren "Contratar" — sin enviar nada.
 Captura cada paso en --out. Falla si algo no aparece o hay errores de consola.
 
-  ~/.cache/hermes-pw-venv/bin/python apps/web/scripts/oficina-qa.py [--url http://localhost:31999] [--out docs/img]
+  ~/.cache/hermes-pw-venv/bin/python apps/web/scripts/oficina-qa.py [--url http://localhost:31999] [--out <carpeta>]
+
+Las capturas van por defecto a una carpeta temporal (no ensucian docs/img).
 
 Nunca espera networkidle: la página tiene SSE abiertos.
 """
@@ -17,6 +19,7 @@ Nunca espera networkidle: la página tiene SSE abiertos.
 import argparse
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -26,7 +29,7 @@ from playwright.sync_api import sync_playwright
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://localhost:31999")
-    ap.add_argument("--out", default="docs/img")
+    ap.add_argument("--out", default=str(Path(tempfile.gettempdir()) / "oficina-qa"))
     ap.add_argument("--headed", action="store_true")
     args = ap.parse_args()
     out = Path(args.out)

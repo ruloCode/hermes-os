@@ -6,7 +6,40 @@ Una oficina 3D con estilo de caricatura donde cada sesión **viva** del Claude A
 
 Inspirada en [agent-office](https://github.com/AgentSystemLabs/agent-office) (AgentSystemLabs, MIT). De ahí se portó el **motor visual**, no la infraestructura: el look toon (`MeshToonMaterial` con rampa de 3 pasos más `OutlineEffect`), el personaje con sus poses, la laptop, el confeti y el mapeo tool → pose (`actions.ts`). Cada archivo portado lo dice en su cabecera. agent-office corre CLIs en PTYs y lee su estado con hooks de Claude Code. Hermes ya tenía el bus de actividad del SDK, así que el estado sale de ahí.
 
-![Oficina en simulación, tema oscuro](img/oficina-oscuro.png)
+![Vista aérea en simulación, tema oscuro](img/oficina-aerea-oscuro.png)
+
+![Explorando junto a un agente, tema claro](img/oficina-cerca-claro.png)
+
+## Recorrer la oficina
+
+El dueño es un personaje dentro de la oficina, un humano portado del `Person` de agent-office. Su nombre sale de `NEXT_PUBLIC_HERMES_OWNER_NAME` y su apariencia se elige en **Tu personaje** (piel, pelo, peinado, camiseta), guardada en el navegador.
+
+| Tecla | Explorar (tercera persona) | Vista aérea |
+| --- | --- | --- |
+| W A S D / flechas | Caminar, relativo a la cámara | — |
+| Shift | Correr | — |
+| Espacio | Saltar (se puede subir a un escritorio) | — |
+| Arrastrar / rueda | Orbitar / acercar la cámara que lo sigue | Orbitar / zoom |
+| E | Interactuar con lo que tiene al alcance: contratar en un escritorio libre o ver a un agente | — |
+| Clic | Igual que E, sobre lo que se apunta | Agente o "+" |
+| V | Pasar a vista aérea | Volver a explorar |
+| Esc | Cerrar panel o diálogo | Igual |
+
+La lista **Equipo** lleva al dueño junto al agente que elijas (en aérea, la cámara va a él). Escribir en un diálogo no mueve al personaje.
+
+## La sala
+
+`lib/oficina/room.ts` recrea a nuestra manera la oficina de agent-office. Tiene piso de tablones, paredes con ventanas y un frente abierto con muro bajo de vidrio y entrada, para que la cámara siempre vea adentro. La cocina tiene mesón, cafetera, nevera, dispensador y mesa con bancos. El lounge tiene sofá, mesa, pufs y TV. Completan la sala una estantería, plantas y lámparas con luz cálida.
+
+Lo que muestra datos es real:
+
+| Objeto | Qué muestra |
+| --- | --- |
+| TV del lounge | El feed de actividad del agente (`/events`) |
+| Pizarra | Los conteos del momento, los mismos del HUD |
+| Reloj | La hora local |
+| Ventanas y luz | El cielo sigue la hora real: de día manda el sol, de noche las lámparas |
+| Letrero | "Oficina de *dueño*" desde la variable de entorno |
 
 ## Qué se ve
 
@@ -73,8 +106,8 @@ scripts/oficina-demo.sh --kill      # detener lo que siga corriendo
 
 **Guion sugerido:**
 
-1. Abre `http://localhost:31415/oficina` (en localhost, no por IP ni túnel). La oficina está vacía y solo existe el pod General.
-2. Con ⌘K, "Oficina de agentes". Clic en el **+** de General, elige un proyecto y contrata. Aparece un pod nuevo con su personaje, que empieza a leer.
+1. Abre `http://localhost:31415/oficina` (en localhost, no por IP ni túnel). Apareces en la entrada; la oficina solo tiene el pod General.
+2. Camina hasta el escritorio de General, presiona **E**, elige un proyecto y contrata. Aparece un pod nuevo con su personaje, que empieza a leer. Muéstrales la TV y la pizarra: se actualizan solas.
 3. Lanza `scripts/oficina-demo.sh` con dos o tres proyectos. Llegan equipos nuevos y cada uno actúa su tool.
 4. Por voz: "Hermes, trabaja en el proyecto X…" (`work_on_project`). Aparece otro personaje.
 5. Clic en uno: su salida en vivo. Espera el ✓ y el confeti.
@@ -88,7 +121,9 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaSim(state \| "demo" \| null)` | Sustituye el estado real, siempre marcado como simulación |
 | `__hermesOficinaDebug()` | Personajes, asientos, selección, escritorios y fps |
 | `__hermesOficinaScreenOf(hit)` | Posición en pantalla de un escritorio o personaje, para clics reales |
-| `__hermesOficinaFocus(hit)` | Lleva la cámara a un escritorio o personaje |
+| `__hermesOficinaFocus(hit)` | Lleva la cámara a un escritorio o personaje (vista aérea) |
+| `__hermesOficinaMode("explore" \| "aerial")` | Cambia de vista |
+| `__hermesOficinaWalkTo(hit)` | Pone al dueño junto a un escritorio o personaje |
 
 ## Pendiente (stretch)
 
@@ -96,3 +131,4 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 - Nombre del personaje escrito por Haiku, debounced. Hoy son las primeras palabras de la tarea.
 - `taskId` en los turnos de chat, para que la consola de texto también tenga personaje.
 - Voz al hacer clic en un personaje: `useVoiceConnect.switchTo` con el proyecto como scope.
+- Techo con lámparas colgantes (hoy la sala es una casa de muñecas sin techo, para que la vista aérea funcione).
