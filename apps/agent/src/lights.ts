@@ -248,6 +248,9 @@ export async function lightsCommand(action: LightAction, value?: string): Promis
       return { ok: true, detail: info.light_state.on_off ? "tira encendida" : "tira apagada" };
     }
     case "brightness": {
+      // Ojo `Number("")` es 0 (finito): sin este guard, "bájale el brillo"
+      // sin número caía en la rama de 0 y APAGABA la tira.
+      if (!val) return { ok: false, error: "¿a cuánto el brillo? (0 a 100)" };
       const n = Number(val.replace("%", ""));
       if (!Number.isFinite(n)) return { ok: false, error: "¿a cuánto el brillo? (0 a 100)" };
       if (n <= 0) {
