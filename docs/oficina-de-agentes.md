@@ -140,6 +140,23 @@ Ojo con `~/.claude/settings.json` del usuario: los runs heredan sus reglas `allo
 
 Las tareas de General (`POST /tasks`, Agent SDK) no tienen modo: las cuida el guardrail y, si miras la oficina, piden permiso para los comandos con efectos.
 
+## Tres pisos
+
+La oficina es un edificio de tres pisos (`FLOOR_Y` en `room.ts`: 0 · 3,6 · 7,2 m):
+
+| Piso | Qué hay |
+| --- | --- |
+| **1 · Equipos** | Los pods con los agentes, la entrada, el letrero, la pizarra y el reloj. Todo lo de los agentes vive aquí, sin cambios |
+| **2 · Café** | La cocina con isla, neón y pizarra de tiza, el lounge con la TV del feed, la cabina telefónica, la estantería y un tapete con pufs en el centro. Balcón de vidrio al frente |
+| **3 · Azotea** | Terraza de madera con antepecho de ladrillo, guirnaldas de bombillos, ping-pong, diana en su tablero, futbolín, arcade, sombrilla con sillas y materas |
+
+- **Escaleras en zigzag** contra el muro oeste: la 1 arranca junto a la entrada y sube hacia el fondo, y la 2, al lado, vuelve hacia el frente. Son macizas: cada escalón es una colisión 20 cm más alta y el personaje los sube solo (su paso automático es de 35 cm). Barandas en el lado abierto y guardas alrededor de cada hueco, salvo por donde se llega.
+- **Colisiones con base** (`Collider.bottom` en `player.ts`): una caja estorba solo si se cruza con la franja del cuerpo (1,7 m). Por eso se camina debajo de la losa del piso 2 y los muebles de abajo no estorban arriba.
+- **Corte de casa de muñecas**: se ven el piso donde estás y los de abajo (el de llegada aparece a mitad de la escalera). Solo se encienden las lámparas de ese piso, y quedan en 0 en vez de quitarse: cambiar cuántas luces hay recompila los shaders y el juego da un tirón.
+- **Vista aérea por piso**: abre en el piso donde estás. El selector "1 · Equipos / 2 · Café / 3 · Azotea" del HUD y las teclas **1**, **2** y **3** eligen cuál ver. Viendo el 2 o el 3 no se clickea nada del 1 a través de la losa y las etiquetas de los pods se ocultan.
+- **"E" solo alcanza a los agentes en el piso 1**. "Ir con un agente" (LB/RB o la lista del equipo) te trae abajo desde cualquier piso.
+- **QA**: `__hermesOficinaStair(i)` te pone al pie de la escalera `i` mirando hacia arriba, y `__hermesOficinaFloor(n)` abre la vista aérea del piso `n`. `oficina-qa.py` sube las dos escaleras caminando y revisa las alturas, el piso que se ve y las teclas.
+
 ## La sala
 
 `lib/oficina/room.ts` es un **loft de coworking** (look tipo WeWork, 2026-09-30, a partir de una imagen de referencia generada con Higgsfield): ladrillo a la vista en los muros (paño de canvas de 1,6 × 1,2 m repetido según el tamaño de cada tramo, así no se estira), piso de concreto pulido, ventanas industriales con cuadrícula de acero negro y un frente abierto con muro bajo de ladrillo y vidrio, para que la cámara siempre vea adentro. La cocina tiene mesón de madera con repisas abiertas, cafetera con vapor, **neón "Hermes"** (textura con halo + luz rosada real), **pizarra de tiza** del café (sin precios: en la oficina un número siempre es un dato real) y una **isla** con frascos de agua con fruta, grifos de kombucha/cerveza, snacks y cuatro banquetas altas bajo dos lámparas industriales colgantes. El lounge tiene sofá terracota, sillón verde de terciopelo, mesa redonda, puf y la TV del feed; en la esquina noreste hay una **cabina telefónica** de vidrio. Matas colgantes cerca de las ventanas y un afiche tipográfico. Sin lámparas sobre los pods: desde la vista aérea tapaban los escritorios.
