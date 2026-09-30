@@ -142,7 +142,7 @@ Las tareas de General (`POST /tasks`, Agent SDK) no tienen modo: las cuida el gu
 
 ## La sala
 
-`lib/oficina/room.ts` recrea a nuestra manera la oficina de agent-office. Tiene piso de tablones, paredes con ventanas y un frente abierto con muro bajo de vidrio y entrada, para que la cámara siempre vea adentro. La cocina tiene mesón, cafetera, nevera, dispensador y mesa con bancos. El lounge tiene sofá, mesa, pufs y TV. Completan la sala una estantería, plantas y lámparas con luz cálida.
+`lib/oficina/room.ts` es un **loft de coworking** (look tipo WeWork, 2026-09-30, a partir de una imagen de referencia generada con Higgsfield): ladrillo a la vista en los muros (paño de canvas de 1,6 × 1,2 m repetido según el tamaño de cada tramo, así no se estira), piso de concreto pulido, ventanas industriales con cuadrícula de acero negro y un frente abierto con muro bajo de ladrillo y vidrio, para que la cámara siempre vea adentro. La cocina tiene mesón de madera con repisas abiertas, cafetera con vapor, **neón "Hermes"** (textura con halo + luz rosada real), **pizarra de tiza** del café (sin precios: en la oficina un número siempre es un dato real) y una **isla** con frascos de agua con fruta, grifos de kombucha/cerveza, snacks y cuatro banquetas altas bajo dos lámparas industriales colgantes. El lounge tiene sofá terracota, sillón verde de terciopelo, mesa redonda, puf y la TV del feed; en la esquina noreste hay una **cabina telefónica** de vidrio. Matas colgantes cerca de las ventanas y un afiche tipográfico. Sin lámparas sobre los pods: desde la vista aérea tapaban los escritorios.
 
 Además hay rincones para caminar, todos procedurales como el resto (cero assets):
 
