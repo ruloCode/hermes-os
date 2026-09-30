@@ -1,6 +1,7 @@
 // El personaje del dueño: un humano chibi que camina por la Oficina entre sus
-// agentes. Cabeza grande, ojos, mejillas y sonrisa; pelo con siete peinados;
-// brazos y piernas en pivotes que se balancean al caminar.
+// agentes. Cabeza grande, ojos, cejas, mejillas y sonrisa; pelo con ocho
+// peinados (rulos por defecto, con volumen arriba y reflejos); barba, gafas y
+// accesorios opcionales; brazos y piernas en pivotes que se balancean al caminar.
 //
 // Basado en agent-office (AgentSystemLabs, MIT — clase Person de
 // src/client/world/character.ts): mismo cuerpo, mismos peinados y la misma
@@ -26,6 +27,12 @@ export class Person {
   private shirt: THREE.MeshToonMaterial;
   private skin: THREE.MeshToonMaterial;
   private hairMat: THREE.MeshToonMaterial;
+  /** Reflejo cobrizo de algunos rulos (sale del color del pelo). */
+  private hairHi: THREE.MeshToonMaterial;
+  private collarMat: THREE.MeshToonMaterial;
+  /** Barba, gafas y accesorios: se rearman al cambiar la apariencia. */
+  private features = new THREE.Group();
+  private chest = new THREE.Group();
   private walkPhase = 0;
   private waveT = -1;
   private look: OwnerLook;
@@ -36,6 +43,8 @@ export class Person {
     const skin = (this.skin = toonUnique(SKIN_TONES[look.skin]));
     this.hairMat = toonUnique(HAIR_COLORS[look.hair]);
     this.hairMat.side = THREE.DoubleSide;
+    this.hairHi = toonUnique(highlightOf(HAIR_COLORS[look.hair]));
+    this.collarMat = toonUnique(collarOf(SHIRT_COLORS[look.shirt]));
     const pants = toon("#3d405b");
     const shoes = toon("#2b2d42");
     const ink = toon("#1d1d1d");
@@ -43,7 +52,7 @@ export class Person {
     this.root.add(this.body);
     this.body.add(mesh(new THREE.CapsuleGeometry(0.26, 0.28, 6, 12), this.shirt, 0, 0.72, 0));
     // Cuello de la camiseta, para que se lea como ropa.
-    const collar = mesh(new THREE.TorusGeometry(0.15, 0.035, 6, 16), toon("#ffffff"), 0, 1.02, 0, false);
+    const collar = mesh(new THREE.TorusGeometry(0.15, 0.035, 6, 16), this.collarMat, 0, 1.02, 0, false);
     collar.rotation.x = Math.PI / 2;
     this.body.add(collar);
 
@@ -60,8 +69,17 @@ export class Person {
     const smile = mesh(new THREE.TorusGeometry(0.06, 0.015, 6, 12, Math.PI), ink, 0, -0.08, 0.32, false);
     smile.rotation.z = Math.PI;
     head.add(smile);
+    // Cejas gruesas, del color del pelo.
+    for (const sx of [-1, 1]) {
+      const brow = mesh(new THREE.CapsuleGeometry(0.02, 0.07, 4, 6), this.hairMat, sx * 0.125, 0.11, 0.315, false);
+      brow.rotation.z = Math.PI / 2 + sx * 0.12;
+      head.add(brow);
+    }
+    head.add(this.features);
+    this.body.add(this.chest);
     this.body.add(head);
     this.buildHair();
+    this.buildFeatures();
 
     const limb = (len: number, r: number, mat: THREE.Material, x: number, y: number) => {
       const pivot = new THREE.Group();
@@ -80,11 +98,79 @@ export class Person {
 
   setLook(look: OwnerLook) {
     const restyle = look.style !== this.look.style;
+    const refeature = look.beard !== this.look.beard || look.glasses !== this.look.glasses || look.extras !== this.look.extras;
     this.look = { ...look };
     this.skin.color.set(SKIN_TONES[look.skin]);
     this.hairMat.color.set(HAIR_COLORS[look.hair]);
+    this.hairHi.color.set(highlightOf(HAIR_COLORS[look.hair]));
     this.shirt.color.set(SHIRT_COLORS[look.shirt]);
+    this.collarMat.color.set(collarOf(SHIRT_COLORS[look.shirt]));
     if (restyle) this.buildHair();
+    if (refeature) this.buildFeatures();
+  }
+
+  /** Barba (bigote + mentón + mandíbula), gafas y accesorios (collar con dije y arete). */
+  private buildFeatures() {
+    for (const g of [this.features, this.chest]) {
+      g.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.geometry.dispose();
+      });
+      g.clear();
+    }
+    const hair = this.hairMat;
+    if (this.look.beard) {
+      // Cascarones apenas más grandes que la cabeza (0,34): mentón al frente y mandíbula a los lados.
+      const front = Math.PI / 2; // en SphereGeometry, phi = π/2 mira a +z
+      // Mentón (debajo de la boca) y una línea de mandíbula fina a cada lado; las mejillas quedan a la vista.
+      this.features.add(mesh(new THREE.SphereGeometry(0.352, 24, 10, front - 0.95, 1.9, Math.PI * 0.63, Math.PI * 0.27), hair, 0, 0, 0, false));
+      for (const s of [-1, 1]) {
+        const phi = s < 0 ? front + 0.7 : front - 1.5;
+        this.features.add(mesh(new THREE.SphereGeometry(0.35, 12, 8, phi, 0.8, Math.PI * 0.58, Math.PI * 0.14), hair, 0, 0, 0, false));
+      }
+      // Bigote en arco sobre la sonrisa.
+      const stache = mesh(new THREE.TorusGeometry(0.075, 0.022, 6, 14, Math.PI), hair, 0, -0.06, 0.33, false);
+      stache.scale.set(1, 0.45, 1);
+      this.features.add(stache);
+    }
+    if (this.look.glasses) {
+      const frame = toon("#e4ecf1", { opacity: 0.9 });
+      const temple = toon("#3a86ff");
+      const lens = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.16, depthWrite: false });
+      for (const sx of [-1, 1]) {
+        const rim = mesh(new THREE.TorusGeometry(0.078, 0.013, 6, 24), frame, sx * 0.128, 0.02, 0.365, false);
+        rim.scale.set(1.12, 0.92, 1);
+        this.features.add(rim);
+        const glass = new THREE.Mesh(new THREE.CircleGeometry(0.076, 20), lens);
+        glass.position.set(sx * 0.128, 0.02, 0.368);
+        glass.scale.set(1.12, 0.92, 1);
+        this.features.add(glass);
+        // Patilla azul: del borde del marco (x ±0,22, z 0,36) hacia atrás hasta la oreja (x ±0,34, z 0).
+        const arm = mesh(new THREE.BoxGeometry(0.018, 0.018, 0.38), temple, sx * 0.285, 0.035, 0.18, false);
+        arm.rotation.y = -sx * 0.32;
+        this.features.add(arm);
+      }
+      this.features.add(mesh(new THREE.CapsuleGeometry(0.012, 0.05, 4, 6), frame, 0, 0.04, 0.37, false));
+      this.features.children[this.features.children.length - 1].rotation.z = Math.PI / 2;
+    }
+    if (this.look.extras) {
+      // Arete en la oreja izquierda (el personaje mira a +z: su izquierda es +x).
+      this.features.add(mesh(new THREE.SphereGeometry(0.022, 8, 6), toon("#d9d9d9"), 0.36, -0.09, 0.03, false));
+      // Collar negro con dije azul sobre la camiseta.
+      // Cordón en V: de los lados del cuello, por encima de la camiseta, hasta el dije.
+      const cordMat = toon("#1d1d1d");
+      const gemAt = new THREE.Vector3(0, 0.87, 0.262);
+      for (const sx of [-1, 1]) {
+        const from = new THREE.Vector3(sx * 0.13, 1.03, 0.1);
+        const len = from.distanceTo(gemAt);
+        const cord = mesh(new THREE.CylinderGeometry(0.009, 0.009, len, 5), cordMat, (from.x + gemAt.x) / 2, (from.y + gemAt.y) / 2, (from.z + gemAt.z) / 2 + 0.012, false);
+        cord.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), gemAt.clone().sub(from).normalize());
+        this.chest.add(cord);
+      }
+      const gem = mesh(new THREE.OctahedronGeometry(0.045), toon("#4cc9f0", { emissive: "#1b6fa3" }), 0, 0.84, 0.27, false);
+      gem.scale.set(0.8, 1.3, 0.6);
+      this.chest.add(gem);
+    }
   }
 
   /** Saludo con la mano (al interactuar con algo). */
@@ -105,6 +191,40 @@ export class Person {
     };
     const cap = () => add(new THREE.SphereGeometry(0.355, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.45), 0, 0.02, -0.02, -0.25);
     switch (HAIR_STYLES[this.look.style]) {
+      case "Rulos": {
+        // Lados cortos (un casquete bajo) y arriba volumen: dos capas de rulos,
+        // algunos con reflejo cobrizo, y ricitos sobre la frente.
+        // Sin la franja del frente (φ = π/2 mira a +z): la cara queda libre.
+        add(new THREE.SphereGeometry(0.352, 20, 12, Math.PI / 2 + 0.95, Math.PI * 2 - 1.9, 0, Math.PI * 0.55), 0, 0.01, -0.02, -0.2);
+        const curl = (r: number, x: number, y: number, z: number, hi: boolean) => {
+          const part = mesh(new THREE.SphereGeometry(r, 9, 7), hi ? this.hairHi : m, x, y, z);
+          this.hair.add(part);
+        };
+        const layer = (n: number, radius: number, minY: number, size: number, lift: number) => {
+          for (let i = 0; i < n; i++) {
+            const y = 1 - (i / (n - 1)) * 2;
+            if (y < minY) continue;
+            const rr = Math.sqrt(1 - y * y);
+            const th = i * 2.39996;
+            const px = Math.cos(th) * rr;
+            const pz = Math.sin(th) * rr;
+            // La frente queda despejada: nada muy adelante y bajo.
+            if (pz > 0.45 && y < 0.62) continue;
+            const wobble = 0.85 + ((i * 37) % 7) / 20;
+            curl(size * wobble, px * radius, y * radius * 1.05 + lift, pz * radius - 0.03, i % 3 === 0);
+          }
+        };
+        layer(90, 0.37, 0.18, 0.085, 0.03);
+        layer(46, 0.43, 0.5, 0.1, 0.08);
+        // Ricitos al borde de la frente: anillos que miran al frente.
+        for (let i = 0; i < 6; i++) {
+          const x = -0.22 + i * 0.088;
+          const ring = mesh(new THREE.TorusGeometry(0.042, 0.02, 6, 10), i % 2 ? this.hairHi : m, x, 0.3 - Math.abs(x) * 0.25, 0.24 - Math.abs(x) * 0.25);
+          ring.rotation.x = -0.5;
+          this.hair.add(ring);
+        }
+        break;
+      }
       case "Corto":
         cap();
         break;
@@ -194,7 +314,19 @@ export class Person {
     this.shirt.dispose();
     this.skin.dispose();
     this.hairMat.dispose();
+    this.hairHi.dispose();
+    this.collarMat.dispose();
   }
+}
+
+/** El reflejo de los rulos: el color del pelo hacia un cobrizo. */
+function highlightOf(hair: string): string {
+  return `#${new THREE.Color(hair).lerp(new THREE.Color("#b5652b"), 0.45).getHexString()}`;
+}
+
+/** El cuello de la camiseta: un tono más oscuro que ella, para que se lea sobre el blanco. */
+function collarOf(shirt: string): string {
+  return `#${new THREE.Color(shirt).lerp(new THREE.Color("#000000"), 0.14).getHexString()}`;
 }
 
 function roundedShoe(): THREE.BufferGeometry {

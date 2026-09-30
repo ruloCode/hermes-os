@@ -398,6 +398,28 @@ export function LookPicker({ look, onChange, onClose }: { look: OwnerLook; onCha
         </div>
       </div>
       <Swatches label="Camiseta" colors={SHIRT_COLORS} value={look.shirt} onChange={(shirt) => onChange({ ...look, shirt })} />
+      <div>
+        <p className="mb-1.5 text-xs text-text-dim">Rasgos</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ["beard", "Barba"],
+              ["glasses", "Gafas"],
+              ["extras", "Collar y arete"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={look[key]}
+              onClick={() => onChange({ ...look, [key]: !look[key] })}
+              className={`rounded-full border px-2.5 py-1 text-xs ${look[key] ? "border-accent bg-accent/15 text-text" : "border-line text-text-dim hover:text-text"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <p className="text-xs text-text-faint">Se guarda en este navegador.</p>
     </section>
   );
