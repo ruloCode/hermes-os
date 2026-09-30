@@ -4,6 +4,8 @@ Recorre la oficina como un usuario, en los dos temas:
   1. EXPLORAR (por defecto): camina con W, corre con Shift, salta con Espacio.
   2. Con la oficina de demostración (window.__hermesOficinaSim("demo")), el
      dueño va junto a un agente, "E" abre su panel y Esc lo cierra.
+  2b. El agente con la mano levantada: su panel muestra el comando exacto que
+     pide y "Aprobar" le baja la mano (vuelve a trabajar).
   3. "V" cambia a VISTA AÉREA: clic real en un personaje abre su panel.
   4. En vivo: clic en un escritorio libre (aérea) y "E" frente a uno libre
      (explorar) abren "Contratar" — sin enviar nada.
@@ -90,7 +92,8 @@ def main() -> int:
             page.evaluate("() => window.__hermesOficinaSim('demo')")
             time.sleep(2.5)
             d = dbg()
-            check(len(d["workers"]) == 8 and len(set(d["seats"].values())) == 8, f"[{theme}] simulación: 8 agentes, 8 escritorios")
+            n = len(d["workers"])
+            check(n == 9 and len(set(d["seats"].values())) == n, f"[{theme}] simulación: 9 agentes, uno por escritorio ({n})")
             wid = d["workers"][0]["id"]
             page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'worker', id })", wid)
             time.sleep(1.2)
@@ -104,6 +107,26 @@ def main() -> int:
             page.keyboard.press("Escape")
             time.sleep(0.4)
             check(dbg()["selected"] is None, f"[{theme}] Esc cierra el panel")
+
+            # 2b. Mano levantada: el panel dice qué pide y Aprobar la baja.
+            ask = next((w for w in d["workers"] if w["status"] == "needs_you"), None)
+            check(ask is not None, f"[{theme}] hay un agente esperando permiso")
+            if ask:
+                page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'worker', id })", ask["id"])
+                time.sleep(1.4)
+                page.screenshot(path=str(out / f"oficina-mano-{tag}.png"))
+                page.keyboard.press("e")
+                time.sleep(0.6)
+                check(page.get_by_text("Pide permiso para ejecutar").count() == 1, f"[{theme}] el panel muestra el permiso pedido")
+                check(page.get_by_text("git push origin fix/login").count() >= 1, f"[{theme}] con el comando exacto")
+                page.screenshot(path=str(out / f"oficina-permiso-{tag}.png"))
+                page.get_by_role("button", name="Aprobar").click()
+                time.sleep(0.6)
+                after = next(w for w in dbg()["workers"] if w["id"] == ask["id"])
+                check(after["status"] == "working", f"[{theme}] Aprobar le baja la mano ({after['status']})")
+                check(page.get_by_text("Pide permiso para ejecutar").count() == 0, f"[{theme}] el bloque de permiso desaparece")
+                page.keyboard.press("Escape")
+                time.sleep(0.4)
 
             # 3. Vista aérea con V y clic real.
             page.keyboard.press("v")

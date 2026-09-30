@@ -178,6 +178,7 @@ export default function OficinaPage() {
   const [usingPad, setUsingPad] = useState(false);
   const [replyVoice, setReplyVoiceState] = useState(true);
   const [sending, setSending] = useState(false);
+  const [deciding, setDeciding] = useState(false);
   const sceneRef = useRef<OficinaSceneHandle>(null);
   const hireRef = useRef<HireDialogHandle>(null);
   const seatsRef = useRef<Map<string, string>>(new Map());
@@ -334,14 +335,18 @@ export default function OficinaPage() {
   }, [team, toggleHermes, voice, hermes]);
 
   // ── Conversación con un agente ────────────────────────────────────────
-  /** Abrir una conversación = el micrófono ya escuchando (salvo en llamada con Hermes). */
+  /**
+   * Abrir una conversación = el micrófono ya escuchando (salvo en llamada con
+   * Hermes, o si el agente espera tu permiso: ahí lo que toca es decidir).
+   */
   const openConversation = useCallback(
     (hit: OfficeHit) => {
       setSelected(hit);
       stopSpeaking();
-      if (!inCall) voice.start();
+      const asking = hit.kind === "worker" && workers.some((w) => w.id === hit.id && w.approval);
+      if (!inCall && !asking) voice.start();
     },
-    [inCall, voice],
+    [inCall, voice, workers],
   );
 
   const closeConversation = useCallback(() => {
@@ -393,6 +398,44 @@ export default function OficinaPage() {
     // `pad` se declara abajo (su rumble lee el control al llamarse).
   }, [selectedWorker, voice, sim, sending, instructWorker, toast]);
 
+  // Tu decisión sobre el permiso que pide un agente: el run sigue (o cambia de
+  // plan) apenas llega. En simulación solo se baja la mano en pantalla.
+  const decideApproval = useCallback(
+    async (w: OfficeWorker, allow: boolean) => {
+      const a = w.approval;
+      if (!a || deciding) return;
+      if (sim) {
+        setSim((prev) =>
+          prev && {
+            ...prev,
+            workers: prev.workers.map((x) =>
+              x.id === w.id
+                ? { ...x, approval: undefined, status: "working", task: { ...x.task, summary: allow ? "aprobado por ti" : "negado por ti" }, lines: [...x.lines, allow ? "✓ aprobado por ti" : "✗ negado por ti"] }
+                : x,
+            ),
+          },
+        );
+        pad.rumble(allow ? "success" : "tap");
+        return;
+      }
+      setDeciding(true);
+      try {
+        const r = await hermesPost<{ ok: boolean; error?: string }>(`/office/approvals/${encodeURIComponent(a.id)}/decide`, { allow });
+        if (!r.ok) toast("error", r.error ?? "No se pudo decidir");
+        else {
+          pad.rumble(allow ? "success" : "tap");
+          toast(allow ? "done" : "error", `${allow ? "Aprobado" : "Negado"}: ${a.summary}`);
+        }
+      } catch (err) {
+        toast("error", `No se pudo decidir: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setDeciding(false);
+      }
+      // `pad` se declara abajo (su rumble lee el control al llamarse).
+    },
+    [sim, deciding, toast],
+  );
+
   // La respuesta del agente al que le hablaste, en voz alta (y el control vibra).
   useEffect(() => {
     for (const w of workers) {
@@ -434,6 +477,11 @@ export default function OficinaPage() {
     const world = sceneRef.current?.world();
     if (helpOpen) {
       if (b === "B" || b === "MENU" || b === "A") setHelpOpen(false);
+      return;
+    }
+    // Un agente con la mano levantada: A aprueba, B niega (antes que la voz).
+    if (conversationOpen && selectedWorker?.approval && (b === "A" || b === "B")) {
+      void decideApproval(selectedWorker, b === "A");
       return;
     }
     if (conversationOpen) {
@@ -520,7 +568,11 @@ export default function OficinaPage() {
     for (const w of workers) {
       const was = prev.get(w.id);
       if (!was && !w.continues) toast("start", `${w.name} llegó a ${projectName(w.project)}`);
-      else if (was && was !== w.status && !talkedRef.current.has(w.id)) {
+      if (w.status === "needs_you" && was !== "needs_you") {
+        // Te necesita: aviso, y el control vibra aunque estés en otra parte del piso.
+        toast("start", `✋ ${w.name} te pide permiso: ${w.approval?.summary ?? ""}`);
+        pad.rumble("alert");
+      } else if (was && was !== w.status && !talkedRef.current.has(w.id)) {
         if (w.status === "done") toast("done", `${w.name} terminó`);
         else if (w.status === "error") toast("error", `${w.name} falló`);
       }
@@ -739,6 +791,8 @@ export default function OficinaPage() {
           padConnected={pad.connected}
           sending={sending}
           onSend={() => void sendToWorker()}
+          deciding={deciding}
+          onDecide={(allow) => void decideApproval(selectedWorker, allow)}
         />
       ) : null}
 

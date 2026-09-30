@@ -25,6 +25,7 @@ import { emit } from "../events.js";
 import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
 import { childEnv } from "./child-env.js";
 import { registerOfficeWorker } from "../office/state.js";
+import { closeApprovalsFor, issueRunToken, revokeRunToken } from "../office/approvals.js";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
 const MODELS = new Set([
@@ -94,6 +95,35 @@ function commonFlags(s: { model: string; effort: string; permissionMode: string 
   ];
   if (existsSync(GUARDRAIL_SETTINGS)) flags.push("--settings", GUARDRAIL_SETTINGS);
   return flags;
+}
+
+// Puente de aprobaciones (office/approval-mcp.mjs): con él, lo que el run
+// pediría permiso para hacer se le PREGUNTA al agente (y a ti en la Oficina) en
+// vez de negarse solo. Va oculto al modelo (--disallowedTools): es del CLI, no
+// una tool que el modelo deba llamar.
+const APPROVAL_MCP = join(dirname(fileURLToPath(import.meta.url)), "../office/approval-mcp.mjs");
+const APPROVAL_TOOL = "mcp__hermes-approval__ask";
+
+function approvalFlags(runId: string, token: string): string[] {
+  if (!existsSync(APPROVAL_MCP)) return [];
+  const config = {
+    mcpServers: {
+      "hermes-approval": {
+        command: process.execPath,
+        args: [APPROVAL_MCP],
+        env: {
+          HERMES_APPROVAL_URL: `http://127.0.0.1:${env.PORT}`,
+          HERMES_APPROVAL_TOKEN: token,
+          HERMES_APPROVAL_RUN: runId,
+        },
+      },
+    },
+  };
+  return [
+    "--mcp-config", JSON.stringify(config),
+    "--permission-prompt-tool", APPROVAL_TOOL,
+    "--disallowedTools", APPROVAL_TOOL,
+  ];
 }
 
 // Ubica el binario `claude` (el server puede no tener ~/.local/bin en PATH).
@@ -349,11 +379,13 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     isResume,
   });
 
+  const approvalToken = issueRunToken(run.id);
   const args = [
     ...commonFlags(s),
     "-p",
     "--output-format", "stream-json",
     "--verbose",
+    ...approvalFlags(run.id, approvalToken),
   ];
   // Resume por id previo, o asigna un id nuevo a esta sesión.
   if (opts.resumeSdkSessionId) args.push("--resume", opts.resumeSdkSessionId);
@@ -441,6 +473,9 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
   const ckptTimer = setInterval(() => checkpointRun(run), 3000);
   proc.on("close", (code) => {
     clearInterval(ckptTimer);
+    // Lo que esperaba permiso se cierra sin ejecutarse y el token deja de servir.
+    closeApprovalsFor(run.id);
+    revokeRunToken(approvalToken);
     run.exitCode = code ?? undefined;
     if (run.status !== "error") run.status = code === 0 ? "done" : "error";
     pushLine(run, {

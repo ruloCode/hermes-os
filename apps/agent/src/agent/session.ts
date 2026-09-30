@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import type { ChatToolStep, HermesTask } from "@hermes/shared";
-import { toolTarget } from "@hermes/shared";
-import { registerOfficeWorker } from "../office/state.js";
+import { needsApproval, toolTarget } from "@hermes/shared";
+import { officeWatched, registerOfficeWorker } from "../office/state.js";
+import { requestApproval } from "../office/approvals.js";
 import { env } from "../env.js";
 import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
@@ -178,6 +179,14 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
               detail: `GUARDRAIL: ${verdict.reason}`,
             });
             return { behavior: "deny", message: verdict.reason ?? "Bloqueado por guardrail" };
+          }
+          // Un Bash con efectos en una tarea con personaje, y alguien mirando la
+          // Oficina: el agente levanta la mano y espera tu decisión. Sin nadie
+          // mirando, el guardrail decide como siempre (una tarea por voz no se
+          // queda colgada esperando a un humano que no está).
+          if (opts.taskId && toolName === "Bash" && officeWatched() && needsApproval(toolName, input as Record<string, unknown>)) {
+            const decision = await requestApproval(opts.taskId, toolName, input as Record<string, unknown>).decision;
+            if (decision.behavior === "deny") return { behavior: "deny", message: decision.message };
           }
           return { behavior: "allow", updatedInput: input };
         },

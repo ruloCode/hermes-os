@@ -97,7 +97,7 @@ import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input
 import { listSalaAgents, officeCast, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
-import { SalaValidationError } from "@hermes/shared";
+import { NOBODY_WATCHING, SalaValidationError, needsApproval } from "@hermes/shared";
 import {
   openInBrowser,
   listTabs,
@@ -109,7 +109,8 @@ import {
 } from "./browser.js";
 import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
 import { avatarProvider, terminatorAvatar } from "./avatar.js";
-import { officeState, startOffice, subscribeOffice } from "./office/state.js";
+import { officeState, officeViewerJoined, officeWatched, startOffice, subscribeOffice } from "./office/state.js";
+import { approvalState, decideApproval, pendingApprovals, requestApproval, runForToken } from "./office/approvals.js";
 import { transcribe } from "./meetings/stt.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
@@ -304,8 +305,18 @@ app.use("*", async (c, next) => {
 // rutas GET se acepta también el token como query ?key=. Además del API key
 // estático se acepta un access token de Supabase Auth (login email+contraseña
 // de la app móvil, que llega por el túnel cloudflared).
+// El puente de aprobaciones de un run de claude -p (office/approval-mcp.mjs)
+// no tiene la llave del dashboard (el hijo no hereda el .env): entra con el
+// token de SU run, y solo a pedir permiso y leer la decisión. Decidir
+// (/office/approvals/:id/decide) exige la credencial normal.
+function approvalBridgeOk(method: string, path: string, token: string | undefined): boolean {
+  if (!runForToken(token)) return false;
+  if (method === "POST" && path === "/office/approvals/ask") return true;
+  return method === "GET" && /^\/office\/approvals\/[\w-]+$/.test(path);
+}
+
 app.use("*", async (c, next) => {
-  if (env.HERMES_API_KEY && c.req.path !== "/health") {
+  if (env.HERMES_API_KEY && c.req.path !== "/health" && !approvalBridgeOk(c.req.method, c.req.path, c.req.header("X-Hermes-Approval"))) {
     const auth = c.req.header("Authorization") ?? "";
     const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const queryKey = c.req.method === "GET" ? (c.req.query("key") ?? "") : "";
@@ -2516,8 +2527,46 @@ app.post("/office/dictate", bodyLimit({ maxSize: 15 * 1024 * 1024 }), async (c) 
   }
 });
 
+// ── Aprobaciones: el agente levanta la mano (office/approvals.ts) ──────
+// El puente del run pide permiso aquí. Bash de solo lectura pasa sin
+// preguntar; sin nadie en la Oficina se niega como antes (claude -p no tenía a
+// quién preguntarle), pero diciendo por qué.
+app.post("/office/approvals/ask", async (c) => {
+  const token = c.req.header("X-Hermes-Approval");
+  const runId = runForToken(token);
+  const body = (await c.req.json().catch(() => ({}))) as { run?: string; tool_name?: string; input?: Record<string, unknown> };
+  if (!runId || body.run !== runId) return c.json({ error: "token inválido para este run" }, 403);
+  const tool = String(body.tool_name ?? "");
+  const input = body.input && typeof body.input === "object" ? body.input : {};
+  if (!needsApproval(tool, input)) return c.json({ decision: { behavior: "allow", updatedInput: input } });
+  if (!officeWatched()) return c.json({ decision: { behavior: "deny", message: NOBODY_WATCHING } });
+  const { id } = requestApproval(runId, tool, input);
+  return c.json({ id });
+});
+
+app.get("/office/approvals", (c) => c.json({ approvals: pendingApprovals(), watched: officeWatched() }));
+
+app.get("/office/approvals/:id", (c) => {
+  const state = approvalState(c.req.param("id"));
+  if (!state) return c.json({ error: "solicitud desconocida" }, 404);
+  // El puente solo ve las de su propio run.
+  const token = c.req.header("X-Hermes-Approval");
+  if (token && runForToken(token) !== state.workerId) return c.json({ error: "no es de este run" }, 403);
+  return c.json({ decision: state.decision ?? null });
+});
+
+app.post("/office/approvals/:id/decide", async (c) => {
+  // Un token de run jamás decide, ni siquiera sobre otro run.
+  if (c.req.header("X-Hermes-Approval")) return c.json({ ok: false, error: "un run no puede decidir" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { allow?: boolean; note?: string };
+  if (typeof body.allow !== "boolean") return c.json({ ok: false, error: "allow (boolean) requerido" }, 400);
+  const ok = decideApproval(c.req.param("id"), body.allow, typeof body.note === "string" ? body.note.slice(0, 500) : undefined);
+  return c.json(ok ? { ok: true } : { ok: false, error: "La solicitud ya se cerró (decidida, vencida o el run terminó)" });
+});
+
 app.get("/office/events", (c) =>
   streamSSE(c, async (stream) => {
+    const leave = officeViewerJoined();
     const remote = viaTunnel((h) => c.req.header(h));
     const state = await officeState();
     const snapshot = remote ? { ...state, workers: state.workers.filter((w) => !w.private) } : state;
@@ -2531,10 +2580,15 @@ app.get("/office/events", (c) =>
     stream.onAbort(() => {
       open = false;
       unsubscribe();
+      leave();
     });
-    while (open) {
-      await new Promise((r) => setTimeout(r, 15000));
-      if (open) await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+    try {
+      while (open) {
+        await new Promise((r) => setTimeout(r, 15000));
+        if (open) await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+      }
+    } finally {
+      leave();
     }
   }),
 );

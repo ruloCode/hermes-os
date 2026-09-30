@@ -2,7 +2,8 @@
 // bombilla dice su estado desde el otro lado del piso. Actúa su última tool
 // (leer = papeles, editar = teclear encorvado, tests = recostado con las manos
 // en la nuca, web = un globo girando), cruza los brazos si un guardrail lo
-// bloquea, se lleva la mano a la barbilla si piensa y da un giro al terminar.
+// bloquea, se lleva la mano a la barbilla si piensa, LEVANTA LA MANO si espera
+// tu permiso y da un giro al terminar.
 //
 // Basado en agent-office (AgentSystemLabs, MIT — clase Worker de
 // src/client/world/character.ts): mismo cuerpo, mismas poses y mismo mezclado
@@ -15,7 +16,7 @@ import { cardSprite, disposeSprite, mesh, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 
 /** Lo que hace el cuerpo: reposo, brazos arriba, brazos cruzados, pensar, teclear o la tool. */
-type Act = "rest" | "up" | "waiting" | "think" | "type" | OfficeAction;
+type Act = "rest" | "up" | "waiting" | "think" | "type" | "hand" | OfficeAction;
 
 /** Una postura, que se mezcla con la siguiente en un momento. */
 interface Stance {
@@ -107,6 +108,15 @@ function stanceOf(act: Act, t: number, s: Stance): Stance {
       s.lid = 0.6;
       break;
     }
+    case "hand":
+      // Te necesita: medio se pone de pie y la mano larga (raisedHand) saluda
+      // por encima de la cabeza, con un rebote corto de "¡aquí!".
+      s.armLx = -0.25;
+      s.lean = -0.08;
+      s.look = 0.035;
+      s.lift = 0.12 + Math.abs(Math.sin(t * 3.5)) * 0.05;
+      s.roll = Math.sin(t * 3.5) * 0.04;
+      break;
     case "think":
       // Hermes: una mano a la barbilla, mirando arriba, meciéndose despacio.
       s.armLx = -0.35;
@@ -137,6 +147,7 @@ const CHIP: Record<OfficeWorkerStatus, string> = {
   working: "⌨️ trabajando",
   thinking: "💭 pensando",
   blocked: "⛔ bloqueado",
+  needs_you: "✋ te necesita",
   done: "✅ listo",
   error: "❌ error",
 };
@@ -165,6 +176,30 @@ function papers(): { group: THREE.Group; page: THREE.Group } {
   group.add(page);
   group.add(mesh(new THREE.BoxGeometry(W * 0.5, 0.05, 0.05), toon("#adb5bd"), 0, 0, 0, false));
   return { group, page };
+}
+
+/**
+ * La mano levantada de "te necesita". El brazo del frijol es corto: arriba
+ * llega a 0,81 m y la cabeza termina en 0,98, así que desde atrás o desde
+ * arriba no se veía. Este es un brazo largo con un guante blanco de caricatura
+ * que asoma por encima de la cabeza y saluda.
+ */
+function raisedHand(skin: THREE.Material): { group: THREE.Group } {
+  const group = new THREE.Group();
+  group.position.set(0.3, 0.6, 0.05);
+  group.add(mesh(new THREE.CapsuleGeometry(0.055, 0.42, 4, 8), skin, 0, 0.26, 0));
+  const glove = toon("#ffffff");
+  const palm = mesh(new THREE.SphereGeometry(0.11, 14, 10), glove, 0, 0.6, 0);
+  palm.scale.set(1, 1.15, 0.55);
+  group.add(palm);
+  for (const [x, len] of [[-0.06, 0.1], [-0.02, 0.12], [0.02, 0.12], [0.06, 0.1]] as const) {
+    group.add(mesh(new THREE.CapsuleGeometry(0.022, len, 4, 6), glove, x, 0.72 + len / 2, 0));
+  }
+  const thumb = mesh(new THREE.CapsuleGeometry(0.024, 0.07, 4, 6), glove, -0.11, 0.62, 0);
+  thumb.rotation.z = 0.9;
+  group.add(thumb);
+  group.visible = false;
+  return { group };
 }
 
 function globe(): { group: THREE.Group; ball: THREE.Group; ring: THREE.Mesh } {
@@ -217,6 +252,7 @@ export class OfficeCharacter {
   private pupils: THREE.Mesh[] = [];
   private papers: ReturnType<typeof papers>;
   private globe: ReturnType<typeof globe>;
+  private hand: ReturnType<typeof raisedHand>;
   private bubble: THREE.Sprite | null = null;
   private bubbleKey = "";
   private status: OfficeWorkerStatus = "starting";
@@ -290,6 +326,8 @@ export class OfficeCharacter {
     this.body.add(this.papers.group);
     this.globe = globe();
     for (const prop of [this.papers.group, this.globe.group]) prop.visible = false;
+    this.hand = raisedHand(skin);
+    this.body.add(this.hand.group);
     this.root.add(this.globe.group);
 
     this.hitbox = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.8), new THREE.MeshBasicMaterial({ visible: false }));
@@ -395,7 +433,9 @@ export class OfficeCharacter {
     }
     const act: Act = hopping
       ? "up"
-      : this.status === "blocked"
+      : this.status === "needs_you"
+        ? "hand"
+        : this.status === "blocked"
         ? "waiting"
         : this.status === "thinking"
           ? "think"
@@ -443,8 +483,8 @@ export class OfficeCharacter {
     this.body.rotation.z = s.roll;
     this.props(dt, t);
     this.blink(dt, s.lid);
-    // La bombilla late cuando algo pide atención (bloqueado) y respira cuando trabaja.
-    const beat = this.status === "blocked" ? Math.abs(Math.sin(t * 8)) * 0.5 : this.status === "working" ? Math.abs(Math.sin(t * 3)) * 0.12 : 0;
+    // La bombilla late cuando algo pide atención (bloqueado, te necesita) y respira cuando trabaja.
+    const beat = this.status === "blocked" || this.status === "needs_you" ? Math.abs(Math.sin(t * 8)) * 0.5 : this.status === "working" ? Math.abs(Math.sin(t * 3)) * 0.12 : 0;
     this.bulbMesh.scale.setScalar(1 + beat + (this.selected ? 0.15 : 0));
     if (this.bubble) {
       // A un lado: los dos de una pareja espalda con espalda quedan girados 180°, así sus tarjetas no se enciman.
@@ -490,6 +530,11 @@ export class OfficeCharacter {
       this.papers.page.rotation.x = -ease(f) * Math.PI * 1.1;
       this.papers.page.visible = f < 1;
     }
+    if (show(this.hand.group, "hand")) {
+      // El brazo corto se esconde mientras la mano larga está arriba (no dos brazos derechos).
+      this.hand.group.rotation.z = -0.3 + Math.sin(t * 7) * 0.28;
+      this.armR.visible = (this.acts.get("hand") ?? 0) < 0.5;
+    } else this.armR.visible = true;
     if (show(this.globe.group, "web")) {
       this.globe.group.position.copy(this.spot).y += Math.sin(t * 2) * 0.03;
       this.globe.ball.rotation.y = t * 2.2;

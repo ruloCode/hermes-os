@@ -19,11 +19,13 @@ export const STATUS_DOT: Record<OfficeWorkerStatus, string> = {
   working: "bg-amber",
   thinking: "bg-cyan",
   blocked: "bg-red",
+  needs_you: "bg-accent",
   done: "bg-green",
   error: "bg-red",
 };
 
 const COUNT_STYLE = [
+  { key: "needs_you", label: "te necesitan" },
   { key: "working", label: "trabajando" },
   { key: "thinking", label: "pensando" },
   { key: "blocked", label: "bloqueados" },

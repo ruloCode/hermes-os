@@ -75,6 +75,7 @@ const STATUS_WORDS: Record<OfficeWorkerStatus, string> = {
   working: "trabajando",
   thinking: "pensando",
   blocked: "bloqueado por un guardrail",
+  needs_you: "esperando tu permiso",
   done: "terminó",
   error: "falló",
 };

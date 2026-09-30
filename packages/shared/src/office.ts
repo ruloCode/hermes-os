@@ -2,15 +2,17 @@
 // SDK o un run de `claude -p`) reducido desde el bus de actividad. Puro, sin
 // fs ni red: el agente lo corre sobre su bus y los tests con eventos sintéticos.
 //
-// Regla que ordena todo: los estados son HONESTOS. Hermes no tiene un "esperando
-// tu respuesta" real (canUseTool decide solo), así que no se inventa: un run
-// callado es "pensando", un guardrail que niega una tool es "bloqueado" y solo
-// dura hasta la siguiente tool.
+// Regla que ordena todo: los estados son HONESTOS. Un run callado es
+// "pensando", un guardrail que niega una tool es "bloqueado" (solo hasta la
+// siguiente tool) y "te necesita" existe SOLO mientras hay una solicitud de
+// permiso viva en el agente (office-approvals.ts): el run está pausado de verdad
+// esperando tu decisión.
 
 import type { AgentActivityEvent } from "./types.js";
 import { FAILS_TO_DESPAIR, outputFailed, toolAction, type OfficeAction } from "./office-actions.js";
+import type { ApprovalOutcome, OfficeApproval } from "./office-approvals.js";
 
-export type OfficeWorkerStatus = "starting" | "working" | "thinking" | "blocked" | "done" | "error";
+export type OfficeWorkerStatus = "starting" | "working" | "thinking" | "blocked" | "needs_you" | "done" | "error";
 
 /** De dónde viene la sesión: define qué stream puede abrirse al hacer clic. */
 export type OfficeSource =
@@ -52,6 +54,8 @@ export interface OfficeWorker {
   sessionId?: string;
   /** Id del personaje al que este continúa (misma sesión): hereda su escritorio. */
   continues?: string;
+  /** Permiso que espera AHORA (status "needs_you"): el run está pausado hasta que decidas. */
+  approval?: OfficeApproval;
 }
 
 export interface OfficeProject {
@@ -338,12 +342,12 @@ export function reduceOfficeEvent(
       const name = ev.toolName ?? "tool";
       const input = parseToolInput(ev.detail);
       const target = toolTarget(input);
-      w.status = "working";
+      w.status = w.approval ? "needs_you" : "working";
       w.toolCalls += 1;
       w.tool = { name, target };
       const act = toolAction(name, input);
       w.action = w.failStreak >= FAILS_TO_DESPAIR && act === "test" ? "failing" : act;
-      w.task.summary = describeTool(name, target);
+      if (!w.approval) w.task.summary = describeTool(name, target);
       pushLine(w, `⚙ ${describeTool(name, target)}`);
       return w;
     }
@@ -359,7 +363,7 @@ export function reduceOfficeEvent(
       if (!ev.detail) return w;
       const line = oneLine(ev.detail.split("\n").find((l) => l.trim()) ?? ev.detail);
       w.lastText = ev.detail.slice(0, 300);
-      if (!isTerminal(w.status)) {
+      if (!isTerminal(w.status) && !w.approval) {
         w.status = "working";
         w.task.summary = line;
       }
@@ -396,11 +400,49 @@ function finish(w: OfficeWorker, status: "done" | "error", at: string, detail?: 
   w.status = status;
   w.finishedAt = at;
   w.action = undefined;
+  w.approval = undefined;
   if (detail) {
     w.lastText = detail.slice(0, 300);
     w.task.summary = oneLine(detail);
   }
   pushLine(w, `${status === "done" ? "✓" : "✗"} ${oneLine(detail || (status === "done" ? "terminado" : "falló"), LINE_MAX - 2)}`);
+}
+
+const OUTCOME_LINE: Record<ApprovalOutcome, string> = {
+  allowed: "✓ aprobado por ti",
+  denied: "✗ negado por ti",
+  timeout: "✗ nadie respondió: se negó sola",
+  gone: "✗ la solicitud se cerró",
+};
+
+/**
+ * Abre o cierra la solicitud de permiso de un personaje. Con `approval` levanta
+ * la mano (status "needs_you"); con null la baja y vuelve a trabajar, dejando en
+ * la laptop cómo se decidió. Devuelve el personaje o null si ya no existe.
+ */
+export function setWorkerApproval(
+  workers: Map<string, OfficeWorker>,
+  id: string,
+  approval: OfficeApproval | null,
+  outcome: ApprovalOutcome = "allowed",
+  now = Date.now(),
+): OfficeWorker | null {
+  const w = workers.get(id);
+  if (!w || isTerminal(w.status)) return null;
+  w.lastEventAt = new Date(now).toISOString();
+  if (approval) {
+    w.approval = approval;
+    w.status = "needs_you";
+    w.task.summary = `Pide permiso: ${approval.summary}`;
+    pushLine(w, `✋ ${oneLine(approval.summary, LINE_MAX - 2)}`);
+    return w;
+  }
+  if (!w.approval) return w;
+  w.approval = undefined;
+  if (w.status === "needs_you") w.status = "working";
+  w.task.summary = OUTCOME_LINE[outcome].slice(2);
+  pushLine(w, OUTCOME_LINE[outcome]);
+  return w;
 }
 
 /**
@@ -432,7 +474,7 @@ export function tickOffice(
 
 /** Conteos para el HUD (solo lo que hay). */
 export function officeCounts(workers: Iterable<OfficeWorker>): Record<OfficeWorkerStatus, number> {
-  const out: Record<OfficeWorkerStatus, number> = { starting: 0, working: 0, thinking: 0, blocked: 0, done: 0, error: 0 };
+  const out: Record<OfficeWorkerStatus, number> = { starting: 0, working: 0, thinking: 0, blocked: 0, needs_you: 0, done: 0, error: 0 };
   for (const w of workers) out[w.status] += 1;
   return out;
 }

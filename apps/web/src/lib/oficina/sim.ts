@@ -3,7 +3,7 @@
 // SIMULACIÓN en el HUD — la regla del dashboard (todo dato visible es real)
 // se respeta diciendo qué no lo es.
 
-import type { OfficeAction, OfficeProject, OfficeState, OfficeWorker, OfficeWorkerStatus } from "@hermes/shared";
+import { APPROVAL_TIMEOUT_MS, type OfficeAction, type OfficeProject, type OfficeState, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
 
 interface Seed {
   project: string;
@@ -63,6 +63,13 @@ const SEEDS: Seed[] = [
   },
   {
     project: "",
+    name: "Publica la rama",
+    status: "needs_you",
+    summary: "Pide permiso: git push origin fix/login",
+    lines: ["❯ Sube el arreglo del login", "⚙ Bash git status", "⚙ Bash git push origin fix/login", "✋ git push origin fix/login"],
+  },
+  {
+    project: "",
     name: "Resume la junta",
     status: "done",
     summary: "$0.12 · 34s · Tres accionables",
@@ -101,6 +108,17 @@ export function demoOfficeState(projects: OfficeProject[], machine: string): Off
       failStreak: 0,
       machine,
       lines: s.lines,
+      approval:
+        s.status === "needs_you"
+          ? {
+              id: `sim-approval-${i}`,
+              tool: "Bash",
+              summary: s.summary.replace(/^Pide permiso: /, ""),
+              detail: s.summary.replace(/^Pide permiso: /, ""),
+              since: at,
+              expiresAt: new Date(Date.parse(at) + APPROVAL_TIMEOUT_MS).toISOString(),
+            }
+          : undefined,
     };
   });
   return { workers, projects, machine, ts: new Date(now).toISOString() };

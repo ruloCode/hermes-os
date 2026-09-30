@@ -12,7 +12,10 @@ import {
   GENERAL_PROJECT,
   reduceOfficeEvent,
   registerWorker,
+  setWorkerApproval,
   tickOffice,
+  type ApprovalOutcome,
+  type OfficeApproval,
   type OfficeProject,
   type OfficeRegistration,
   type OfficeState,
@@ -60,6 +63,35 @@ export function registerOfficeWorker(reg: Omit<OfficeRegistration, "machine">): 
     delete w.replaced;
   }
   publish({ type: "worker", worker: w });
+}
+
+/**
+ * Abre o cierra el "te necesita" de un personaje (lo llama office/approvals.ts).
+ * Devuelve false si el personaje ya no existe o terminó.
+ */
+export function setOfficeApproval(id: string, approval: OfficeApproval | null, outcome?: ApprovalOutcome): boolean {
+  const w = setWorkerApproval(workers, id, approval, outcome);
+  if (!w) return false;
+  publish({ type: "worker", worker: w });
+  return true;
+}
+
+// Quién está mirando la Oficina: pedir permiso solo tiene sentido si alguien
+// puede darlo. Cada conexión a GET /office/events cuenta mientras dure.
+let viewers = 0;
+
+export function officeViewerJoined(): () => void {
+  viewers += 1;
+  let left = false;
+  return () => {
+    if (left) return;
+    left = true;
+    viewers = Math.max(0, viewers - 1);
+  };
+}
+
+export function officeWatched(): boolean {
+  return viewers > 0;
 }
 
 export function subscribeOffice(fn: Listener): () => void {

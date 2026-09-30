@@ -4,6 +4,8 @@
 // usando y desde cuándo, y su salida. Para un run de claude -p la salida es el
 // stream REAL del run (GET /claude/run/:id/stream, el mismo de la consola);
 // para el resto de sesiones son las líneas que el agente guardó del bus.
+// Si el agente espera tu permiso, lo primero del panel es QUÉ pide (el comando
+// exacto) y los dos botones: el run está pausado hasta que decidas.
 
 import { useEffect, useRef, useState } from "react";
 import type { OfficeWorker, OfficeWorkerStatus } from "@hermes/shared";
@@ -16,6 +18,7 @@ const STATUS_LABEL: Record<OfficeWorkerStatus, string> = {
   working: "Trabajando",
   thinking: "Pensando",
   blocked: "Bloqueado por un guardrail",
+  needs_you: "Esperando tu permiso",
   done: "Listo",
   error: "Error",
 };
@@ -25,6 +28,7 @@ const STATUS_DOT: Record<OfficeWorkerStatus, string> = {
   working: "bg-amber",
   thinking: "bg-cyan",
   blocked: "bg-red",
+  needs_you: "bg-accent",
   done: "bg-green",
   error: "bg-red",
 };
@@ -44,6 +48,11 @@ const SOURCE_LABEL: Record<OfficeWorker["source"], string> = {
 interface Line {
   kind: string;
   text: string;
+}
+
+function remaining(until: string): string {
+  const s = Math.max(0, Math.round((Date.parse(until) - Date.now()) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 function elapsed(from: string, to?: string): string {
@@ -99,6 +108,8 @@ export function WorkerDrawer({
   padConnected,
   sending,
   onSend,
+  deciding,
+  onDecide,
 }: {
   worker: OfficeWorker;
   projectName: string;
@@ -108,6 +119,8 @@ export function WorkerDrawer({
   padConnected: boolean;
   sending: boolean;
   onSend: () => void;
+  deciding: boolean;
+  onDecide: (allow: boolean) => void;
 }) {
   const isRun = worker.source === "run" && !simulated;
   const stream = useRunStream(isRun ? worker.id : null);
@@ -171,7 +184,37 @@ export function WorkerDrawer({
         </div>
       </dl>
 
-      {worker.task.summary ? (
+      {worker.approval ? (
+        <section className="border-b border-line bg-accent/10 px-4 py-3" aria-live="assertive">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm font-medium text-text">✋ Pide permiso para ejecutar</p>
+            <p className="shrink-0 text-xs text-text-dim tabular-nums">se niega sola en {remaining(worker.approval.expiresAt)}</p>
+          </div>
+          <pre className="mt-2 max-h-40 overflow-y-auto rounded-md border border-line bg-panel px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap text-text">
+            {worker.approval.detail}
+          </pre>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={deciding}
+              onClick={() => onDecide(true)}
+              className="flex-1 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              Aprobar{padConnected ? " (A)" : ""}
+            </button>
+            <button
+              type="button"
+              disabled={deciding}
+              onClick={() => onDecide(false)}
+              className="flex-1 rounded-md border border-line px-3 py-2 text-sm text-text hover:border-red hover:text-red disabled:opacity-50"
+            >
+              Negar{padConnected ? " (B)" : ""}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {worker.task.summary && !worker.approval ? (
         <p className="border-b border-line px-4 py-2 font-mono text-xs break-all text-text-dim">{worker.task.summary}</p>
       ) : null}
 
