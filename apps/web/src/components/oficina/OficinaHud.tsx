@@ -425,6 +425,31 @@ export function LookPicker({ look, onChange, onClose }: { look: OwnerLook; onCha
   );
 }
 
+const FLOORS = ["Equipos", "Café", "Azotea"] as const;
+
+/** Qué piso se ve: en explorar lo dice; en vista aérea deja elegir (también con las teclas 1, 2 y 3). */
+export function FloorPicker({ floor, mode, onPick }: { floor: number; mode: OfficeMode; onPick: (floor: number) => void }) {
+  return (
+    <div className={`pointer-events-auto flex items-center gap-1 rounded-xl p-1 ${glass}`} role="group" aria-label="Pisos">
+      {FLOORS.map((name, i) => {
+        const on = i === floor;
+        return (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onPick(i)}
+            title={mode === "aerial" ? `Ver el piso ${i + 1}` : `Ver el piso ${i + 1} desde arriba (tecla ${i + 1})`}
+            className={`rounded-lg px-2.5 py-1 text-xs ${on ? "bg-accent font-medium text-white" : "text-text-dim hover:text-text"}`}
+          >
+            {i + 1} · {name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export interface Toast {
   id: number;
   tone: "start" | "done" | "error";

@@ -1,7 +1,10 @@
 // Control del personaje del dueño en tercera persona, estilo RPG: WASD o
 // flechas mueven relativo a la cámara, Shift corre, Espacio salta; arrastrar
 // orbita la cámara que lo sigue y la rueda acerca o aleja. Choca con muebles y
-// paredes (círculo contra cajas) y puede subirse de un salto a un escritorio.
+// paredes (círculo contra cajas), puede subirse de un salto a un escritorio y
+// sube escaleras solo (cada escalón es una caja más alta que la anterior, por
+// debajo del paso automático). Las cajas tienen base: debajo de la losa del
+// piso de arriba se camina.
 //
 // La idea y las constantes vienen de agent-office (AgentSystemLabs, MIT —
 // src/client/player.ts); el código es propio y más corto (sin primera
@@ -16,10 +19,14 @@ export interface Collider {
   maxZ: number;
   /** Altura de la parte de arriba (sobre ella se puede estar de pie). */
   top: number;
+  /** Altura de la base (default 0): una losa del piso de arriba no estorba al caminar debajo. */
+  bottom?: number;
 }
 
 const RADIUS = 0.3;
 const STEP = 0.35;
+/** Altura del personaje: una caja estorba solo si se cruza con esta franja vertical. */
+const BODY_H = 1.7;
 const WALK = 4.4;
 const RUN = 7.4;
 const JUMP_V = 6.4;
@@ -111,8 +118,8 @@ export class PlayerController {
     if (!on) this.keys.clear();
   }
 
-  spawn(x: number, z: number, facing: number) {
-    this.pos.set(x, 0, z);
+  spawn(x: number, z: number, facing: number, y = 0) {
+    this.pos.set(x, y, z);
     this.facing = facing;
     this.camYaw = facing + Math.PI;
     this.vy = 0;
@@ -129,7 +136,7 @@ export class PlayerController {
   }
 
   private blocked(x: number, z: number): boolean {
-    for (const c of this.colliders) if (c.top > this.pos.y + STEP && overlaps(c, x, z, RADIUS)) return true;
+    for (const c of this.colliders) if (c.top > this.pos.y + STEP && (c.bottom ?? 0) < this.pos.y + BODY_H && overlaps(c, x, z, RADIUS)) return true;
     return false;
   }
 

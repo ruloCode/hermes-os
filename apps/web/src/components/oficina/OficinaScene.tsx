@@ -36,6 +36,8 @@ interface Props {
   onClick: (hit: OfficeHit | null) => void;
   onNear: (hit: OfficeHit | null) => void;
   onMode: (mode: OfficeMode) => void;
+  /** El piso que se ve (0 equipos · 1 café · 2 azotea). */
+  onFloor?: (floor: number) => void;
   /** Nombre de la voz que presta cada personaje en la llamada del equipo. */
   voices?: ReadonlyMap<string, string>;
   /** Quién suena ahora en esa llamada (lo lee el mundo cada frame). */
@@ -53,7 +55,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, voices, speakingProbe },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -61,8 +63,8 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   const labelRefs = useRef(new Map<string, HTMLDivElement>());
   const headRef = useRef<HTMLDivElement>(null);
   const nearRef = useRef<HTMLDivElement>(null);
-  const cb = useRef({ onClick, onNear, onMode });
-  cb.current = { onClick, onNear, onMode };
+  const cb = useRef({ onClick, onNear, onMode, onFloor });
+  cb.current = { onClick, onNear, onMode, onFloor };
   const initial = useRef({ ownerName, look });
 
   useImperativeHandle(ref, () => ({ world: () => worldRef.current }), []);
@@ -85,6 +87,7 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
         onNear: (hit) => cb.current.onNear(hit),
         onClick: (hit) => cb.current.onClick(hit),
         onMode: (mode) => cb.current.onMode(mode),
+        onFloor: (floor) => cb.current.onFloor?.(floor),
       },
       initial.current,
     );

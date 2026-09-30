@@ -9,6 +9,9 @@ Recorre la oficina como un usuario, en los dos temas:
   2c. El agente en modo Plan: su panel muestra el plan, Shift+Tab cambia el
      modo con que lo ejecutará y "Aprobar y ejecutar" lo pasa a trabajar.
   4b. Contratar abre con el modo Auto elegido (los de Claude Code).
+  5. Tres pisos: al pie de la escalera, W sube al café (piso 2) y la segunda
+     escalera a la azotea (piso 3); desde arriba no se alcanza a los agentes y
+     la vista aérea de cada piso muestra solo lo suyo.
   3. "V" cambia a VISTA AÉREA: clic real en un personaje abre su panel.
   4. En vivo: clic en un escritorio libre (aérea) y "E" frente a uno libre
      (explorar) abren "Contratar" — sin enviar nada.
@@ -158,6 +161,39 @@ def main() -> int:
                 check(p2["status"] == "working", f"[{theme}] el plan aprobado pasa a trabajar ({p2['status']})")
                 page.keyboard.press("Escape")
                 time.sleep(0.4)
+
+            # 5. Pisos: subir las dos escaleras caminando de verdad.
+            page.evaluate("() => window.__hermesOficinaStair(0)")
+            time.sleep(0.6)
+            page.keyboard.down("w")
+            time.sleep(2.2)
+            page.keyboard.up("w")
+            time.sleep(0.5)
+            d = dbg()
+            check(abs(d["player"]["y"] - 3.6) < 0.05 and d["floor"]["shown"] == 1, f"[{theme}] la escalera 1 sube al café ({d['player']['y']} m, piso {d['floor']['shown'] + 1})")
+            check(d["near"] is None, f"[{theme}] desde el piso 2 no se alcanza a los agentes")
+            page.screenshot(path=str(out / f"oficina-piso2-{tag}.png"))
+            page.evaluate("() => window.__hermesOficinaStair(1)")
+            time.sleep(0.6)
+            page.keyboard.down("w")
+            time.sleep(2.2)
+            page.keyboard.up("w")
+            time.sleep(0.5)
+            d = dbg()
+            check(abs(d["player"]["y"] - 7.2) < 0.05 and d["floor"]["shown"] == 2, f"[{theme}] la escalera 2 sube a la azotea ({d['player']['y']} m)")
+            page.screenshot(path=str(out / f"oficina-azotea-{tag}.png"))
+            for f in (1, 2):
+                page.keyboard.press(str(f + 1))
+                time.sleep(1.8)
+                check(dbg()["floor"]["shown"] == f, f"[{theme}] tecla {f + 1} = vista aérea del piso {f + 1}")
+            page.screenshot(path=str(out / f"oficina-aerea-azotea-{tag}.png"))
+            page.keyboard.press("1")
+            time.sleep(1.2)
+            # De vuelta abajo para lo que sigue.
+            page.evaluate("() => window.__hermesOficinaMode('explore')")
+            page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'worker', id })", wid)
+            time.sleep(1.0)
+            check(dbg()["floor"]["mine"] == 0, f"[{theme}] ir con un agente vuelve al piso 1")
 
             # 3. Vista aérea con V y clic real.
             page.keyboard.press("v")

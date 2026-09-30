@@ -19,6 +19,15 @@ import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
 
 export const WALL_H = 3.4;
+/** Grosor de la losa entre pisos. */
+const SLAB = 0.2;
+/** Altura del suelo de cada piso: 1 equipos · 2 café y lounge · 3 azotea. */
+export const FLOOR_Y = [0, WALL_H + SLAB, 2 * (WALL_H + SLAB)] as const;
+export const FLOOR_NAMES = ["Equipos", "Café", "Azotea"] as const;
+/** El piso de una altura (a mitad de escalera ya cuenta el de llegada, para verlo al subir). */
+export function floorAt(y: number): number {
+  return y < FLOOR_Y[1] - 1.2 ? 0 : y < FLOOR_Y[2] - 1.2 ? 1 : 2;
+}
 const WALL_T = 0.24;
 const PARTITION_H = 1.0;
 const DOOR_HALF = 2;
@@ -50,6 +59,13 @@ export interface Room {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   spawn: { x: number; z: number; facing: number };
   lamps: THREE.PointLight[];
+  /** Piso de cada lámpara (mismo orden que `lamps`): solo se encienden las del piso que se ve. */
+  lampFloor: number[];
+  floors: THREE.Group[];
+  /** Pie de cada escalera (para el QA y "ir a la escalera"): dónde pararse y hacia dónde mirar para subir. */
+  stairs: { x: number; z: number; y: number; facing: number }[];
+  /** Muestra los pisos hasta `upTo` (los de encima se ocultan, como un corte de casa de muñecas). */
+  showFloors(upTo: number): void;
   /** Clave de tamaño: si cambia, la sala se reconstruye. */
   key: string;
   setFeed(lines: FeedLine[]): void;
@@ -730,6 +746,256 @@ function waterCooler(): THREE.Group {
   return g;
 }
 
+// ── Pisos: losas con hueco, escaleras, barandas y azotea ───────────────
+
+/** Tablones de la terraza de la azotea. */
+function deckTexture(dark: boolean, w: number, d: number): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const g = c.getContext("2d")!;
+  const base = dark ? "#6b4f3a" : "#b98b62";
+  g.fillStyle = base;
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 8; i++) {
+    g.fillStyle = mix(base, i % 2 ? "#000000" : "#ffffff", 0.06);
+    g.fillRect(0, i * 32 + 2, 256, 28);
+    g.fillStyle = mix(base, "#000000", 0.35);
+    g.fillRect(0, i * 32, 256, 2);
+    g.fillRect(((i * 97) % 200) + 20, i * 32, 2, 32);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(w / 2, d / 2);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+interface FloorsCtx {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  cx: number;
+  p: OfficePalette;
+  brick: HTMLCanvasElement;
+  disposables: { dispose(): void }[];
+  floors: THREE.Group[];
+  col: (level: number, c: Collider) => void;
+  light: (level: number, l: THREE.PointLight) => void;
+}
+
+/**
+ * Las losas de los pisos 2 y 3 (con el hueco de su escalera), las dos
+ * escaleras en zigzag contra el muro oeste, sus barandas, el balcón del
+ * frente del piso 2 y la azotea (antepecho, terraza, luces colgantes).
+ * Devuelve el pie de cada escalera en coordenadas del mundo.
+ */
+function buildFloorsAndStairs(ctx: FloorsCtx): { x: number; z: number; y: number; facing: number }[] {
+  const { minX, maxX, minZ, maxZ, cx, p, brick, disposables, floors, col, light } = ctx;
+  const N = 18;
+  const rise = FLOOR_Y[1] / N;
+  const run = 5.4;
+  const tread = run / N;
+  // Escalera 1 (piso 1 → 2) sube hacia el fondo desde el frente; la 2 (2 → 3), al lado, vuelve hacia el frente.
+  const zHigh = maxZ - 1.5;
+  const zLow = zHigh - run;
+  const s1 = { x0: minX + WALL_T / 2, x1: minX + 1.9 };
+  const s2 = { x0: minX + 2.0, x1: minX + 3.6 };
+  const hole1 = { minX, maxX: minX + 1.95, minZ: zLow, maxZ: zHigh };
+  const hole2 = { minX: minX + 1.95, maxX: minX + 3.65, minZ: zLow, maxZ: zHigh };
+
+  const black = toon("#1f2024");
+  const treadMat = toon(p.dark ? "#8a5a3b" : "#b07a52");
+  const riserMat = toon(p.dark ? "#3a3532" : "#5a524c");
+
+  // Losa con hueco: cuatro rectángulos alrededor del hueco, cada uno con su textura a escala.
+  const slab = (level: number, hole: { minX: number; maxX: number; minZ: number; maxZ: number }, tex: (w: number, d: number) => THREE.CanvasTexture) => {
+    const g = floors[level];
+    const rects = [
+      [minX, maxX, minZ, hole.minZ],
+      [minX, maxX, hole.maxZ, maxZ],
+      [minX, hole.minX, hole.minZ, hole.maxZ],
+      [hole.maxX, maxX, hole.minZ, hole.maxZ],
+    ];
+    for (const [x0, x1, z0, z1] of rects) {
+      const w = x1 - x0;
+      const d = z1 - z0;
+      if (w < 0.05 || d < 0.05) continue;
+      const t = tex(w, d);
+      const m = new THREE.MeshToonMaterial({ map: t, color: "#ffffff" });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set((x0 + x1) / 2, 0.002, (z0 + z1) / 2);
+      plane.receiveShadow = true;
+      g.add(plane);
+      // Canto de la losa (se ve desde afuera y por el hueco).
+      g.add(mesh(box(w, SLAB, d), riserMat, (x0 + x1) / 2, -SLAB / 2 - 0.004, (z0 + z1) / 2, false));
+      disposables.push(t, m);
+      col(level, { minX: x0, maxX: x1, minZ: z0, maxZ: z1, bottom: -SLAB, top: 0 });
+    }
+  };
+  slab(1, hole1, (w, d) => concreteTexture(p.dark, w, d));
+  slab(2, hole2, (w, d) => deckTexture(p.dark, w, d));
+
+  // Escalera maciza: cada escalón es una caja de su altura (el personaje los sube solo).
+  const stair = (level: number, x0: number, x1: number, zStart: number, dir: 1 | -1) => {
+    const g = floors[level];
+    for (let i = 0; i < N; i++) {
+      const h = (i + 1) * rise;
+      const za = zStart + dir * i * tread;
+      const zb = zStart + dir * (i + 1) * tread;
+      const z0 = Math.min(za, zb);
+      const z1 = Math.max(za, zb);
+      g.add(mesh(box(x1 - x0, h, tread), riserMat, (x0 + x1) / 2, h / 2, (z0 + z1) / 2));
+      g.add(mesh(box(x1 - x0 + 0.02, 0.04, tread + 0.02), treadMat, (x0 + x1) / 2, h - 0.02, (z0 + z1) / 2, false));
+      col(level, { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top: h });
+    }
+  };
+  stair(0, s1.x0, s1.x1, zHigh, -1);
+  stair(1, s2.x0, s2.x1, zLow, 1);
+
+  // Baranda: postes, pasamanos (inclinado si sube) y su colisión, que hace de guarda.
+  const rail = (level: number, axis: "x" | "z", at: number, from: number, to: number, hFrom: number, hTo: number, guardTop: number) => {
+    const g = floors[level];
+    const H = 1.0;
+    const len = Math.abs(to - from);
+    const posts = Math.max(2, Math.round(len / 1.2) + 1);
+    for (let i = 0; i < posts; i++) {
+      const t = i / (posts - 1);
+      const u = from + (to - from) * t;
+      const base = hFrom + (hTo - hFrom) * t;
+      const post = mesh(new THREE.CylinderGeometry(0.025, 0.025, H, 6), black, 0, base + H / 2, 0, false);
+      if (axis === "x") post.position.set(u, base + H / 2, at);
+      else post.position.set(at, base + H / 2, u);
+      g.add(post);
+    }
+    const a = axis === "x" ? new THREE.Vector3(from, hFrom + H, at) : new THREE.Vector3(at, hFrom + H, from);
+    const b = axis === "x" ? new THREE.Vector3(to, hTo + H, at) : new THREE.Vector3(at, hTo + H, to);
+    const bar = mesh(new THREE.CylinderGeometry(0.035, 0.035, a.distanceTo(b), 8), black, 0, 0, 0, false);
+    bar.position.copy(a).lerp(b, 0.5);
+    bar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    g.add(bar);
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    col(level, axis === "x" ? { minX: lo, maxX: hi, minZ: at - 0.05, maxZ: at + 0.05, top: guardTop } : { minX: at - 0.05, maxX: at + 0.05, minZ: lo, maxZ: hi, top: guardTop });
+  };
+  // Escalera 1: baranda del lado abierto (el otro es el muro).
+  rail(0, "z", s1.x1 + 0.03, zHigh, zLow, 0, FLOOR_Y[1], FLOOR_Y[1] + 1.1);
+  // Piso 2: guarda al borde sur del hueco 1 y las dos barandas de la escalera 2.
+  rail(1, "x", zHigh - 0.03, minX + WALL_T / 2, hole1.maxX, 0, 0, 1.1);
+  rail(1, "z", s2.x0 - 0.03, zLow, zHigh, 0, FLOOR_Y[1], FLOOR_Y[1] + 1.1);
+  rail(1, "z", s2.x1 + 0.03, zLow, zHigh, 0, FLOOR_Y[1], FLOOR_Y[1] + 1.1);
+  // Azotea: el hueco 2 se rodea salvo por el sur, que es donde se llega.
+  rail(2, "x", zLow + 0.03, hole2.minX, hole2.maxX, 0, 0, 1.1);
+  rail(2, "z", hole2.minX + 0.03, zLow, zHigh, 0, 0, 1.1);
+  rail(2, "z", hole2.maxX - 0.03, zLow, zHigh, 0, 0, 1.1);
+
+  // Piso 2: balcón de vidrio al frente (sin puerta: la entrada es abajo).
+  {
+    const g = floors[1];
+    const glass = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide });
+    disposables.push(glass);
+    const w = maxX - minX;
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(w, 1.0), glass);
+    pane.position.set(cx, 0.55, maxZ);
+    g.add(pane);
+    g.add(mesh(box(w, 0.06, 0.1), black, cx, 1.08, maxZ, false));
+    g.add(mesh(box(w, 0.08, 0.14), black, cx, 0.04, maxZ, false));
+    col(1, { minX, maxX, minZ: maxZ - 0.1, maxZ: maxZ + 0.1, top: 1.2 });
+    // El centro del café, sobre los pods: un tapete grande, pufs y matas.
+    g.add(mesh(roundedBox(8, 0.02, 5, 0.6), toon(p.dark ? mix(p.bg, "#2a9d8f", 0.3) : mix("#2a9d8f", "#ffffff", 0.65)), cx, 0.012, (minZ + maxZ) / 2, false));
+    [
+      ["#e76f51", cx - 1.6, (minZ + maxZ) / 2],
+      ["#e9c46a", cx + 1.6, (minZ + maxZ) / 2 + 0.8],
+    ].forEach(([c, x, z]) => {
+      const bean = mesh(new THREE.SphereGeometry(0.55, 18, 12), toon(c as string), x as number, 0.32, z as number);
+      bean.scale.y = 0.6;
+      g.add(bean);
+      col(1, { minX: (x as number) - 0.45, maxX: (x as number) + 0.45, minZ: (z as number) - 0.45, maxZ: (z as number) + 0.45, top: 0.55 });
+    });
+  }
+
+  // Azotea: antepecho de ladrillo en los cuatro lados, terraza, luces colgantes y un rincón para sentarse.
+  {
+    const g = floors[2];
+    const H = 1.0;
+    const T = 0.3;
+    const edges: [number, number, number, number][] = [
+      [minX, maxX, minZ, minZ + T],
+      [minX, maxX, maxZ - T, maxZ],
+      [minX, minX + T, minZ, maxZ],
+      [maxX - T, maxX, minZ, maxZ],
+    ];
+    for (const [x0, x1, z0, z1] of edges) {
+      const w = x1 - x0;
+      const d = z1 - z0;
+      const m = brickMaterial(brick, Math.max(w, d), H, disposables);
+      g.add(mesh(box(w, H, d), m, (x0 + x1) / 2, H / 2, (z0 + z1) / 2));
+      g.add(mesh(box(w + 0.04, 0.06, d + 0.04), black, (x0 + x1) / 2, H + 0.03, (z0 + z1) / 2, false));
+      col(2, { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top: H + 0.2 });
+    }
+    // Guirnaldas de bombillos entre postes negros.
+    const bulb = toon("#fff3d0", { emissive: "#ffcf7a" });
+    const lineZs = [minZ + 5, minZ + 11, minZ + 17].filter((z) => z < maxZ - 1);
+    const xA = minX + 6;
+    const xB = maxX - 3;
+    for (const z of lineZs) {
+      for (const x of [xA, xB]) {
+        g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.2, 8), black, x, 1.6, z));
+        col(2, { minX: x - 0.08, maxX: x + 0.08, minZ: z - 0.08, maxZ: z + 0.08, top: 3.2 });
+      }
+      const n = Math.round((xB - xA) / 1.1);
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const y = 3.1 - Math.sin(t * Math.PI) * 0.7;
+        g.add(mesh(new THREE.SphereGeometry(0.07, 8, 6), bulb, xA + (xB - xA) * t, y - 0.1, z, false));
+      }
+    }
+    for (const [x, z] of [
+      [cx - 6, minZ + 11],
+      [cx + 6, minZ + 11],
+    ]) {
+      const l = new THREE.PointLight("#ffcf8a", 1, 14, 1.4);
+      l.position.set(x, 2.6, z);
+      light(2, l);
+    }
+    // Rincón con sombrilla y dos sillas de playa (noreste).
+    const nook = { x: maxX - 6, z: minZ + 4 };
+    g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.4, 8), black, nook.x, 1.2, nook.z));
+    const shade = mesh(new THREE.ConeGeometry(1.6, 0.6, 16, 1, true), toon(p.accent), nook.x, 2.4, nook.z, false);
+    g.add(shade);
+    col(2, { minX: nook.x - 0.1, maxX: nook.x + 0.1, minZ: nook.z - 0.1, maxZ: nook.z + 0.1, top: 2.6 });
+    for (const dx of [-1.1, 1.1]) {
+      const chair = new THREE.Group();
+      chair.add(mesh(box(0.6, 0.08, 1.4), toon("#e9c46a"), 0, 0.35, 0));
+      const back = mesh(box(0.6, 0.08, 0.7), toon("#e9c46a"), 0, 0.6, -0.6);
+      back.rotation.x = 0.9;
+      chair.add(back);
+      for (const sx of [-0.25, 0.25]) for (const sz of [-0.55, 0.55]) chair.add(mesh(box(0.04, 0.35, 0.04), toon("#8a5a3b"), sx, 0.17, sz, false));
+      chair.position.set(nook.x + dx, 0, nook.z + 0.4);
+      g.add(chair);
+      col(2, { minX: nook.x + dx - 0.32, maxX: nook.x + dx + 0.32, minZ: nook.z - 0.35, maxZ: nook.z + 1.15, top: 0.4 });
+    }
+    // Materas en las esquinas.
+    for (const [x, z] of [
+      [minX + 5, minZ + 1.2],
+      [cx, minZ + 1.2],
+      [maxX - 1.2, maxZ - 1.2],
+      [cx + 3, maxZ - 1.2],
+    ]) {
+      g.add(mesh(box(1.2, 0.5, 0.6), toon("#8a5a3b"), x, 0.25, z));
+      for (const dx of [-0.35, 0, 0.35]) g.add(mesh(new THREE.SphereGeometry(0.28, 10, 8), toon(dx === 0 ? "#4f9d55" : "#5fb760"), x + dx, 0.7, z, false));
+      col(2, { minX: x - 0.6, maxX: x + 0.6, minZ: z - 0.3, maxZ: z + 0.3, top: 0.5 });
+    }
+  }
+
+  return [
+    { x: (s1.x0 + s1.x1) / 2, z: zHigh + 0.7, y: 0, facing: Math.PI },
+    { x: (s2.x0 + s2.x1) / 2, z: zLow - 0.7, y: FLOOR_Y[1], facing: 0 },
+  ];
+}
+
 // ── Pantallas con datos reales ──────────────────────────────────────────
 
 function screenCanvas(w: number, h: number) {
@@ -749,6 +1015,35 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const colliders: Collider[] = [];
   const disposables: { dispose(): void }[] = [];
   const lamps: THREE.PointLight[] = [];
+  const lampFloor: number[] = [];
+
+  // Tres pisos: cada uno es un grupo a su altura. Lo de cada piso se construye
+  // en coordenadas locales (y = 0 es su suelo); `on(n)` elige a qué piso va lo
+  // que sigue, `col` sube la colisión a esa altura y `light` deja las luces en
+  // la raíz (así el mundo las apaga por piso sin cambiar cuántas hay: cambiar
+  // el número de luces recompila los shaders y el juego da un tirón).
+  const floors = FLOOR_Y.map((y) => {
+    const f = new THREE.Group();
+    f.position.y = y;
+    group.add(f);
+    return f;
+  });
+  let level = 0;
+  let g = floors[0];
+  const on = (n: number) => {
+    level = n;
+    g = floors[n];
+  };
+  const col = (c: Collider) => {
+    const y = FLOOR_Y[level];
+    colliders.push({ ...c, bottom: y + (c.bottom ?? 0), top: c.top >= 99 ? 99 : y + c.top });
+  };
+  const light = (l: THREE.PointLight) => {
+    l.position.y += FLOOR_Y[level];
+    group.add(l);
+    lamps.push(l);
+    lampFloor.push(level);
+  };
 
   // Planta: pods al centro, cocina al oeste, lounge al este.
   const minX = Math.min(layout.floor.minX - 8, -19.5);
@@ -771,7 +1066,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((minX + maxX) / 2, 0.002, (minZ + maxZ) / 2);
   floor.receiveShadow = true;
-  group.add(floor);
+  g.add(floor);
   disposables.push(floor.geometry, floorMat, floorTex);
 
   const kitchen = { minX: minX + 0.2, maxX: minX + 7.5, minZ: minZ + 0.2, maxZ: minZ + 11 };
@@ -829,7 +1124,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
         axis === "x"
           ? mesh(box(u1 - u0, v1 - v0, WALL_T), mat, (u0 + u1) / 2, (v0 + v1) / 2, at)
           : mesh(box(WALL_T, v1 - v0, u1 - u0), mat, at, (v0 + v1) / 2, (u0 + u1) / 2);
-      group.add(m);
+      g.add(m);
     };
     let u = from;
     for (const c of [...windows].sort((a, b) => a - b)) {
@@ -864,7 +1159,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
         win.position.set(at, 0, c);
         win.rotation.y = inward === 1 ? Math.PI / 2 : -Math.PI / 2;
       }
-      group.add(win);
+      g.add(win);
     }
     piece(u, to, 0, WALL_H);
     // Rodapié y colisión.
@@ -872,8 +1167,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
       axis === "x"
         ? mesh(box(to - from, 0.18, WALL_T + 0.04), trimMat, (from + to) / 2, 0.09, at, false)
         : mesh(box(WALL_T + 0.04, 0.18, to - from), trimMat, at, 0.09, (from + to) / 2, false);
-    group.add(base);
-    colliders.push(
+    g.add(base);
+    col(
       axis === "x"
         ? { minX: from, maxX: to, minZ: at - WALL_T / 2, maxZ: at + WALL_T / 2, top: 99 }
         : { minX: at - WALL_T / 2, maxX: at + WALL_T / 2, minZ: from, maxZ: to, top: 99 },
@@ -884,6 +1179,12 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   wall("x", minZ, minX - WALL_T / 2, maxX + WALL_T / 2, [cx - 13, cx - 7.5, cx + 7.5, cx + 13], 1);
   wall("z", minX, minZ, maxZ, [minZ + 13, minZ + 19].filter((z) => z < maxZ - 2), 1);
   wall("z", maxX, minZ, maxZ, [minZ + 3.5, minZ + 18].filter((z) => z < maxZ - 2), -1);
+  // El piso 2 repite los muros con sus ventanas; el 3 es azotea (solo antepecho).
+  on(1);
+  wall("x", minZ, minX - WALL_T / 2, maxX + WALL_T / 2, [cx - 13, cx - 7.5, cx + 7.5, cx + 13], 1);
+  wall("z", minX, minZ, maxZ, [minZ + 13, minZ + 19].filter((z) => z < maxZ - 2), 1);
+  wall("z", maxX, minZ, maxZ, [minZ + 3.5, minZ + 18].filter((z) => z < maxZ - 2), -1);
+  on(0);
 
   // Frente abierto: muro bajo con vidrio arriba y la entrada al centro.
   const partitionGlass = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide });
@@ -892,15 +1193,15 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     [minX - WALL_T / 2, cx - DOOR_HALF],
     [cx + DOOR_HALF, maxX + WALL_T / 2],
   ]) {
-    group.add(mesh(box(b - a, PARTITION_H, WALL_T), brickMaterial(brick, b - a, PARTITION_H, disposables), (a + b) / 2, PARTITION_H / 2, maxZ));
-    group.add(mesh(box(b - a, 0.06, WALL_T + 0.06), frameMat, (a + b) / 2, PARTITION_H + 0.03, maxZ, false));
+    g.add(mesh(box(b - a, PARTITION_H, WALL_T), brickMaterial(brick, b - a, PARTITION_H, disposables), (a + b) / 2, PARTITION_H / 2, maxZ));
+    g.add(mesh(box(b - a, 0.06, WALL_T + 0.06), frameMat, (a + b) / 2, PARTITION_H + 0.03, maxZ, false));
     const gl = new THREE.Mesh(new THREE.PlaneGeometry(b - a, 0.5), partitionGlass);
     gl.position.set((a + b) / 2, PARTITION_H + 0.3, maxZ);
-    group.add(gl);
-    colliders.push({ minX: a, maxX: b, minZ: maxZ - WALL_T / 2, maxZ: maxZ + WALL_T / 2, top: PARTITION_H + 0.5 });
+    g.add(gl);
+    col({ minX: a, maxX: b, minZ: maxZ - WALL_T / 2, maxZ: maxZ + WALL_T / 2, top: PARTITION_H + 0.5 });
   }
   // Tapete de bienvenida.
-  group.add(mesh(roundedBox(2.6, 0.02, 1.4, 0.3), toon(p.accent), cx, 0.012, maxZ - 1.1, false));
+  g.add(mesh(roundedBox(2.6, 0.02, 1.4, 0.3), toon(p.accent), cx, 0.012, maxZ - 1.1, false));
 
   // ── Pared del fondo: letrero con el nombre del dueño y reloj real ──────
   const sign = screenCanvas(1024, 256);
@@ -926,15 +1227,15 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const signMat = new THREE.MeshBasicMaterial({ map: sign.tex, toneMapped: false, transparent: true });
   const signMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 1.3), signMat);
   signMesh.position.set(cx, 2.55, minZ + WALL_T / 2 + 0.02);
-  group.add(signMesh);
+  g.add(signMesh);
   disposables.push(sign.tex, signMat, signMesh.geometry);
 
   const clock = screenCanvas(256, 256);
   const clockMat = new THREE.MeshBasicMaterial({ map: clock.tex, toneMapped: false, transparent: true });
   const clockMesh = new THREE.Mesh(new THREE.CircleGeometry(0.42, 40), clockMat);
   clockMesh.position.set(cx + 4.2, 2.55, minZ + WALL_T / 2 + 0.03);
-  group.add(clockMesh);
-  group.add(mesh(new THREE.TorusGeometry(0.43, 0.04, 8, 40), toon("#2b2d42"), clockMesh.position.x, 2.55, minZ + WALL_T / 2 + 0.05, false));
+  g.add(clockMesh);
+  g.add(mesh(new THREE.TorusGeometry(0.43, 0.04, 8, 40), toon("#2b2d42"), clockMesh.position.x, 2.55, minZ + WALL_T / 2 + 0.05, false));
   disposables.push(clock.tex, clockMat, clockMesh.geometry);
   let clockSecond = -1;
   const paintClock = (now: Date) => {
@@ -982,10 +1283,10 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const boardMat = new THREE.MeshBasicMaterial({ map: board.tex, toneMapped: false });
   const boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6), boardMat);
   boardMesh.position.set(cx - 4.6, 1.95, minZ + WALL_T / 2 + 0.04);
-  group.add(boardMesh);
-  group.add(mesh(box(2.52, 1.72, 0.04), toon("#adb5bd"), cx - 4.6, 1.95, minZ + WALL_T / 2 + 0.01, false));
-  group.add(mesh(box(2.3, 0.05, 0.12), toon("#adb5bd"), cx - 4.6, 1.12, minZ + WALL_T / 2 + 0.07, false));
-  ["#ef476f", "#3a86ff", "#06d6a0"].forEach((c, i) => group.add(mesh(box(0.14, 0.03, 0.03), toon(c), cx - 5.3 + i * 0.22, 1.16, minZ + WALL_T / 2 + 0.09, false)));
+  g.add(boardMesh);
+  g.add(mesh(box(2.52, 1.72, 0.04), toon("#adb5bd"), cx - 4.6, 1.95, minZ + WALL_T / 2 + 0.01, false));
+  g.add(mesh(box(2.3, 0.05, 0.12), toon("#adb5bd"), cx - 4.6, 1.12, minZ + WALL_T / 2 + 0.07, false));
+  ["#ef476f", "#3a86ff", "#06d6a0"].forEach((c, i) => g.add(mesh(box(0.14, 0.03, 0.03), toon(c), cx - 5.3 + i * 0.22, 1.16, minZ + WALL_T / 2 + 0.09, false)));
   disposables.push(board.tex, boardMat, boardMesh.geometry);
   let boardKey = "";
   const paintBoard = (stats: BoardStat[]) => {
@@ -1023,6 +1324,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   };
   paintBoard([]);
 
+  // ── Piso 2 · Café y lounge ─────────────────────────────────────────────
+  on(1);
   // ── Cocina (oeste) ─────────────────────────────────────────────────────
   const kx = minX + WALL_T / 2 + 0.55;
   const woodDark = toon(p.dark ? "#5a3b28" : "#8a5a3b");
@@ -1070,7 +1373,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   counter.add(mesh(box(0.02, 0.22, 0.38), toon("#1d2433"), 0.135, 1.16, 1.98, false));
   counter.add(mesh(box(0.02, 0.22, 0.12), toon("#343a40"), 0.135, 1.16, 2.27, false));
   counter.position.set(kx, 0, minZ + 3.2);
-  group.add(counter);
+  g.add(counter);
   // Vapor de las dos tazas de la cafetera (sprites: sin sombra ni contorno).
   counter.updateMatrixWorld(true);
   const steam: { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; base: THREE.Vector3; phase: number }[] = [];
@@ -1085,27 +1388,29 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     return c.tex;
   })();
   disposables.push(steamTex);
+  group.updateMatrixWorld(true);
   espresso.steamAt.forEach((at, i) => {
-    const base = machine.localToWorld(at.clone());
+    // El vapor vive en el grupo del piso: se pasa de mundo a coordenadas de ese piso.
+    const base = g.worldToLocal(machine.localToWorld(at.clone()));
     for (let k = 0; k < 3; k++) {
       const mat = new THREE.SpriteMaterial({ map: steamTex, transparent: true, depthWrite: false, opacity: 0 });
       const sprite = new THREE.Sprite(mat);
       sprite.position.copy(base);
-      group.add(sprite);
+      g.add(sprite);
       disposables.push(mat);
       steam.push({ sprite, mat, base, phase: k / 3 + i * 0.17 });
     }
   });
-  colliders.push({ minX: kx - 0.55, maxX: kx + 0.55, minZ: minZ + 0.7, maxZ: minZ + 5.7, top: 1.0 });
+  col({ minX: kx - 0.55, maxX: kx + 0.55, minZ: minZ + 0.7, maxZ: minZ + 5.7, top: 1.0 });
   const fr = fridge();
   fr.position.set(kx - 0.05, 0, minZ + 6.5);
   fr.rotation.y = Math.PI / 2;
-  group.add(fr);
-  colliders.push({ minX: kx - 0.5, maxX: kx + 0.45, minZ: minZ + 6, maxZ: minZ + 7, top: 2.1 });
+  g.add(fr);
+  col({ minX: kx - 0.5, maxX: kx + 0.45, minZ: minZ + 6, maxZ: minZ + 7, top: 2.1 });
   const cooler = waterCooler();
   cooler.position.set(kx - 0.1, 0, minZ + 8.2);
-  group.add(cooler);
-  colliders.push({ minX: kx - 0.35, maxX: kx + 0.15, minZ: minZ + 7.95, maxZ: minZ + 8.45, top: 1.5 });
+  g.add(cooler);
+  col({ minX: kx - 0.35, maxX: kx + 0.15, minZ: minZ + 7.95, maxZ: minZ + 8.45, top: 1.5 });
   // Isla de cocina: madera, frascos de agua con fruta, grifos de kombucha y
   // cerveza, frascos de snacks y banquetas altas del lado del piso.
   const tableAt = new THREE.Vector3(kitchen.minX + 4.1, 0, minZ + 3.6);
@@ -1135,19 +1440,19 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     island.add(mesh(new THREE.SphereGeometry(0.07, 10, 8), toon(c), 0.1 + (i % 2) * 0.1, 1.08, 1.33 + Math.floor(i / 2) * 0.12, false)),
   );
   island.position.copy(tableAt);
-  group.add(island);
-  colliders.push({ minX: tableAt.x - 0.55, maxX: tableAt.x + 0.55, minZ: tableAt.z - 1.9, maxZ: tableAt.z + 1.9, top: 0.97 });
+  g.add(island);
+  col({ minX: tableAt.x - 0.55, maxX: tableAt.x + 0.55, minZ: tableAt.z - 1.9, maxZ: tableAt.z + 1.9, top: 0.97 });
   for (let i = 0; i < 4; i++) {
     const st = barStool();
     const z = tableAt.z - 1.3 + i * 0.86;
     st.position.set(tableAt.x + 0.95, 0, z);
-    group.add(st);
-    colliders.push({ minX: tableAt.x + 0.78, maxX: tableAt.x + 1.12, minZ: z - 0.17, maxZ: z + 0.17, top: 0.8 });
+    g.add(st);
+    col({ minX: tableAt.x + 0.78, maxX: tableAt.x + 1.12, minZ: z - 0.17, maxZ: z + 0.17, top: 0.8 });
   }
   for (const dz of [-1.1, 1.1]) {
     const lamp = pendantLamp(1.25);
     lamp.position.set(tableAt.x, WALL_H + 0.2, tableAt.z + dz);
-    group.add(lamp);
+    g.add(lamp);
   }
 
   // Neón sobre la barra del café y pizarra de tiza en la esquina.
@@ -1156,20 +1461,19 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const neon = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.81), neonMat);
   neon.position.set(minX + WALL_T / 2 + 0.03, 2.65, minZ + 2.4);
   neon.rotation.y = Math.PI / 2;
-  group.add(neon);
+  g.add(neon);
   disposables.push(neonTex, neonMat, neon.geometry);
   const neonGlow = new THREE.PointLight("#ff4f8b", 1, 5, 1.8);
   neonGlow.position.set(minX + 0.8, 2.6, minZ + 2.4);
-  group.add(neonGlow);
-  lamps.push(neonGlow);
+  light(neonGlow);
   const chalkTex = chalkboardCanvas(p.font);
   const chalkMat = new THREE.MeshBasicMaterial({ map: chalkTex });
   disposables.push(chalkTex, chalkMat);
   const chalkX = minX + 2.3;
-  group.add(mesh(box(1.42, 1.9, 0.05), toon("#5a3b28"), chalkX, 1.95, minZ + WALL_T / 2 + 0.025, false));
+  g.add(mesh(box(1.42, 1.9, 0.05), toon("#5a3b28"), chalkX, 1.95, minZ + WALL_T / 2 + 0.025, false));
   const chalk = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.78), chalkMat);
   chalk.position.set(chalkX, 1.95, minZ + WALL_T / 2 + 0.055);
-  group.add(chalk);
+  g.add(chalk);
 
   // ── Lounge (este): TV con el feed real, sofá, mesa de centro, pufs ─────
   const lz = minZ + 11;
@@ -1184,11 +1488,11 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   tvGroup.add(tvScreen);
   tvGroup.position.set(tvX, 1.75, lz);
   tvGroup.rotation.y = -Math.PI / 2;
-  group.add(tvGroup);
+  g.add(tvGroup);
   disposables.push(tv.tex, tvMat, tvScreen.geometry);
   // Mueble bajo la TV.
-  group.add(mesh(box(0.5, 0.5, 2.6), toon(p.dark ? "#4a3a30" : "#a86b44"), tvX - 0.3, 0.25, lz));
-  colliders.push({ minX: tvX - 0.55, maxX: tvX, minZ: lz - 1.3, maxZ: lz + 1.3, top: 0.5 });
+  g.add(mesh(box(0.5, 0.5, 2.6), toon(p.dark ? "#4a3a30" : "#a86b44"), tvX - 0.3, 0.25, lz));
+  col({ minX: tvX - 0.55, maxX: tvX, minZ: lz - 1.3, maxZ: lz + 1.3, top: 0.5 });
 
   let feed: FeedLine[] = [];
   const paintTv = () => {
@@ -1228,11 +1532,11 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   paintTv();
 
   const rugAt = new THREE.Vector3(maxX - 4.4, 0, lz);
-  group.add(mesh(roundedBox(6, 0.02, 5.6, 0.8), toon(p.dark ? mix(p.accent, p.bg, 0.55) : mix(p.accent, "#ffffff", 0.6)), rugAt.x, 0.012, rugAt.z, false));
+  g.add(mesh(roundedBox(6, 0.02, 5.6, 0.8), toon(p.dark ? mix(p.accent, p.bg, 0.55) : mix(p.accent, "#ffffff", 0.6)), rugAt.x, 0.012, rugAt.z, false));
   const sofa = couch(p.dark ? "#9a4431" : "#b8553b");
   sofa.position.set(maxX - 6.6, 0, lz);
-  group.add(sofa);
-  colliders.push({ minX: maxX - 7.2, maxX: maxX - 6.1, minZ: lz - 1.9, maxZ: lz + 1.9, top: 0.55 });
+  g.add(sofa);
+  col({ minX: maxX - 7.2, maxX: maxX - 6.1, minZ: lz - 1.9, maxZ: lz + 1.9, top: 0.55 });
   // Mesa de centro redonda de madera, con libros, taza y una mata.
   const ctable = new THREE.Group();
   ctable.add(mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.08, 28), toon("#8a5a3b"), 0, 0.42, 0));
@@ -1246,49 +1550,50 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   ctable.add(mesh(new THREE.CylinderGeometry(0.08, 0.06, 0.1, 10), toon("#e8dfd2"), 0.1, 0.51, 0.35));
   ctable.add(mesh(new THREE.SphereGeometry(0.1, 10, 8), toon("#5fb760"), 0.1, 0.62, 0.35));
   ctable.position.set(maxX - 4.8, 0, lz);
-  group.add(ctable);
-  colliders.push({ minX: maxX - 5.3, maxX: maxX - 4.3, minZ: lz - 0.8, maxZ: lz + 0.8, top: 0.46 });
+  g.add(ctable);
+  col({ minX: maxX - 5.3, maxX: maxX - 4.3, minZ: lz - 0.8, maxZ: lz + 0.8, top: 0.46 });
   // Sillón verde de terciopelo frente al sofá, y un puf naranja.
   const chair = armchair(p.dark ? "#2f5d50" : "#3f7d6b");
   chair.position.set(maxX - 3.2, 0, lz + 1.7);
   chair.rotation.y = Math.PI + 0.5;
-  group.add(chair);
-  colliders.push({ minX: maxX - 3.8, maxX: maxX - 2.6, minZ: lz + 1.1, maxZ: lz + 2.3, top: 0.6 });
+  g.add(chair);
+  col({ minX: maxX - 3.8, maxX: maxX - 2.6, minZ: lz + 1.1, maxZ: lz + 2.3, top: 0.6 });
   const lounge = pendantLamp(1.1);
   lounge.position.set(maxX - 4.8, WALL_H + 0.2, lz);
-  group.add(lounge);
+  g.add(lounge);
   [["#e76f51", maxX - 3.6, lz - 2.1]].forEach(([c, x, z]) => {
     const bean = mesh(new THREE.SphereGeometry(0.55, 18, 12), toon(c as string), x as number, 0.32, z as number);
     bean.scale.y = 0.6;
-    group.add(bean);
-    colliders.push({ minX: (x as number) - 0.45, maxX: (x as number) + 0.45, minZ: (z as number) - 0.45, maxZ: (z as number) + 0.45, top: 0.55 });
+    g.add(bean);
+    col({ minX: (x as number) - 0.45, maxX: (x as number) + 0.45, minZ: (z as number) - 0.45, maxZ: (z as number) + 0.45, top: 0.55 });
   });
   const shelf = bookshelf();
   shelf.position.set(maxX - 3.5, 0, minZ + WALL_T / 2 + 0.25);
-  group.add(shelf);
-  colliders.push({ minX: maxX - 4.6, maxX: maxX - 2.4, minZ: minZ, maxZ: minZ + 0.6, top: 2.1 });
+  g.add(shelf);
+  col({ minX: maxX - 4.6, maxX: maxX - 2.4, minZ: minZ, maxZ: minZ + 0.6, top: 2.1 });
 
   // Máquina de snacks al final de la cocina, de frente al piso.
   const vend = vendingMachine(p.dark ? mix(p.accent, "#000000", 0.25) : p.accent);
   vend.position.set(minX + WALL_T / 2 + 0.42, 0, minZ + 9.9);
   vend.rotation.y = Math.PI / 2;
-  group.add(vend);
-  colliders.push({ minX, maxX: minX + 0.9, minZ: minZ + 9.4, maxZ: minZ + 10.4, top: 1.95 });
+  g.add(vend);
+  col({ minX, maxX: minX + 0.9, minZ: minZ + 9.4, maxZ: minZ + 10.4, top: 1.95 });
 
-  // ── Zona de juegos (suroeste): ping-pong, canasta de pelotas y diana ────
-  const gameAt = new THREE.Vector3(minX + 4.1, 0, minZ + 16.3);
-  group.add(mesh(roundedBox(6.2, 0.02, 6.2, 0.5), toon(p.dark ? mix(p.bg, "#2a9d8f", 0.35) : mix("#2a9d8f", "#ffffff", 0.6)), gameAt.x, 0.012, gameAt.z, false));
+  // ── Piso 3 · Azotea: ping-pong, canasta, diana, futbolín y arcade ──────
+  on(2);
+  const gameAt = new THREE.Vector3(cx - 8, 0, minZ + 8);
+  g.add(mesh(roundedBox(6.2, 0.02, 6.2, 0.5), toon(p.dark ? mix(p.bg, "#2a9d8f", 0.35) : mix("#2a9d8f", "#ffffff", 0.6)), gameAt.x, 0.012, gameAt.z, false));
   const pong = pingPongTable();
   pong.position.copy(gameAt);
-  group.add(pong);
-  colliders.push({ minX: gameAt.x - 1.25, maxX: gameAt.x + 1.25, minZ: gameAt.z - 0.72, maxZ: gameAt.z + 0.72, top: 0.8 });
+  g.add(pong);
+  col({ minX: gameAt.x - 1.25, maxX: gameAt.x + 1.25, minZ: gameAt.z - 0.72, maxZ: gameAt.z + 0.72, top: 0.8 });
   const basket = new THREE.Group();
   basket.add(mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.34, 14, 1, true), toon("#8d99ae"), 0, 0.17, 0));
   basket.add(mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.02, 14), toon("#8d99ae"), 0, 0.01, 0, false));
   for (let i = 0; i < 7; i++) basket.add(mesh(new THREE.SphereGeometry(0.035, 8, 6), toon(i % 3 ? "#ffffff" : "#ff9f1c"), Math.cos(i * 2.3) * 0.1, 0.33 + (i % 2) * 0.04, Math.sin(i * 2.3) * 0.1, false));
   basket.position.set(gameAt.x - 2.6, 0, gameAt.z - 2.1);
-  group.add(basket);
-  colliders.push({ minX: basket.position.x - 0.2, maxX: basket.position.x + 0.2, minZ: basket.position.z - 0.2, maxZ: basket.position.z + 0.2, top: 0.36 });
+  g.add(basket);
+  col({ minX: basket.position.x - 0.2, maxX: basket.position.x + 0.2, minZ: basket.position.z - 0.2, maxZ: basket.position.z + 0.2, top: 0.36 });
   const dartTex = dartboardCanvas();
   const dartMat = new THREE.MeshBasicMaterial({ map: dartTex });
   disposables.push(dartTex, dartMat);
@@ -1310,79 +1615,89 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     dart.add(d);
     dart.add(mesh(box(0.04, 0.05, 0.004), toon("#e63946"), 0.17, y, z, false));
   }
-  dart.position.set(minX + WALL_T / 2 + 0.01, 1.75, gameAt.z);
-  group.add(dart);
+  // En la azotea no hay muro: la diana va en un tablero de madera propio.
+  const dartX = gameAt.x - 4.2;
+  g.add(mesh(box(0.12, 2.1, 1.3), toon("#8a5a3b"), dartX, 1.05, gameAt.z));
+  col({ minX: dartX - 0.1, maxX: dartX + 0.1, minZ: gameAt.z - 0.65, maxZ: gameAt.z + 0.65, top: 2.1 });
+  dart.position.set(dartX + 0.07, 1.75, gameAt.z);
+  g.add(dart);
 
   // ── Esquina sureste: futbolín y máquina arcade ─────────────────────────
   const foosAt = new THREE.Vector3(maxX - 4, 0, minZ + 17.2);
   const foos = foosball();
   foos.position.copy(foosAt);
-  group.add(foos);
-  colliders.push({ minX: foosAt.x - 0.65, maxX: foosAt.x + 0.65, minZ: foosAt.z - 0.42, maxZ: foosAt.z + 0.42, top: 0.84 });
+  g.add(foos);
+  col({ minX: foosAt.x - 0.65, maxX: foosAt.x + 0.65, minZ: foosAt.z - 0.42, maxZ: foosAt.z + 0.42, top: 0.84 });
   const arcadeTex = arcadeCanvas(p.skins);
   disposables.push(arcadeTex);
   const arcade = arcadeCabinet(arcadeTex, p.accent);
   arcade.position.set(maxX - WALL_T / 2 - 0.42, 0, minZ + 15.2);
   arcade.rotation.y = -Math.PI / 2;
-  group.add(arcade);
+  g.add(arcade);
   arcade.traverse((o) => {
     const m = (o as THREE.Mesh).material;
     if (m instanceof THREE.MeshBasicMaterial) disposables.push(m);
   });
-  colliders.push({ minX: maxX - 0.9, maxX, minZ: minZ + 14.8, maxZ: minZ + 15.6, top: 1.95 });
+  col({ minX: maxX - 0.9, maxX, minZ: minZ + 14.8, maxZ: minZ + 15.6, top: 1.95 });
 
   // ── Detalles: cuadros en la pared del fondo y perchero en la entrada ────
+  on(1);
   {
     const x = cx + 10.25;
     const tex = posterCanvas(["Buenas", "ideas,", "mejor", "equipo"], "#e07a5f", "#fff7ef", p.font);
     const mat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(tex, mat);
-    group.add(mesh(box(1.3, 1.7, 0.05), trimMat, x, 2.15, minZ + WALL_T / 2 + 0.025, false));
+    g.add(mesh(box(1.3, 1.7, 0.05), trimMat, x, 2.15, minZ + WALL_T / 2 + 0.025, false));
     const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.57), mat);
     poster.position.set(x, 2.15, minZ + WALL_T / 2 + 0.055);
-    group.add(poster);
+    g.add(poster);
   }
+  on(0);
   for (const [x, seed] of [[cx - 10.25, 3]]) {
     const tex = artCanvas(p.skins, seed);
     const mat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(tex, mat);
-    group.add(mesh(box(1.3, 1.6, 0.05), toon("#5a3a22"), x, 2.2, minZ + WALL_T / 2 + 0.025, false));
+    g.add(mesh(box(1.3, 1.6, 0.05), toon("#5a3a22"), x, 2.2, minZ + WALL_T / 2 + 0.025, false));
     const art = new THREE.Mesh(new THREE.PlaneGeometry(1.14, 1.44), mat);
     art.position.set(x, 2.2, minZ + WALL_T / 2 + 0.055);
-    group.add(art);
+    g.add(art);
   }
   const rackAt = { x: cx - DOOR_HALF - 1.9, z: maxZ - 0.8 };
   const rack = coatRack(p.accent);
   rack.position.set(rackAt.x, 0, rackAt.z);
-  group.add(rack);
-  colliders.push({ minX: rackAt.x - 0.25, maxX: rackAt.x + 0.25, minZ: rackAt.z - 0.25, maxZ: rackAt.z + 0.25, top: 1.8 });
+  g.add(rack);
+  col({ minX: rackAt.x - 0.25, maxX: rackAt.x + 0.25, minZ: rackAt.z - 0.25, maxZ: rackAt.z + 0.25, top: 1.8 });
 
   // ── Plantas y lámparas ─────────────────────────────────────────────────
-  // Cabina telefónica de vidrio en la esquina noreste.
+  // Cabina telefónica de vidrio en la esquina noreste del café.
+  on(1);
   const boothGlass = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
   disposables.push(boothGlass);
   const booth = phoneBooth(boothGlass);
   const boothAt = { x: maxX - 1.0, z: minZ + 1.0 };
   booth.position.set(boothAt.x, 0, boothAt.z);
-  group.add(booth);
-  colliders.push({ minX: boothAt.x - 0.62, maxX: boothAt.x + 0.62, minZ: boothAt.z - 0.62, maxZ: boothAt.z + 0.62, top: 2.4 });
+  g.add(booth);
+  col({ minX: boothAt.x - 0.62, maxX: boothAt.x + 0.62, minZ: boothAt.z - 0.62, maxZ: boothAt.z + 0.62, top: 2.4 });
 
   // Matas colgantes cerca de las ventanas y en la cocina (por encima de la cabeza: sin colisión).
-  for (const [x, z, drop] of [
-    [cx - 7.5, minZ + 0.9, 0.9],
-    [cx + 7.5, minZ + 0.9, 0.9],
-    [cx - 13, minZ + 0.9, 0.8],
-    [minX + 1.0, minZ + 13, 0.8],
-    [maxX - 1.0, minZ + 3.5, 0.8],
-    [tableAt.x + 1.6, tableAt.z + 3.2, 0.9],
+  for (const [x, z, drop, n] of [
+    [cx - 7.5, minZ + 0.9, 0.9, 0],
+    [cx + 7.5, minZ + 0.9, 0.9, 0],
+    [maxX - 1.0, minZ + 3.5, 0.8, 0],
+    [cx - 13, minZ + 0.9, 0.8, 1],
+    [cx + 7.5, minZ + 0.9, 0.9, 1],
+    [tableAt.x + 1.6, tableAt.z + 3.2, 0.9, 1],
   ] as const) {
+    on(n);
     const hp = hangingPlant(drop);
     hp.position.set(x, WALL_H + 0.1, z);
-    group.add(hp);
+    g.add(hp);
   }
+  on(0);
 
   const plants: [number, number, number][] = [
-    [minX + 0.8, maxZ - 0.9, 1.1],
+    // La esquina suroeste queda libre: ahí arranca la escalera.
+    [minX + 2.6, maxZ - 0.9, 1.1],
     [maxX - 0.8, maxZ - 0.9, 1.1],
     [cx - 10.2, minZ + 0.8, 0.9],
     [cx + 6.3, minZ + 0.8, 0.9],
@@ -1393,11 +1708,12 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   for (const [x, z, s] of plants) {
     const pl = plant(s);
     pl.position.set(x, 0, z);
-    group.add(pl);
+    g.add(pl);
     const r = 0.3 * s;
-    colliders.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, top: 0.5 * s });
+    col({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, top: 0.5 * s });
   }
 
+  on(1);
   const lampSpots: [number, number, string][] = [
     [maxX - 7.4, lz + 2.4, "#ffd6a5"],
     [kitchen.maxX + 0.6, minZ + 8, "#ffe8b3"],
@@ -1405,23 +1721,31 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   for (const [x, z, shade] of lampSpots) {
     const l = floorLamp(shade);
     l.group.position.set(x, 0, z);
-    group.add(l.group);
-    colliders.push({ minX: x - 0.25, maxX: x + 0.25, minZ: z - 0.25, maxZ: z + 0.25, top: 1.9 });
-    const light = new THREE.PointLight("#ffc98a", 1, 9, 1.6);
-    light.position.set(x, 1.75, z);
-    group.add(light);
-    lamps.push(light);
+    g.add(l.group);
+    col({ minX: x - 0.25, maxX: x + 0.25, minZ: z - 0.25, maxZ: z + 0.25, top: 1.9 });
+    const lampLight = new THREE.PointLight("#ffc98a", 1, 9, 1.6);
+    lampLight.position.set(x, 1.75, z);
+    light(lampLight);
   }
   const kitchenLight = new THREE.PointLight("#ffd9a0", 1, 8, 1.6);
   kitchenLight.position.set(tableAt.x, 2.0, tableAt.z);
-  group.add(kitchenLight);
-  lamps.push(kitchenLight);
+  light(kitchenLight);
+
+  // ── Losas, escaleras y azotea ──────────────────────────────────────────
+  const stairs = buildFloorsAndStairs({ minX, maxX, minZ, maxZ, cx, p, brick, disposables, floors, col: (n, c) => { on(n); col(c); }, light: (n, l) => { on(n); light(l); } });
+  on(0);
 
   let lastSky = "";
   return {
     group,
     colliders,
     bounds: { minX, maxX, minZ, maxZ },
+    floors,
+    lampFloor,
+    stairs,
+    showFloors(upTo) {
+      floors.forEach((f, i) => (f.visible = i <= upTo));
+    },
     spawn: { x: cx, z: maxZ - 2.2, facing: Math.PI },
     lamps,
     key,

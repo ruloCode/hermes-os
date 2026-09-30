@@ -23,7 +23,7 @@ import { Laptop } from "./laptop";
 import { OfficeCharacter } from "./worker";
 import { Person } from "./person";
 import { PlayerController, isTyping, type Collider } from "./player";
-import { buildRoom, type BoardStat, type FeedLine, type Room } from "./room";
+import { buildRoom, type BoardStat, type FeedLine, type Room, FLOOR_Y, floorAt } from "./room";
 import { setToonFont, toon } from "./toon";
 import type { OwnerLook } from "./look";
 import type { OfficePalette } from "./palette";
@@ -54,6 +54,8 @@ export interface OfficeWorldHooks {
   onHover?: (hit: OfficeHit | null) => void;
   onClick?: (hit: OfficeHit | null) => void;
   onMode?: (mode: OfficeMode) => void;
+  /** El piso que se ve cambió (explorar: donde está el dueño; aérea: el elegido). */
+  onFloor?: (floor: number) => void;
 }
 
 export interface OfficeWorldOptions {
@@ -132,6 +134,11 @@ export class OfficeWorld {
   private frames = 0;
   private fpsAt = performance.now();
   private clockAt = 0;
+  /** Piso que se ve en vista aérea (en explorar manda la altura del dueño). */
+  private aerialFloor = 0;
+  private shownFloor = -1;
+  /** Intensidad de las lámparas según la hora; se reparte solo a las del piso que se ve. */
+  private lampBase = 1;
   private padInput = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, run: false, zoom: 0 };
   mode: OfficeMode = "explore";
   fps = 0;
@@ -230,9 +237,11 @@ export class OfficeWorld {
     this.focusGoal = null;
     if (mode === "aerial") {
       this.player.setEnabled(false);
-      this.controls.target.set(this.player.pos.x, 0.5, this.player.pos.z);
+      this.controls.target.set(this.player.pos.x, this.player.pos.y + 0.5, this.player.pos.z);
       this.controls.enabled = true;
-      this.frameAll();
+      // La vista aérea abre en el piso donde estás.
+      this.aerialFloor = floorAt(this.player.pos.y);
+      this.frameFloor();
     } else {
       this.controls.enabled = false;
       this.player.setEnabled(true);
@@ -294,6 +303,8 @@ export class OfficeWorld {
       camYaw: +this.player.camYaw.toFixed(3),
       camera: { x: +this.camera.position.x.toFixed(2), z: +this.camera.position.z.toFixed(2) },
       near: this.near,
+      floor: { mine: floorAt(p.y), shown: this.shownFloor },
+      stairs: this.room?.stairs ?? [],
       fps: this.fps,
     };
   }
@@ -369,6 +380,7 @@ export class OfficeWorld {
         this.room.dispose();
       }
       this.room = buildRoom(layout, this.palette, this.ownerName);
+      this.shownFloor = -1;
       this.room.group.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
@@ -434,7 +446,7 @@ export class OfficeWorld {
   private fitDistance(center: THREE.Vector3, f: { minX: number; maxX: number; minZ: number; maxZ: number }): number {
     const cam = this.camera.clone();
     const corners: THREE.Vector3[] = [];
-    for (const x of [f.minX, f.maxX]) for (const z of [f.minZ, f.maxZ]) for (const y of [0, 2.4]) corners.push(new THREE.Vector3(x, y, z));
+    for (const x of [f.minX, f.maxX]) for (const z of [f.minZ, f.maxZ]) for (const y of [center.y, center.y + 2.4]) corners.push(new THREE.Vector3(x, y, z));
     const p = new THREE.Vector3();
     let dist = 8;
     for (let i = 0; i < 40 && dist < this.controls.maxDistance; i++) {
@@ -546,7 +558,8 @@ export class OfficeWorld {
 
   private updateNear() {
     let best: { hit: OfficeHit; d: number; at: THREE.Vector3 } | null = null;
-    if (this.mode === "explore") {
+    // Los escritorios están en el piso 1: desde arriba no se alcanzan.
+    if (this.mode === "explore" && floorAt(this.player.pos.y) === 0) {
       const p = this.player.pos;
       for (const view of this.desks.values()) {
         const seat = deskToWorld(view.desk, { x: 0, z: SEAT_ANCHOR.z });
@@ -581,6 +594,8 @@ export class OfficeWorld {
   };
 
   private hitAt(clientX: number, clientY: number): OfficeHit | null {
+    // Viendo el piso 2 o 3, la losa tapa a los agentes: nada del piso 1 se clickea a través de ella.
+    if (this.shownFloor > 0) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
@@ -677,6 +692,55 @@ export class OfficeWorld {
     this.frame(dt, performance.now());
   }
 
+  /** Solo el piso que se ve tiene sus lámparas prendidas (las demás quedan en 0, sin quitarlas de la escena). */
+  private applyFloorLamps() {
+    if (!this.room) return;
+    this.room.lamps.forEach((l, i) => (l.intensity = this.room!.lampFloor[i] === this.shownFloor ? this.lampBase : 0));
+  }
+
+  /** Corte de casa de muñecas: se ven el piso actual y los de abajo. */
+  private updateFloors() {
+    if (!this.room) return;
+    const mine = floorAt(this.player.pos.y);
+    const shown = this.mode === "explore" ? mine : this.aerialFloor;
+    // En aérea, si el dueño está en un piso oculto, tampoco se ve.
+    this.owner.root.visible = mine <= shown;
+    if (shown === this.shownFloor) return;
+    this.shownFloor = shown;
+    this.room.showFloors(shown);
+    this.applyFloorLamps();
+    this.hooks.onFloor?.(shown);
+  }
+
+  /** Vista aérea de un piso: el 1 encuadra los pods; el 2 y el 3, la planta entera a su altura. */
+  setFloorView(floor: number) {
+    if (this.mode !== "aerial") this.setMode("aerial");
+    this.aerialFloor = Math.max(0, Math.min(FLOOR_Y.length - 1, Math.round(floor)));
+    this.frameFloor();
+  }
+
+  private frameFloor() {
+    const f = this.aerialFloor;
+    if (f === 0 || !this.room) {
+      this.frameAll();
+      return;
+    }
+    const b = this.room.bounds;
+    const y = FLOOR_Y[f];
+    const center = new THREE.Vector3((b.minX + b.maxX) / 2, y, (b.minZ + b.maxZ) / 2);
+    const dist = this.fitDistance(center, b);
+    this.focusGoal = { target: center, pos: center.clone().add(FRAME_DIR.clone().multiplyScalar(dist)) };
+  }
+
+  /** QA y "ir a la escalera": el dueño al pie de la escalera `i`, mirando hacia arriba. */
+  goToStair(i: number): boolean {
+    const st = this.room?.stairs[i];
+    if (!st) return false;
+    if (this.mode !== "explore") this.setMode("explore");
+    this.player.spawn(st.x, st.z, st.facing, st.y);
+    return true;
+  }
+
   /** Luz según la hora real: de día manda el sol, de noche las lámparas. */
   private applyDaylight() {
     if (!this.room) return;
@@ -685,7 +749,8 @@ export class OfficeWorld {
     this.sun.intensity = (dark ? 0.55 : 0.7) + d.day * (dark ? 1.05 : 1.4);
     this.sun.color.set(d.day >= 1 ? "#fff1d6" : d.day <= 0 ? "#b8c6ff" : "#ffc58a");
     this.hemi.intensity = (dark ? 0.8 : 1.05) + d.day * 0.4;
-    for (const l of this.room.lamps) l.intensity = 0.6 + (1 - d.day) * 2.6;
+    this.lampBase = 0.6 + (1 - d.day) * 2.6;
+    this.applyFloorLamps();
   }
 
   private frame(dt: number, now: number) {
@@ -725,6 +790,7 @@ export class OfficeWorld {
     }
     // El dueño sigue a su controlador (también visible desde la vista aérea).
     this.owner.root.position.copy(this.player.pos);
+    this.updateFloors();
     this.owner.root.rotation.y = this.player.facing;
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
 
@@ -781,7 +847,8 @@ export class OfficeWorld {
         const at = this.tmp.set(cx, 0.02, pod.z + 2.5);
         const far = this.mode === "explore" && at.distanceTo(this.camera.position) > 14;
         const a = this.project(at);
-        return { project: pod.project, ...a, visible: a.visible && !far };
+        // Los pods están en el piso 1: viendo el 2 o el 3, la losa los tapa y su etiqueta también se va.
+        return { project: pod.project, ...a, visible: a.visible && !far && this.shownFloor <= 0 };
       });
       this.hooks.onPods(anchors);
     }

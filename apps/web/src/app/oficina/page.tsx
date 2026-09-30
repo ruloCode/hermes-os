@@ -54,6 +54,7 @@ import { HireDialog, type HireDialogHandle } from "@/components/oficina/HireDial
 import {
   ControllerHelp,
   ControlsHint,
+  FloorPicker,
   LookPicker,
   StatusCard,
   TeamRoster,
@@ -65,6 +66,7 @@ import {
 import { demoOfficeState } from "@/lib/oficina/sim";
 import { DEFAULT_LOOK, loadLook, saveLook, type OwnerLook } from "@/lib/oficina/look";
 import { daylightAt, type FeedLine } from "@/lib/oficina/room";
+import { isTyping } from "@/lib/oficina/player";
 import { replyVoiceEnabled, setReplyVoice, speak, stopSpeaking } from "@/lib/oficina/speech";
 import type { OfficeHit, OfficeMode } from "@/lib/oficina/office-world";
 
@@ -77,6 +79,8 @@ interface Live {
 declare global {
   interface Window {
     __hermesOficinaSim?: (state: OfficeState | "demo" | null) => void;
+    __hermesOficinaStair?: (i: number) => boolean;
+    __hermesOficinaFloor?: (floor: number) => void;
     __hermesOficinaDebug?: () => unknown;
     __hermesOficinaScreenOf?: (hit: OfficeHit) => { x: number; y: number } | null;
     __hermesOficinaFocus?: (hit: OfficeHit) => void;
@@ -190,6 +194,8 @@ export default function OficinaPage() {
   // de cada agente al volver a hablarle, por sesión: una conversación que sigue
   // conserva el modo que le pusiste.
   const [officeMode, setOfficeModeState] = useState<AgentMode>(DEFAULT_OFFICE_MODE);
+  /** Piso que se ve (0 equipos · 1 café · 2 azotea). */
+  const [floor, setFloor] = useState(0);
   const [modeBySession, setModeBySession] = useState<Record<string, AgentMode>>({});
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState(false);
@@ -705,6 +711,11 @@ export default function OficinaPage() {
         cycleModeRef.current();
         return;
       }
+      // 1, 2, 3: ver ese piso desde arriba (fuera de una conversación y de un campo de texto).
+      if (!conversationOpenRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
+        sceneRef.current?.world()?.setFloorView(Number(e.code.slice(5)) - 1);
+        return;
+      }
       if (e.key !== "Escape") return;
       closeConversation();
       setLookOpen(false);
@@ -746,6 +757,8 @@ export default function OficinaPage() {
     window.__hermesOficinaFocus = (hit) => sceneRef.current?.world()?.focus(hit);
     window.__hermesOficinaMode = (m) => sceneRef.current?.world()?.setMode(m);
     window.__hermesOficinaWalkTo = (hit) => sceneRef.current?.world()?.walkTo(hit);
+    window.__hermesOficinaStair = (i) => sceneRef.current?.world()?.goToStair(i) ?? false;
+    window.__hermesOficinaFloor = (f) => sceneRef.current?.world()?.setFloorView(f);
     window.__hermesOficinaTeam = { say: (text: string) => teamRef.current.say(text), debug: () => teamRef.current.debug() };
     window.__hermesOficinaDictate = (text) => {
       voice.cancel();
@@ -758,6 +771,8 @@ export default function OficinaPage() {
       delete window.__hermesOficinaFocus;
       delete window.__hermesOficinaMode;
       delete window.__hermesOficinaWalkTo;
+      delete window.__hermesOficinaStair;
+      delete window.__hermesOficinaFloor;
       delete window.__hermesOficinaDictate;
       delete window.__hermesOficinaTeam;
     };
@@ -789,12 +804,16 @@ export default function OficinaPage() {
         onClick={onClick}
         onNear={setNear}
         onMode={setModeState}
+        onFloor={setFloor}
         voices={team.voiceNames}
         speakingProbe={team.speakingWorker}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
-        <StatusCard title={title} machine={machine} feed={feed} simulated={!!sim} total={workers.length} tally={tally} daylight={daylight} />
+        <div className="flex flex-col items-start gap-2">
+          <StatusCard title={title} machine={machine} feed={feed} simulated={!!sim} total={workers.length} tally={tally} daylight={daylight} />
+          <FloorPicker floor={floor} mode={mode} onPick={(f) => sceneRef.current?.world()?.setFloorView(f)} />
+        </div>
         <div className="flex flex-col items-end gap-2">
           <Toolbar
             mode={mode}
