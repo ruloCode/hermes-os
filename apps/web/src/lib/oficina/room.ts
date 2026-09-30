@@ -1,7 +1,8 @@
-// La sala de la Oficina de agentes: el lugar alrededor de los pods. Piso de
-// madera, paredes con ventanas, frente abierto (muro bajo de vidrio con la
-// entrada, para que la cámara siempre vea adentro), cocina, lounge con TV,
-// estantería, plantas y lámparas con luz cálida real.
+// La sala de la Oficina de agentes: el lugar alrededor de los pods, con look de
+// coworking tipo loft (ladrillo a la vista, concreto pulido, ventanas
+// industriales, lámparas colgantes, neón). Frente abierto (muro bajo de vidrio
+// con la entrada, para que la cámara siempre vea adentro), cocina con isla y
+// barra de café, lounge con TV, cabina telefónica, plantas y luz cálida real.
 //
 // Todo lo que muestra datos es REAL: la TV pinta el feed de actividad del
 // agente, el reloj marca la hora local, el cielo de las ventanas sigue esa hora
@@ -13,7 +14,7 @@
 
 import * as THREE from "three";
 import type { OfficeLayout } from "@hermes/shared";
-import { mesh, roundedBox, toon } from "./toon";
+import { mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
 
@@ -80,69 +81,300 @@ export function daylightAt(now: Date): Daylight {
   return { day, skyTop: top, skyBottom: bottom, label: day >= 1 ? "día" : day <= 0 ? "noche" : h < 12 ? "amanecer" : "atardecer" };
 }
 
-// ── Texturas pintadas en canvas ─────────────────────────────────────────
+// ── Estilo loft (coworking): ladrillo, concreto, neón, tiza ─────────────
 
-function planksTexture(base: string, dark: boolean, w: number, d: number): THREE.CanvasTexture {
+/** Ladrillo a la vista: un paño de 1,6 × 1,2 m que se repite según el tamaño de cada tramo de muro. */
+const BRICK_TILE = { w: 1.6, h: 1.2 };
+
+function brickCanvas(dark: boolean): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = c.height = 512;
   const g = c.getContext("2d")!;
-  const alt = mix(base, dark ? "#000000" : "#8a5a3b", 0.12);
-  const seam = mix(base, "#000000", dark ? 0.35 : 0.22);
+  const mortar = dark ? "#3a2c26" : "#d9c7b4";
+  const bricks = dark ? ["#6e3b2c", "#7a4232", "#5e3326", "#83503c", "#6a3a2e"] : ["#b5563a", "#c0644a", "#a44c33", "#c9745a", "#b0583f"];
+  g.fillStyle = mortar;
+  g.fillRect(0, 0, 512, 512);
+  const rows = 8;
+  const rh = 512 / rows;
+  const bw = 128;
+  for (let r = 0; r < rows; r++) {
+    const off = (r % 2) * (bw / 2);
+    for (let i = -1; i < 5; i++) {
+      const x = i * bw + off;
+      g.fillStyle = bricks[(r * 3 + i * 7 + 20) % bricks.length];
+      g.fillRect(x + 4, r * rh + 4, bw - 8, rh - 8);
+      // Un poco de textura en cada ladrillo.
+      g.fillStyle = "rgba(0,0,0,0.07)";
+      g.fillRect(x + 4, r * rh + rh - 14, bw - 8, 10);
+      g.fillStyle = "rgba(255,255,255,0.05)";
+      g.fillRect(x + 8, r * rh + 8, bw - 30, 6);
+    }
+  }
+  return c;
+}
+
+/** Material de ladrillo para un tramo de `u` × `v` metros (el paño no se estira). */
+function brickMaterial(canvas: HTMLCanvasElement, u: number, v: number, disposables: { dispose(): void }[]): THREE.MeshToonMaterial {
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(Math.max(0.2, u / BRICK_TILE.w), Math.max(0.2, v / BRICK_TILE.h));
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  const m = toonUnique("#ffffff");
+  m.map = t;
+  disposables.push(t, m);
+  return m;
+}
+
+/** Concreto pulido: gris cálido con manchas suaves y juntas de dilatación. */
+function concreteTexture(dark: boolean, w: number, d: number): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 512;
+  const g = c.getContext("2d")!;
+  const base = dark ? "#4a4541" : "#aea397";
   g.fillStyle = base;
   g.fillRect(0, 0, 512, 512);
-  for (let row = 0; row < 8; row++) {
-    const offset = (row % 2) * 128;
-    for (let col = -1; col < 3; col++) {
-      const x = col * 256 + offset;
-      g.fillStyle = (row + col) % 3 === 0 ? alt : base;
-      g.fillRect(x + 2, row * 64 + 2, 252, 60);
-      // Veta suave.
-      g.strokeStyle = mix(base, "#000000", 0.08);
-      g.lineWidth = 1;
-      for (let v = 0; v < 3; v++) {
-        g.beginPath();
-        const y = row * 64 + 14 + v * 16 + ((col * 7 + row * 3) % 5);
-        g.moveTo(x + 10, y);
-        g.bezierCurveTo(x + 90, y - 4, x + 170, y + 4, x + 246, y);
-        g.stroke();
-      }
-    }
-    g.fillStyle = seam;
-    g.fillRect(0, row * 64, 512, 3);
+  for (let i = 0; i < 90; i++) {
+    const x = (i * 97) % 512;
+    const y = (i * 181) % 512;
+    const r = 18 + ((i * 13) % 50);
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    const light = i % 2 === 0;
+    grad.addColorStop(0, light ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
   }
+  g.strokeStyle = dark ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.12)";
+  g.lineWidth = 2;
+  g.strokeRect(1, 1, 510, 510);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(w / 5, d / 5);
+  t.repeat.set(w / 4, d / 4);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
 }
 
-function tilesTexture(a: string, b: string, w: number, d: number): THREE.CanvasTexture {
+/** Letrero de neón: el texto con halo, sobre fondo transparente. */
+function neonCanvas(text: string, color: string, font: string): THREE.CanvasTexture {
   const c = document.createElement("canvas");
-  c.width = c.height = 256;
+  c.width = 1024;
+  c.height = 320;
   const g = c.getContext("2d")!;
-  for (let i = 0; i < 4; i++)
-    for (let j = 0; j < 4; j++) {
-      g.fillStyle = (i + j) % 2 ? a : b;
-      g.fillRect(i * 64, j * 64, 64, 64);
-    }
-  g.strokeStyle = mix(a, "#000000", 0.25);
-  g.lineWidth = 2;
-  for (let i = 0; i <= 4; i++) {
-    g.beginPath();
-    g.moveTo(i * 64, 0);
-    g.lineTo(i * 64, 256);
-    g.moveTo(0, i * 64);
-    g.lineTo(256, i * 64);
-    g.stroke();
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.font = `italic 700 190px ${font}`;
+  for (const [blur, alpha] of [
+    [60, 0.55],
+    [28, 0.8],
+    [10, 1],
+  ] as const) {
+    g.shadowColor = color;
+    g.shadowBlur = blur;
+    g.globalAlpha = alpha;
+    g.strokeStyle = color;
+    g.lineWidth = 14;
+    g.strokeText(text, 512, 170);
   }
+  g.globalAlpha = 1;
+  g.shadowBlur = 0;
+  g.lineWidth = 5;
+  g.strokeStyle = "#fff4f7";
+  g.strokeText(text, 512, 170);
   const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(w / 2.4, d / 2.4);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
   return t;
+}
+
+/** Pizarra de tiza del café. Sin precios: en la oficina un número siempre es un dato real. */
+function chalkboardCanvas(font: string): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 512;
+  c.height = 700;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#23282a";
+  g.fillRect(0, 0, 512, 700);
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = "rgba(255,255,255,0.025)";
+    g.fillRect((i * 71) % 512, (i * 113) % 700, 90, 30);
+  }
+  g.fillStyle = "#f4f1ea";
+  g.textAlign = "center";
+  g.font = `700 64px ${font}`;
+  g.fillText("Café & más", 256, 90);
+  g.strokeStyle = "#f4f1ea";
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(120, 118);
+  g.lineTo(392, 114);
+  g.stroke();
+  g.textAlign = "left";
+  g.font = `500 40px ${font}`;
+  ["Espresso", "Americano", "Latte", "Cold brew", "Kombucha", "Agua de frutas"].forEach((item, i) => g.fillText(item, 70, 200 + i * 64));
+  g.textAlign = "center";
+  g.font = `italic 500 34px ${font}`;
+  g.fillStyle = "#ffcf8a";
+  g.fillText("buenas ideas, buen café", 256, 640);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Afiche tipográfico en la pared. */
+function posterCanvas(lines: string[], bg: string, ink: string, font: string): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 480;
+  c.height = 640;
+  const g = c.getContext("2d")!;
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 480, 640);
+  g.fillStyle = ink;
+  g.font = `800 92px ${font}`;
+  lines.forEach((l, i) => g.fillText(l, 40, 150 + i * 100));
+  g.font = `800 50px ${font}`;
+  g.fillText("♡", 40, 590);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Lámpara industrial colgante: campana negra, bombilla cálida y el cable hasta arriba. */
+function pendantLamp(drop = 0.9): THREE.Group {
+  const g = new THREE.Group();
+  const black = toon("#1f2024");
+  g.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, drop, 5), black, 0, -drop / 2, 0, false));
+  g.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 10), black, 0, -drop - 0.02, 0, false));
+  g.add(mesh(new THREE.CylinderGeometry(0.1, 0.34, 0.3, 20, 1, true), black, 0, -drop - 0.2, 0, false));
+  g.add(mesh(new THREE.SphereGeometry(0.09, 12, 10), toon("#fff3d0", { emissive: "#ffcf7a" }), 0, -drop - 0.3, 0, false));
+  return g;
+}
+
+/** Maceta colgante con hojas que caen en cascada (pothos). */
+function hangingPlant(drop = 0.7): THREE.Group {
+  const g = new THREE.Group();
+  const rope = toon("#c8b18e");
+  for (const a of [0, 2.1, 4.2]) {
+    const r = mesh(new THREE.CylinderGeometry(0.006, 0.006, drop, 4), rope, Math.cos(a) * 0.08, -drop / 2, Math.sin(a) * 0.08, false);
+    g.add(r);
+  }
+  const potY = -drop - 0.1;
+  g.add(mesh(new THREE.CylinderGeometry(0.2, 0.14, 0.24, 14), toon("#e8dfd2"), 0, potY, 0, false));
+  const leaf = [toon("#4f9d55"), toon("#5fb760"), toon("#74c776")];
+  // Copa redonda sobre la maceta y cuatro ramas que cuelgan por los lados.
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    g.add(mesh(new THREE.SphereGeometry(0.13, 10, 8), leaf[i % 3], Math.cos(a) * 0.12, potY + 0.16, Math.sin(a) * 0.12, false));
+  }
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + 0.4;
+    const n = 3 + (k % 2);
+    for (let i = 0; i < n; i++) {
+      const out = 0.2 + i * 0.03;
+      g.add(mesh(new THREE.SphereGeometry(0.075 - i * 0.008, 8, 6), leaf[(k + i) % 3], Math.cos(a) * out, potY - 0.02 - i * 0.12, Math.sin(a) * out, false));
+    }
+  }
+  return g;
+}
+
+/** Banqueta alta de bar: asiento de madera, patas negras y reposapiés. */
+function barStool(): THREE.Group {
+  const g = new THREE.Group();
+  const black = toon("#1f2024");
+  g.add(mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.06, 16), toon("#a86b44"), 0, 0.78, 0));
+  for (const [x, z] of [
+    [0.13, 0.13],
+    [-0.13, 0.13],
+    [0.13, -0.13],
+    [-0.13, -0.13],
+  ]) {
+    const leg = mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.78, 6), black, x * 0.9, 0.39, z * 0.9, false);
+    leg.rotation.z = -x * 0.25;
+    leg.rotation.x = z * 0.25;
+    g.add(leg);
+  }
+  g.add(mesh(new THREE.TorusGeometry(0.16, 0.012, 5, 16), black, 0, 0.3, 0, false));
+  g.children[g.children.length - 1].rotation.x = Math.PI / 2;
+  return g;
+}
+
+/** Dispensador de agua con fruta: frasco de vidrio, agua de color y rodajas. */
+function fruitJar(water: string, fruit: string): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.04, 14), toon("#8a5a3b"), 0, 0.02, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.34, 16), toon(water, { opacity: 0.55 }), 0, 0.22, 0, false));
+  g.add(mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.38, 16, 1, true), toon("#e8f6ff", { opacity: 0.25 }), 0, 0.23, 0, false));
+  g.add(mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.04, 12), toon("#c9ced6"), 0, 0.44, 0, false));
+  for (let i = 0; i < 4; i++) {
+    const slice = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.012, 10), toon(fruit), Math.cos(i * 1.7) * 0.05, 0.12 + i * 0.07, Math.sin(i * 1.7) * 0.05, false);
+    slice.rotation.x = 0.6 + i * 0.4;
+    g.add(slice);
+  }
+  g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.06, 6), toon("#c9ced6"), 0, 0.08, 0.13, false));
+  return g;
+}
+
+/** Torre de grifos (kombucha, cerveza): barra cromada con manijas de colores. */
+function tapTower(handles: string[]): THREE.Group {
+  const g = new THREE.Group();
+  const chrome = toon("#c9ced6");
+  const n = handles.length;
+  g.add(mesh(box(0.08 + n * 0.16, 0.05, 0.16), chrome, 0, 0.025, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 8), chrome, 0, 0.26, 0));
+  g.add(mesh(box(0.08 + n * 0.16, 0.08, 0.1), chrome, 0, 0.5, 0));
+  handles.forEach((c, i) => {
+    const x = (i - (n - 1) / 2) * 0.16;
+    g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 6), chrome, x, 0.44, 0.07, false));
+    g.add(mesh(roundedBox(0.045, 0.2, 0.045, 0.015), toon(c), x, 0.56, 0.02, false));
+  });
+  return g;
+}
+
+/** Cabina telefónica de vidrio con marco negro, banquito, repisa y su luz (frente hacia +z). */
+function phoneBooth(glass: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const black = toon("#1f2024");
+  const W = 1.15;
+  const H = 2.25;
+  for (const [x, z] of [
+    [-W / 2, -W / 2],
+    [W / 2, -W / 2],
+    [-W / 2, W / 2],
+    [W / 2, W / 2],
+  ])
+    g.add(mesh(box(0.06, H, 0.06), black, x, H / 2, z));
+  g.add(mesh(box(W + 0.08, 0.14, W + 0.08), black, 0, H + 0.07, 0));
+  g.add(mesh(box(W + 0.08, 0.06, W + 0.08), toon("#2b2d42"), 0, 0.03, 0));
+  // Vidrio en los cuatro lados; la puerta (frente) con su jalador.
+  for (const [x, z, ry] of [
+    [0, W / 2, 0],
+    [0, -W / 2, 0],
+    [W / 2, 0, Math.PI / 2],
+    [-W / 2, 0, Math.PI / 2],
+  ] as const) {
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.06, H - 0.1), glass);
+    pane.position.set(x, H / 2 + 0.02, z);
+    pane.rotation.y = ry;
+    g.add(pane);
+  }
+  g.add(mesh(box(0.03, 0.5, 0.03), toon("#c9ced6"), W / 2 - 0.15, 1.1, W / 2 + 0.03, false));
+  g.add(mesh(box(0.7, 0.04, 0.32), toon("#a86b44"), 0, 1.05, -W / 2 + 0.2));
+  g.add(mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.05, 14), toon("#a86b44"), 0, 0.62, 0.05));
+  g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6, 8), black, 0, 0.3, 0.05, false));
+  g.add(mesh(box(0.5, 0.03, 0.5), toon("#fff3d0", { emissive: "#ffcf7a" }), 0, H - 0.02, 0, false));
+  return g;
+}
+
+/** Sillón individual (el del lounge). */
+function armchair(color: string): THREE.Group {
+  const g = new THREE.Group();
+  const m = toon(color);
+  const dark = toon(mix(color, "#000000", 0.2));
+  g.add(mesh(roundedBox(1.0, 0.42, 1.0, 0.16), m, 0, 0.3, 0));
+  g.add(mesh(roundedBox(0.28, 0.8, 1.0, 0.12), m, -0.42, 0.55, 0));
+  for (const s of [-1, 1]) g.add(mesh(roundedBox(0.9, 0.55, 0.22, 0.1), dark, 0.02, 0.45, s * 0.5));
+  g.add(mesh(roundedBox(0.75, 0.13, 0.72, 0.08), m, 0.05, 0.56, 0));
+  return g;
 }
 
 // ── Muebles ─────────────────────────────────────────────────────────────
@@ -498,14 +730,6 @@ function waterCooler(): THREE.Group {
   return g;
 }
 
-function stool(color: string): THREE.Group {
-  const g = new THREE.Group();
-  g.add(mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.08, 14), toon(color), 0, 0.72, 0));
-  g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.7, 8), toon("#8d99ae"), 0, 0.36, 0));
-  g.add(mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.03, 12), toon("#8d99ae"), 0, 0.02, 0));
-  return g;
-}
-
 // ── Pantallas con datos reales ──────────────────────────────────────────
 
 function screenCanvas(w: number, h: number) {
@@ -535,14 +759,13 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const D = maxZ - minZ;
   const key = [minX, maxX, minZ, maxZ].map((n) => n.toFixed(1)).join(",");
 
-  const wallColor = p.dark ? mix(p.bg, "#e8dccb", 0.2) : "#f3ede3";
-  const wallMat = toon(wallColor);
-  const trimMat = toon(p.dark ? mix(p.bg, p.accent, 0.35) : mix(p.accent, "#ffffff", 0.35));
-  const frameMat = toon(p.dark ? "#d9d2c5" : "#ffffff");
+  // Ladrillo a la vista en los muros; acero negro en marcos y rodapiés.
+  const brick = brickCanvas(p.dark);
+  const trimMat = toon("#1f2024");
+  const frameMat = toon("#1f2024");
 
-  // Piso de tablones (adentro) y baldosas en la cocina.
-  const woodBase = p.dark ? "#6b4f3a" : "#d9b48f";
-  const floorTex = planksTexture(woodBase, p.dark, W, D);
+  // Piso de concreto pulido en toda la planta (los tapetes marcan las zonas).
+  const floorTex = concreteTexture(p.dark, W, D);
   const floorMat = new THREE.MeshToonMaterial({ map: floorTex, color: "#ffffff" });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
   floor.rotation.x = -Math.PI / 2;
@@ -552,16 +775,6 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   disposables.push(floor.geometry, floorMat, floorTex);
 
   const kitchen = { minX: minX + 0.2, maxX: minX + 7.5, minZ: minZ + 0.2, maxZ: minZ + 11 };
-  const kW = kitchen.maxX - kitchen.minX;
-  const kD = kitchen.maxZ - kitchen.minZ;
-  const tileTex = tilesTexture(p.dark ? "#3c4a55" : "#e9f1f5", p.dark ? "#2e3a44" : "#cfdde6", kW, kD);
-  const tileMat = new THREE.MeshToonMaterial({ map: tileTex, color: "#ffffff" });
-  const tiles = new THREE.Mesh(new THREE.PlaneGeometry(kW, kD), tileMat);
-  tiles.rotation.x = -Math.PI / 2;
-  tiles.position.set((kitchen.minX + kitchen.maxX) / 2, 0.004, (kitchen.minZ + kitchen.maxZ) / 2);
-  tiles.receiveShadow = true;
-  group.add(tiles);
-  disposables.push(tiles.geometry, tileMat, tileTex);
 
   // ── Ventanas: el cielo afuera es un backdrop pintado con la hora real ──
   const sky = screenCanvas(256, 256);
@@ -611,10 +824,11 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     const y1 = 2.65;
     const piece = (u0: number, u1: number, v0: number, v1: number) => {
       if (u1 - u0 < 0.01 || v1 - v0 < 0.01) return;
+      const mat = brickMaterial(brick, u1 - u0, v1 - v0, disposables);
       const m =
         axis === "x"
-          ? mesh(box(u1 - u0, v1 - v0, WALL_T), wallMat, (u0 + u1) / 2, (v0 + v1) / 2, at)
-          : mesh(box(WALL_T, v1 - v0, u1 - u0), wallMat, at, (v0 + v1) / 2, (u0 + u1) / 2);
+          ? mesh(box(u1 - u0, v1 - v0, WALL_T), mat, (u0 + u1) / 2, (v0 + v1) / 2, at)
+          : mesh(box(WALL_T, v1 - v0, u1 - u0), mat, at, (v0 + v1) / 2, (u0 + u1) / 2);
       group.add(m);
     };
     let u = from;
@@ -632,7 +846,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
       win.add(mesh(box(winW, F, Dp), frameMat, 0, y1 - F / 2, 0, false));
       win.add(mesh(box(winW, F, Dp), frameMat, 0, y0 + F / 2, 0, false));
       for (const s of [-1, 1]) win.add(mesh(box(F, y1 - y0, Dp), frameMat, s * (winW / 2 - F / 2), (y0 + y1) / 2, 0, false));
-      win.add(mesh(box(F * 0.8, y1 - y0 - 2 * F, 0.06), frameMat, 0, (y0 + y1) / 2, 0, false));
+      // Ventana industrial: cuadrícula de 3 × 2 en acero negro.
+      for (const s of [-1, 1]) win.add(mesh(box(F * 0.6, y1 - y0 - 2 * F, 0.06), frameMat, (s * (winW - 2 * F)) / 6, (y0 + y1) / 2, 0, false));
+      win.add(mesh(box(winW - 2 * F, F * 0.6, 0.06), frameMat, 0, (y0 + y1) / 2, 0, false));
       win.add(mesh(box(winW + 0.2, 0.06, 0.22), frameMat, 0, y0 - 0.03, 0.16, false));
       const glass = new THREE.Mesh(new THREE.PlaneGeometry(winW - 2 * F, y1 - y0 - 2 * F), glassMat);
       glass.position.set(0, (y0 + y1) / 2, 0);
@@ -676,7 +892,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     [minX - WALL_T / 2, cx - DOOR_HALF],
     [cx + DOOR_HALF, maxX + WALL_T / 2],
   ]) {
-    group.add(mesh(box(b - a, PARTITION_H, WALL_T), wallMat, (a + b) / 2, PARTITION_H / 2, maxZ));
+    group.add(mesh(box(b - a, PARTITION_H, WALL_T), brickMaterial(brick, b - a, PARTITION_H, disposables), (a + b) / 2, PARTITION_H / 2, maxZ));
     group.add(mesh(box(b - a, 0.06, WALL_T + 0.06), frameMat, (a + b) / 2, PARTITION_H + 0.03, maxZ, false));
     const gl = new THREE.Mesh(new THREE.PlaneGeometry(b - a, 0.5), partitionGlass);
     gl.position.set((a + b) / 2, PARTITION_H + 0.3, maxZ);
@@ -809,21 +1025,30 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
 
   // ── Cocina (oeste) ─────────────────────────────────────────────────────
   const kx = minX + WALL_T / 2 + 0.55;
+  const woodDark = toon(p.dark ? "#5a3b28" : "#8a5a3b");
+  const woodTop = toon(p.dark ? "#a9784f" : "#c99a6c");
   const counter = new THREE.Group();
-  counter.add(mesh(box(1.0, 0.92, 5), toon(p.dark ? "#3d5a80" : "#8ecae6"), 0, 0.46, 0));
-  counter.add(mesh(box(1.1, 0.08, 5.1), toon(p.dark ? "#d9d2c5" : "#f7f3ea"), 0, 0.96, 0));
-  // Puertas y manijas del mueble bajo.
+  counter.add(mesh(box(1.0, 0.92, 5), woodDark, 0, 0.46, 0));
+  counter.add(mesh(box(1.1, 0.08, 5.1), woodTop, 0, 0.96, 0));
+  // Puertas de madera con tirador negro.
   for (let i = 0; i < 4; i++) {
-    counter.add(mesh(box(0.02, 0.72, 1.12), toon(p.dark ? "#4a6d94" : "#a9d6ec"), 0.51, 0.48, -1.8 + i * 1.2, false));
-    counter.add(mesh(box(0.03, 0.03, 0.22), toon("#6c757d"), 0.53, 0.76, -1.8 + i * 1.2, false));
+    counter.add(mesh(box(0.02, 0.72, 1.12), toon(p.dark ? "#6a4630" : "#9c6a47"), 0.51, 0.48, -1.8 + i * 1.2, false));
+    counter.add(mesh(box(0.03, 0.03, 0.22), trimMat, 0.53, 0.76, -1.8 + i * 1.2, false));
   }
-  // Salpicadero de baldosa y gabinetes altos contra el muro.
-  counter.add(mesh(box(0.02, 0.72, 5), toon(p.dark ? "#51606c" : "#dfe9ee"), -0.52, 1.36, 0, false));
-  counter.add(mesh(box(0.36, 0.7, 4.8), toon(p.dark ? "#3d5a80" : "#8ecae6"), -0.36, 2.2, 0));
-  for (let i = 0; i < 4; i++) {
-    counter.add(mesh(box(0.02, 0.62, 1.12), toon(p.dark ? "#4a6d94" : "#a9d6ec"), -0.17, 2.2, -1.8 + i * 1.2, false));
-    counter.add(mesh(new THREE.SphereGeometry(0.025, 8, 6), toon("#6c757d"), -0.15, 1.98, -1.8 + i * 1.2 + (i % 2 ? -0.42 : 0.42), false));
+  // Repisas abiertas de madera sobre el ladrillo, con tazas, frascos y matas.
+  for (const y of [1.78, 2.2]) {
+    counter.add(mesh(box(0.28, 0.05, 1.9), woodTop, -0.38, y, 1.3));
+    for (const z of [0.5, 2.1]) counter.add(mesh(box(0.2, 0.14, 0.03), trimMat, -0.44, y - 0.09, z, false));
   }
+  ["#ffffff", "#f4f1ea", "#ffffff", "#e8dfd2", "#ffffff"].forEach((c, i) =>
+    counter.add(mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.11, 10), toon(c), -0.36, 1.86, 0.55 + i * 0.3, false)),
+  );
+  [0.6, 1.0, 1.4].forEach((z, i) => {
+    counter.add(mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.2, 12), toon("#e8f6ff", { opacity: 0.35 }), -0.36, 2.33, z, false));
+    counter.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 12), toon(["#6f4e37", "#e9c46a", "#c8694b"][i]), -0.36, 2.28, z, false));
+  });
+  counter.add(mesh(new THREE.CylinderGeometry(0.1, 0.08, 0.14, 10), toon("#e8dfd2"), -0.36, 2.3, 1.95, false));
+  counter.add(mesh(new THREE.SphereGeometry(0.13, 10, 8), toon("#5fb760"), -0.36, 2.45, 1.95, false));
   const espresso = espressoMachine();
   const machine = espresso.group;
   machine.position.set(0, 1.0, -1.5);
@@ -881,21 +1106,70 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   cooler.position.set(kx - 0.1, 0, minZ + 8.2);
   group.add(cooler);
   colliders.push({ minX: kx - 0.35, maxX: kx + 0.15, minZ: minZ + 7.95, maxZ: minZ + 8.45, top: 1.5 });
-  const tableAt = new THREE.Vector3(kitchen.minX + 4.4, 0, minZ + 4.5);
-  const table = new THREE.Group();
-  table.add(mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.07, 26), toon("#c98b5a"), 0, 0.78, 0));
-  table.add(mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.75, 10), toon("#2b2d42"), 0, 0.39, 0));
-  table.add(mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.04, 16), toon("#2b2d42"), 0, 0.02, 0));
-  table.add(mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10), toon("#ffffff"), 0.2, 0.87, 0.1));
-  table.position.copy(tableAt);
-  group.add(table);
-  colliders.push({ minX: tableAt.x - 0.6, maxX: tableAt.x + 0.6, minZ: tableAt.z - 0.6, maxZ: tableAt.z + 0.6, top: 0.82 });
-  [0, 1, 2].forEach((i) => {
-    const a = (i / 3) * Math.PI * 2 + 0.4;
-    const s = stool(p.skins[i % p.skins.length]);
-    s.position.set(tableAt.x + Math.cos(a) * 1.05, 0, tableAt.z + Math.sin(a) * 1.05);
-    group.add(s);
+  // Isla de cocina: madera, frascos de agua con fruta, grifos de kombucha y
+  // cerveza, frascos de snacks y banquetas altas del lado del piso.
+  const tableAt = new THREE.Vector3(kitchen.minX + 4.1, 0, minZ + 3.6);
+  const island = new THREE.Group();
+  island.add(mesh(box(0.9, 0.9, 3.6), woodDark, 0, 0.45, 0));
+  island.add(mesh(box(1.1, 0.07, 3.8), woodTop, 0, 0.93, 0));
+  for (let i = 0; i < 6; i++) island.add(mesh(box(0.02, 0.8, 0.02), trimMat, 0.46, 0.45, -1.5 + i * 0.6, false));
+  [
+    ["#f6e27a", "#f4d35e"],
+    ["#b8e0a0", "#8ac926"],
+    ["#f4a3a8", "#e63946"],
+  ].forEach(([water, fruit], i) => {
+    const jar = fruitJar(water, fruit);
+    jar.position.set(-0.15, 0.965, -1.45 + i * 0.36);
+    island.add(jar);
   });
+  const taps = tapTower(["#e76f51", "#2a9d8f", "#e9c46a"]);
+  taps.position.set(-0.2, 0.965, 0.1);
+  taps.rotation.y = Math.PI / 2;
+  island.add(taps);
+  [0.75, 0.95, 1.15].forEach((z, i) => {
+    island.add(mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.22, 12), toon("#e8f6ff", { opacity: 0.35 }), -0.25, 1.08, z, false));
+    island.add(mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 12), toon(["#c98b5a", "#6f4e37", "#e9c46a"][i]), -0.25, 1.03, z, false));
+  });
+  island.add(mesh(new THREE.CylinderGeometry(0.2, 0.13, 0.09, 14), toon("#1f2024"), 0.15, 1.01, 1.4));
+  ["#e63946", "#ffb703", "#8ac926", "#ff9f1c"].forEach((c, i) =>
+    island.add(mesh(new THREE.SphereGeometry(0.07, 10, 8), toon(c), 0.1 + (i % 2) * 0.1, 1.08, 1.33 + Math.floor(i / 2) * 0.12, false)),
+  );
+  island.position.copy(tableAt);
+  group.add(island);
+  colliders.push({ minX: tableAt.x - 0.55, maxX: tableAt.x + 0.55, minZ: tableAt.z - 1.9, maxZ: tableAt.z + 1.9, top: 0.97 });
+  for (let i = 0; i < 4; i++) {
+    const st = barStool();
+    const z = tableAt.z - 1.3 + i * 0.86;
+    st.position.set(tableAt.x + 0.95, 0, z);
+    group.add(st);
+    colliders.push({ minX: tableAt.x + 0.78, maxX: tableAt.x + 1.12, minZ: z - 0.17, maxZ: z + 0.17, top: 0.8 });
+  }
+  for (const dz of [-1.1, 1.1]) {
+    const lamp = pendantLamp(1.25);
+    lamp.position.set(tableAt.x, WALL_H + 0.2, tableAt.z + dz);
+    group.add(lamp);
+  }
+
+  // Neón sobre la barra del café y pizarra de tiza en la esquina.
+  const neonTex = neonCanvas("Hermes", "#ff4f8b", p.font);
+  const neonMat = new THREE.MeshBasicMaterial({ map: neonTex, transparent: true, toneMapped: false, depthWrite: false });
+  const neon = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.81), neonMat);
+  neon.position.set(minX + WALL_T / 2 + 0.03, 2.65, minZ + 2.4);
+  neon.rotation.y = Math.PI / 2;
+  group.add(neon);
+  disposables.push(neonTex, neonMat, neon.geometry);
+  const neonGlow = new THREE.PointLight("#ff4f8b", 1, 5, 1.8);
+  neonGlow.position.set(minX + 0.8, 2.6, minZ + 2.4);
+  group.add(neonGlow);
+  lamps.push(neonGlow);
+  const chalkTex = chalkboardCanvas(p.font);
+  const chalkMat = new THREE.MeshBasicMaterial({ map: chalkTex });
+  disposables.push(chalkTex, chalkMat);
+  const chalkX = minX + 2.3;
+  group.add(mesh(box(1.42, 1.9, 0.05), toon("#5a3b28"), chalkX, 1.95, minZ + WALL_T / 2 + 0.025, false));
+  const chalk = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.78), chalkMat);
+  chalk.position.set(chalkX, 1.95, minZ + WALL_T / 2 + 0.055);
+  group.add(chalk);
 
   // ── Lounge (este): TV con el feed real, sofá, mesa de centro, pufs ─────
   const lz = minZ + 11;
@@ -955,22 +1229,35 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
 
   const rugAt = new THREE.Vector3(maxX - 4.4, 0, lz);
   group.add(mesh(roundedBox(6, 0.02, 5.6, 0.8), toon(p.dark ? mix(p.accent, p.bg, 0.55) : mix(p.accent, "#ffffff", 0.6)), rugAt.x, 0.012, rugAt.z, false));
-  const sofa = couch(p.dark ? "#3d5a80" : "#5b8def");
+  const sofa = couch(p.dark ? "#9a4431" : "#b8553b");
   sofa.position.set(maxX - 6.6, 0, lz);
   group.add(sofa);
   colliders.push({ minX: maxX - 7.2, maxX: maxX - 6.1, minZ: lz - 1.9, maxZ: lz + 1.9, top: 0.55 });
+  // Mesa de centro redonda de madera, con libros, taza y una mata.
   const ctable = new THREE.Group();
-  ctable.add(mesh(roundedBox(1.0, 0.07, 1.6, 0.1), toon("#c98b5a"), 0, 0.42, 0));
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) ctable.add(mesh(box(0.06, 0.4, 0.06), toon("#2b2d42"), sx * 0.4, 0.2, sz * 0.7));
-  ctable.add(mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10), toon("#ef476f"), 0.2, 0.52, -0.3));
-  ctable.add(mesh(box(0.3, 0.04, 0.22), toon("#457b9d"), -0.1, 0.48, 0.3));
+  ctable.add(mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.08, 28), toon("#8a5a3b"), 0, 0.42, 0));
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    ctable.add(mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.4, 8), trimMat, Math.cos(a) * 0.5, 0.2, Math.sin(a) * 0.5));
+  }
+  ctable.add(mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10), toon("#ffffff"), 0.25, 0.52, -0.25));
+  ctable.add(mesh(box(0.34, 0.05, 0.26), toon("#e76f51"), -0.15, 0.49, 0.2));
+  ctable.add(mesh(box(0.3, 0.04, 0.22), toon("#264653"), -0.15, 0.535, 0.2));
+  ctable.add(mesh(new THREE.CylinderGeometry(0.08, 0.06, 0.1, 10), toon("#e8dfd2"), 0.1, 0.51, 0.35));
+  ctable.add(mesh(new THREE.SphereGeometry(0.1, 10, 8), toon("#5fb760"), 0.1, 0.62, 0.35));
   ctable.position.set(maxX - 4.8, 0, lz);
   group.add(ctable);
   colliders.push({ minX: maxX - 5.3, maxX: maxX - 4.3, minZ: lz - 0.8, maxZ: lz + 0.8, top: 0.46 });
-  [
-    ["#06d6a0", maxX - 3.6, lz + 2.1],
-    ["#ffd166", maxX - 3.6, lz - 2.1],
-  ].forEach(([c, x, z]) => {
+  // Sillón verde de terciopelo frente al sofá, y un puf naranja.
+  const chair = armchair(p.dark ? "#2f5d50" : "#3f7d6b");
+  chair.position.set(maxX - 3.2, 0, lz + 1.7);
+  chair.rotation.y = Math.PI + 0.5;
+  group.add(chair);
+  colliders.push({ minX: maxX - 3.8, maxX: maxX - 2.6, minZ: lz + 1.1, maxZ: lz + 2.3, top: 0.6 });
+  const lounge = pendantLamp(1.1);
+  lounge.position.set(maxX - 4.8, WALL_H + 0.2, lz);
+  group.add(lounge);
+  [["#e76f51", maxX - 3.6, lz - 2.1]].forEach(([c, x, z]) => {
     const bean = mesh(new THREE.SphereGeometry(0.55, 18, 12), toon(c as string), x as number, 0.32, z as number);
     bean.scale.y = 0.6;
     group.add(bean);
@@ -1045,10 +1332,17 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   colliders.push({ minX: maxX - 0.9, maxX, minZ: minZ + 14.8, maxZ: minZ + 15.6, top: 1.95 });
 
   // ── Detalles: cuadros en la pared del fondo y perchero en la entrada ────
-  for (const [x, seed] of [
-    [cx - 10.25, 3],
-    [cx + 10.25, 8],
-  ]) {
+  {
+    const x = cx + 10.25;
+    const tex = posterCanvas(["Buenas", "ideas,", "mejor", "equipo"], "#e07a5f", "#fff7ef", p.font);
+    const mat = new THREE.MeshBasicMaterial({ map: tex });
+    disposables.push(tex, mat);
+    group.add(mesh(box(1.3, 1.7, 0.05), trimMat, x, 2.15, minZ + WALL_T / 2 + 0.025, false));
+    const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.57), mat);
+    poster.position.set(x, 2.15, minZ + WALL_T / 2 + 0.055);
+    group.add(poster);
+  }
+  for (const [x, seed] of [[cx - 10.25, 3]]) {
     const tex = artCanvas(p.skins, seed);
     const mat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(tex, mat);
@@ -1064,10 +1358,32 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   colliders.push({ minX: rackAt.x - 0.25, maxX: rackAt.x + 0.25, minZ: rackAt.z - 0.25, maxZ: rackAt.z + 0.25, top: 1.8 });
 
   // ── Plantas y lámparas ─────────────────────────────────────────────────
+  // Cabina telefónica de vidrio en la esquina noreste.
+  const boothGlass = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
+  disposables.push(boothGlass);
+  const booth = phoneBooth(boothGlass);
+  const boothAt = { x: maxX - 1.0, z: minZ + 1.0 };
+  booth.position.set(boothAt.x, 0, boothAt.z);
+  group.add(booth);
+  colliders.push({ minX: boothAt.x - 0.62, maxX: boothAt.x + 0.62, minZ: boothAt.z - 0.62, maxZ: boothAt.z + 0.62, top: 2.4 });
+
+  // Matas colgantes cerca de las ventanas y en la cocina (por encima de la cabeza: sin colisión).
+  for (const [x, z, drop] of [
+    [cx - 7.5, minZ + 0.9, 0.9],
+    [cx + 7.5, minZ + 0.9, 0.9],
+    [cx - 13, minZ + 0.9, 0.8],
+    [minX + 1.0, minZ + 13, 0.8],
+    [maxX - 1.0, minZ + 3.5, 0.8],
+    [tableAt.x + 1.6, tableAt.z + 3.2, 0.9],
+  ] as const) {
+    const hp = hangingPlant(drop);
+    hp.position.set(x, WALL_H + 0.1, z);
+    group.add(hp);
+  }
+
   const plants: [number, number, number][] = [
     [minX + 0.8, maxZ - 0.9, 1.1],
     [maxX - 0.8, maxZ - 0.9, 1.1],
-    [maxX - 0.8, minZ + 0.9, 1.0],
     [cx - 10.2, minZ + 0.8, 0.9],
     [cx + 6.3, minZ + 0.8, 0.9],
     [cx - DOOR_HALF - 0.7, maxZ - 0.7, 0.8],
@@ -1097,7 +1413,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     lamps.push(light);
   }
   const kitchenLight = new THREE.PointLight("#ffd9a0", 1, 8, 1.6);
-  kitchenLight.position.set(tableAt.x, 2.2, tableAt.z);
+  kitchenLight.position.set(tableAt.x, 2.0, tableAt.z);
   group.add(kitchenLight);
   lamps.push(kitchenLight);
 
