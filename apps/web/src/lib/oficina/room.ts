@@ -56,6 +56,8 @@ export interface Room {
   setBoard(stats: BoardStat[]): void;
   /** Reloj y cielo con la hora local real. Devuelve la luz del momento. */
   tick(now: Date): Daylight;
+  /** Animación ambiental de la sala (vapor de la cafetera), cada frame. */
+  animate(t: number): void;
   dispose(): void;
 }
 
@@ -207,13 +209,271 @@ function bookshelf(): THREE.Group {
   return g;
 }
 
-function coffeeMachine(): THREE.Group {
+/** Cafetera espresso de dos grupos (el frente mira a +z). `steamAt` = sobre cada taza. */
+function espressoMachine(): { group: THREE.Group; steamAt: THREE.Vector3[] } {
   const g = new THREE.Group();
-  g.add(mesh(roundedBox(0.55, 0.65, 0.45, 0.08), toon("#343a40"), 0, 0.33, 0));
-  g.add(mesh(box(0.35, 0.05, 0.25), toon("#6c757d"), 0, 0.05, 0.14, false));
-  g.add(mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.12, 10), toon("#ffffff"), 0, 0.13, 0.12));
-  g.add(mesh(new THREE.SphereGeometry(0.04, 8, 8), toon("#ef476f", { emissive: "#ef476f" }), 0.17, 0.52, 0.23, false));
+  const steel = toon("#c9ced6");
+  const dark = toon("#2b2d42");
+  const black = toon("#1d1d1d");
+  g.add(mesh(box(0.84, 0.08, 0.56), dark, 0, 0.04, 0));
+  g.add(mesh(roundedBox(0.8, 0.55, 0.5, 0.06), steel, 0, 0.36, 0));
+  g.add(mesh(box(0.84, 0.05, 0.54), dark, 0, 0.66, 0));
+  // Barandita del calienta-tazas y dos tazas boca abajo.
+  g.add(mesh(box(0.78, 0.04, 0.02), steel, 0, 0.72, 0.25, false));
+  for (const x of [-0.12, 0.08]) g.add(mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.07, 10), toon("#fffaf0"), x, 0.72, -0.05, false));
+  // Panel frontal con manómetro y luces de encendido.
+  g.add(mesh(box(0.72, 0.18, 0.02), dark, 0, 0.52, 0.255, false));
+  const gauge = mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.02, 18), toon("#fffaf0"), 0, 0.52, 0.27, false);
+  gauge.rotation.x = Math.PI / 2;
+  g.add(gauge);
+  g.add(mesh(box(0.006, 0.04, 0.005), toon("#e63946"), 0.012, 0.535, 0.282, false));
+  g.add(mesh(new THREE.SphereGeometry(0.018, 8, 6), toon("#06d6a0", { emissive: "#06d6a0" }), -0.28, 0.52, 0.27, false));
+  g.add(mesh(new THREE.SphereGeometry(0.018, 8, 6), toon("#ffd166", { emissive: "#ffd166" }), 0.28, 0.52, 0.27, false));
+  // Bandeja de goteo.
+  g.add(mesh(box(0.7, 0.03, 0.2), black, 0, 0.095, 0.33, false));
+  const steamAt: THREE.Vector3[] = [];
+  for (const s of [-1, 1]) {
+    const x = s * 0.18;
+    g.add(mesh(new THREE.CylinderGeometry(0.065, 0.06, 0.07, 14), steel, x, 0.33, 0.29, false));
+    g.add(mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.04, 12), black, x, 0.28, 0.3, false));
+    g.add(mesh(box(0.035, 0.03, 0.2), black, x, 0.28, 0.42, false));
+    g.add(mesh(new THREE.CylinderGeometry(0.042, 0.034, 0.07, 12), toon("#fffaf0"), x, 0.145, 0.32, false));
+    g.add(mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.004, 12), toon("#5a3a22"), x, 0.179, 0.32, false));
+    steamAt.push(new THREE.Vector3(x, 0.2, 0.32));
+  }
+  // Lanceta de vapor.
+  const wand = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.3, 8), steel, 0.36, 0.25, 0.3, false);
+  wand.rotation.z = -0.25;
+  g.add(wand);
+  return { group: g, steamAt };
+}
+
+/** Molino de café con tolva de granos. */
+function grinder(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(roundedBox(0.26, 0.3, 0.3, 0.04), toon("#2b2d42"), 0, 0.15, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.08, 14), toon("#c9ced6"), 0, 0.34, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.14, 0.07, 0.24, 14), toon("#e9d8c4", { opacity: 0.55 }), 0, 0.5, 0, false));
+  g.add(mesh(new THREE.CylinderGeometry(0.11, 0.07, 0.14, 14), toon("#5a3a22"), 0, 0.45, 0, false));
+  g.add(mesh(new THREE.CylinderGeometry(0.145, 0.145, 0.03, 14), toon("#2b2d42"), 0, 0.63, 0, false));
   return g;
+}
+
+function vendingMachine(body: string): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(roundedBox(1.0, 1.95, 0.8, 0.06), toon(body), 0, 0.975, 0));
+  const glass = new THREE.MeshToonMaterial({ color: "#a9d6ff", transparent: true, opacity: 0.28 });
+  g.add(mesh(box(0.64, 1.22, 0.02), toon("#1d2433"), -0.12, 1.2, 0.395, false));
+  const snacks = ["#ef476f", "#ffd166", "#06d6a0", "#3a86ff", "#f4a261", "#b388eb"];
+  for (let r = 0; r < 4; r++) {
+    g.add(mesh(box(0.6, 0.015, 0.06), toon("#adb5bd"), -0.12, 0.7 + r * 0.29, 0.39, false));
+    for (let c = 0; c < 4; c++) {
+      const h = 0.15 + ((r + c) % 3) * 0.02;
+      g.add(mesh(box(0.11, h, 0.06), toon(snacks[(r * 4 + c * 3) % snacks.length]), -0.35 + c * 0.155, 0.71 + r * 0.29 + h / 2, 0.39, false));
+    }
+  }
+  g.add(mesh(box(0.64, 1.22, 0.01), glass, -0.12, 1.2, 0.415, false));
+  // Teclado, ranura de monedas y la bandeja de salida.
+  g.add(mesh(box(0.2, 0.55, 0.02), toon("#2b2d42"), 0.33, 1.3, 0.405, false));
+  for (let i = 0; i < 9; i++) g.add(mesh(box(0.035, 0.035, 0.015), toon("#e9ecef"), 0.28 + (i % 3) * 0.05, 1.45 - Math.floor(i / 3) * 0.06, 0.42, false));
+  g.add(mesh(box(0.08, 0.02, 0.015), toon("#adb5bd"), 0.33, 1.16, 0.42, false));
+  g.add(mesh(box(0.64, 0.2, 0.03), toon("#1d1d1d"), -0.12, 0.35, 0.405, false));
+  g.add(mesh(box(0.9, 0.12, 0.02), toon("#fff7e6", { emissive: "#fff1d6" }), 0, 1.84, 0.405, false));
+  return g;
+}
+
+/** Mesa de ping-pong a lo largo de x, con red, raquetas y pelota. */
+function pingPongTable(): THREE.Group {
+  const g = new THREE.Group();
+  const L = 2.5;
+  const W = 1.4;
+  const H = 0.76;
+  const white = toon("#ffffff");
+  const dark = toon("#2b2d42");
+  g.add(mesh(box(L, 0.05, W), toon("#1f5f8b"), 0, H, 0));
+  for (const s of [-1, 1]) {
+    g.add(mesh(box(L, 0.006, 0.03), white, 0, H + 0.028, s * (W / 2 - 0.015), false));
+    g.add(mesh(box(0.03, 0.006, W), white, s * (L / 2 - 0.015), H + 0.028, 0, false));
+  }
+  g.add(mesh(box(L, 0.006, 0.012), white, 0, H + 0.028, 0, false));
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) g.add(mesh(box(0.06, H - 0.03, 0.06), dark, sx * (L / 2 - 0.25), (H - 0.03) / 2, sz * (W / 2 - 0.15)));
+    g.add(mesh(box(0.05, 0.05, W - 0.3), dark, sx * (L / 2 - 0.25), 0.2, 0, false));
+  }
+  // Red con sus postes.
+  for (const s of [-1, 1]) g.add(mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.19, 8), dark, 0, H + 0.095, s * (W / 2 + 0.03), false));
+  g.add(mesh(box(0.012, 0.14, W + 0.06), toon("#f1f3f5", { opacity: 0.7 }), 0, H + 0.1, 0, false));
+  g.add(mesh(box(0.018, 0.02, W + 0.06), white, 0, H + 0.175, 0, false));
+  const paddle = (color: string, x: number, z: number, rot: number) => {
+    const p = new THREE.Group();
+    p.add(mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.014, 16), toon(color), 0, 0, 0, false));
+    p.add(mesh(box(0.1, 0.02, 0.03), toon("#c98b5a"), 0.12, 0, 0, false));
+    p.position.set(x, H + 0.033, z);
+    p.rotation.y = rot;
+    g.add(p);
+  };
+  paddle("#e63946", 0.72, 0.32, 0.6);
+  paddle("#2b2d42", -0.8, -0.28, 2.6);
+  g.add(mesh(new THREE.SphereGeometry(0.022, 10, 8), toon("#ff9f1c"), 0.34, H + 0.047, -0.18, false));
+  return g;
+}
+
+/** Futbolín a lo largo de x: rojo contra azul, las manijas de cada equipo a un lado. */
+function foosball(): THREE.Group {
+  const g = new THREE.Group();
+  const L = 1.3;
+  const W = 0.8;
+  const H = 0.84;
+  const wood = toon("#8b5e3c");
+  g.add(mesh(box(L, 0.04, W), wood, 0, H - 0.2, 0));
+  for (const s of [-1, 1]) {
+    g.add(mesh(box(L, 0.18, 0.05), wood, 0, H - 0.09, s * (W / 2 - 0.025)));
+    g.add(mesh(box(0.05, 0.18, W), wood, s * (L / 2 - 0.025), H - 0.09, 0));
+    g.add(mesh(box(0.03, 0.08, 0.24), toon("#1d1d1d"), s * (L / 2 - 0.05), H - 0.12, 0, false));
+    for (const sz of [-1, 1]) g.add(mesh(box(0.07, H - 0.2, 0.07), wood, s * (L / 2 - 0.08), (H - 0.2) / 2, sz * (W / 2 - 0.08)));
+  }
+  g.add(mesh(box(L - 0.1, 0.02, W - 0.1), toon("#2d9a4b"), 0, H - 0.17, 0, false));
+  g.add(mesh(box(0.012, 0.004, W - 0.1), toon("#ffffff"), 0, H - 0.158, 0, false));
+  const ring = mesh(new THREE.TorusGeometry(0.1, 0.006, 6, 24), toon("#ffffff"), 0, H - 0.158, 0, false);
+  ring.rotation.x = Math.PI / 2;
+  g.add(ring);
+  // Varillas: portero, defensa, ataque rival, medio, medio rival, ataque, defensa rival, portero rival.
+  const team = [0, 0, 1, 0, 1, 0, 1, 1];
+  const count = [1, 2, 3, 5, 5, 3, 2, 1];
+  const rodMat = toon("#c9ced6");
+  const colors = [toon("#e63946"), toon("#3a86ff")];
+  team.forEach((t, i) => {
+    const x = -0.525 + i * 0.15;
+    const rod = mesh(new THREE.CylinderGeometry(0.01, 0.01, W + 0.5, 8), rodMat, x, H - 0.05, 0, false);
+    rod.rotation.x = Math.PI / 2;
+    g.add(rod);
+    const side = t === 0 ? 1 : -1;
+    const handle = mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.13, 10), toon("#1d1d1d"), x, H - 0.05, side * (W / 2 + 0.3), false);
+    handle.rotation.x = Math.PI / 2;
+    g.add(handle);
+    const n = count[i];
+    for (let k = 0; k < n; k++) {
+      const z = n === 1 ? 0 : -0.28 + (k * 0.56) / (n - 1);
+      g.add(mesh(box(0.04, 0.1, 0.03), colors[t], x, H - 0.1, z, false));
+      g.add(mesh(new THREE.SphereGeometry(0.02, 8, 6), toon("#f1c27d"), x, H - 0.035, z, false));
+    }
+  });
+  g.add(mesh(new THREE.SphereGeometry(0.018, 10, 8), toon("#ffffff"), 0.05, H - 0.14, 0.1, false));
+  return g;
+}
+
+/** Máquina arcade (el frente mira a +z). La pantalla es una ilustración, sin puntajes. */
+function arcadeCabinet(screen: THREE.Texture, trim: string): THREE.Group {
+  const g = new THREE.Group();
+  const body = toon("#2b2d42");
+  const stripe = toon(trim);
+  g.add(mesh(box(0.8, 1.0, 0.7), body, 0, 0.5, 0));
+  g.add(mesh(box(0.8, 0.78, 0.5), body, 0, 1.39, -0.1));
+  for (const s of [-1, 1]) g.add(mesh(box(0.02, 1.7, 0.4), stripe, s * 0.41, 0.95, 0.05, false));
+  const panel = mesh(box(0.8, 0.06, 0.3), toon("#3d405b"), 0, 1.03, 0.28);
+  panel.rotation.x = 0.28;
+  g.add(panel);
+  g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 8), toon("#1d1d1d"), -0.2, 1.1, 0.28, false));
+  g.add(mesh(new THREE.SphereGeometry(0.035, 10, 8), toon("#e63946"), -0.2, 1.16, 0.28, false));
+  ["#ffd166", "#06d6a0", "#3a86ff"].forEach((c, i) => g.add(mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.03, 12), toon(c), 0.02 + i * 0.1, 1.09, 0.27 - i * 0.01, false)));
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.48), new THREE.MeshBasicMaterial({ map: screen, toneMapped: false }));
+  scr.position.set(0, 1.42, 0.155);
+  scr.rotation.x = -0.12;
+  g.add(scr);
+  g.add(mesh(box(0.8, 0.2, 0.12), toon(trim, { emissive: trim }), 0, 1.86, 0.12, false));
+  g.add(mesh(box(0.3, 0.12, 0.02), toon("#1d1d1d"), 0, 0.55, 0.355, false));
+  return g;
+}
+
+function coatRack(jacket: string): THREE.Group {
+  const g = new THREE.Group();
+  const dark = toon("#2b2d42");
+  g.add(mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.05, 16), dark, 0, 0.025, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.8, 8), dark, 0, 0.92, 0));
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const hook = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6), dark, Math.cos(a) * 0.08, 1.72, Math.sin(a) * 0.08, false);
+    hook.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9);
+    g.add(hook);
+  }
+  const coat = mesh(roundedBox(0.36, 0.7, 0.16, 0.07), toon(jacket), 0.14, 1.32, 0);
+  g.add(coat);
+  g.add(mesh(new THREE.SphereGeometry(0.11, 12, 8), toon("#ffd166"), -0.12, 1.72, 0.02, false));
+  return g;
+}
+
+function artCanvas(colors: string[], seed: number) {
+  const c = screenCanvas(256, 320);
+  const g = c.ctx;
+  g.fillStyle = "#f7f1e5";
+  g.fillRect(0, 0, 256, 320);
+  for (let i = 0; i < 7; i++) {
+    const k = (seed * 31 + i * 17) % 97;
+    g.fillStyle = colors[(i + seed) % colors.length];
+    g.globalAlpha = 0.85;
+    if (i % 2) {
+      g.beginPath();
+      g.arc(40 + ((k * 7) % 180), 50 + ((k * 13) % 220), 24 + (k % 50), 0, Math.PI * 2);
+      g.fill();
+    } else g.fillRect((k * 5) % 170, (k * 11) % 250, 50 + (k % 70), 18 + (k % 40));
+  }
+  g.globalAlpha = 1;
+  c.tex.needsUpdate = true;
+  return c.tex;
+}
+
+function dartboardCanvas() {
+  const c = screenCanvas(256, 256);
+  const g = c.ctx;
+  const ring = (r0: number, r1: number, a: string, b: string) => {
+    for (let i = 0; i < 20; i++) {
+      const a0 = ((i - 0.5) / 20) * Math.PI * 2;
+      const a1 = ((i + 0.5) / 20) * Math.PI * 2;
+      g.fillStyle = i % 2 ? a : b;
+      g.beginPath();
+      g.arc(128, 128, r1, a0, a1);
+      g.arc(128, 128, r0, a1, a0, true);
+      g.fill();
+    }
+  };
+  g.fillStyle = "#1d1d1d";
+  g.beginPath();
+  g.arc(128, 128, 127, 0, Math.PI * 2);
+  g.fill();
+  ring(20, 104, "#1d1d1d", "#f3e3c3");
+  ring(98, 106, "#2d9a4b", "#e63946");
+  ring(58, 65, "#2d9a4b", "#e63946");
+  g.fillStyle = "#2d9a4b";
+  g.beginPath();
+  g.arc(128, 128, 12, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#e63946";
+  g.beginPath();
+  g.arc(128, 128, 6, 0, Math.PI * 2);
+  g.fill();
+  c.tex.needsUpdate = true;
+  return c.tex;
+}
+
+/** Pantalla de la arcade en modo demostración: marcianitos y una nave, sin números. */
+function arcadeCanvas(colors: string[]) {
+  const c = screenCanvas(256, 200);
+  const g = c.ctx;
+  g.fillStyle = "#0b1020";
+  g.fillRect(0, 0, 256, 200);
+  const invader = ["00100000100", "00010001000", "00111111100", "01101110110", "11111111111", "10111111101", "10100000101", "00011011000"];
+  for (let row = 0; row < 3; row++)
+    for (let col = 0; col < 5; col++) {
+      g.fillStyle = colors[(row + col) % colors.length];
+      invader.forEach((line, y) => [...line].forEach((px, x) => px === "1" && g.fillRect(24 + col * 44 + x * 3, 20 + row * 36 + y * 3, 3, 3)));
+    }
+  g.fillStyle = "#6ccb8f";
+  g.fillRect(118, 170, 20, 8);
+  g.fillRect(125, 163, 6, 8);
+  g.fillStyle = "#ffffff";
+  for (let i = 0; i < 18; i++) g.fillRect((i * 67) % 256, (i * 41) % 200, 1.5, 1.5);
+  c.tex.needsUpdate = true;
+  return c.tex;
 }
 
 function fridge(): THREE.Group {
@@ -552,16 +812,65 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const counter = new THREE.Group();
   counter.add(mesh(box(1.0, 0.92, 5), toon(p.dark ? "#3d5a80" : "#8ecae6"), 0, 0.46, 0));
   counter.add(mesh(box(1.1, 0.08, 5.1), toon(p.dark ? "#d9d2c5" : "#f7f3ea"), 0, 0.96, 0));
-  const machine = coffeeMachine();
+  // Puertas y manijas del mueble bajo.
+  for (let i = 0; i < 4; i++) {
+    counter.add(mesh(box(0.02, 0.72, 1.12), toon(p.dark ? "#4a6d94" : "#a9d6ec"), 0.51, 0.48, -1.8 + i * 1.2, false));
+    counter.add(mesh(box(0.03, 0.03, 0.22), toon("#6c757d"), 0.53, 0.76, -1.8 + i * 1.2, false));
+  }
+  // Salpicadero de baldosa y gabinetes altos contra el muro.
+  counter.add(mesh(box(0.02, 0.72, 5), toon(p.dark ? "#51606c" : "#dfe9ee"), -0.52, 1.36, 0, false));
+  counter.add(mesh(box(0.36, 0.7, 4.8), toon(p.dark ? "#3d5a80" : "#8ecae6"), -0.36, 2.2, 0));
+  for (let i = 0; i < 4; i++) {
+    counter.add(mesh(box(0.02, 0.62, 1.12), toon(p.dark ? "#4a6d94" : "#a9d6ec"), -0.17, 2.2, -1.8 + i * 1.2, false));
+    counter.add(mesh(new THREE.SphereGeometry(0.025, 8, 6), toon("#6c757d"), -0.15, 1.98, -1.8 + i * 1.2 + (i % 2 ? -0.42 : 0.42), false));
+  }
+  const espresso = espressoMachine();
+  const machine = espresso.group;
   machine.position.set(0, 1.0, -1.5);
   machine.rotation.y = Math.PI / 2;
   counter.add(machine);
-  // Tazas y un frutero.
-  ["#ef476f", "#ffd166", "#06d6a0"].forEach((c, i) => counter.add(mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10), toon(c), 0.1, 1.06, -0.6 + i * 0.18)));
-  counter.add(mesh(new THREE.CylinderGeometry(0.22, 0.14, 0.1, 14), toon("#c98b5a"), 0.05, 1.05, 1.2));
-  ["#e63946", "#ffb703", "#8ac926"].forEach((c, i) => counter.add(mesh(new THREE.SphereGeometry(0.08, 10, 8), toon(c), -0.05 + i * 0.07, 1.14, 1.15 + (i % 2) * 0.08)));
+  const mill = grinder();
+  mill.position.set(-0.05, 1.0, -2.25);
+  counter.add(mill);
+  // Tazas del día, fregadero con grifo, frutero y microondas.
+  ["#ef476f", "#ffd166", "#06d6a0"].forEach((c, i) => counter.add(mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10), toon(c), 0.1, 1.06, -0.75 + i * 0.18)));
+  counter.add(mesh(box(0.56, 0.02, 0.72), toon("#adb5bd"), 0.02, 1.005, 0.45, false));
+  counter.add(mesh(box(0.46, 0.02, 0.6), toon("#6c757d"), 0.02, 1.012, 0.45, false));
+  counter.add(mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.32, 8), toon("#c9ced6"), -0.36, 1.16, 0.45, false));
+  counter.add(mesh(box(0.22, 0.035, 0.035), toon("#c9ced6"), -0.26, 1.31, 0.45, false));
+  counter.add(mesh(box(0.1, 0.02, 0.03), toon("#c9ced6"), -0.36, 1.12, 0.6, false));
+  counter.add(mesh(new THREE.CylinderGeometry(0.22, 0.14, 0.1, 14), toon("#c98b5a"), 0.05, 1.05, 1.25));
+  ["#e63946", "#ffb703", "#8ac926"].forEach((c, i) => counter.add(mesh(new THREE.SphereGeometry(0.08, 10, 8), toon(c), -0.05 + i * 0.07, 1.14, 1.2 + (i % 2) * 0.08)));
+  counter.add(mesh(roundedBox(0.46, 0.32, 0.62, 0.04), toon("#dee2e6"), -0.1, 1.16, 2.05));
+  counter.add(mesh(box(0.02, 0.22, 0.38), toon("#1d2433"), 0.135, 1.16, 1.98, false));
+  counter.add(mesh(box(0.02, 0.22, 0.12), toon("#343a40"), 0.135, 1.16, 2.27, false));
   counter.position.set(kx, 0, minZ + 3.2);
   group.add(counter);
+  // Vapor de las dos tazas de la cafetera (sprites: sin sombra ni contorno).
+  counter.updateMatrixWorld(true);
+  const steam: { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; base: THREE.Vector3; phase: number }[] = [];
+  const steamTex = (() => {
+    const c = screenCanvas(64, 64);
+    const grad = c.ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grad.addColorStop(0, "rgba(255,255,255,0.9)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    c.ctx.fillStyle = grad;
+    c.ctx.fillRect(0, 0, 64, 64);
+    c.tex.needsUpdate = true;
+    return c.tex;
+  })();
+  disposables.push(steamTex);
+  espresso.steamAt.forEach((at, i) => {
+    const base = machine.localToWorld(at.clone());
+    for (let k = 0; k < 3; k++) {
+      const mat = new THREE.SpriteMaterial({ map: steamTex, transparent: true, depthWrite: false, opacity: 0 });
+      const sprite = new THREE.Sprite(mat);
+      sprite.position.copy(base);
+      group.add(sprite);
+      disposables.push(mat);
+      steam.push({ sprite, mat, base, phase: k / 3 + i * 0.17 });
+    }
+  });
   colliders.push({ minX: kx - 0.55, maxX: kx + 0.55, minZ: minZ + 0.7, maxZ: minZ + 5.7, top: 1.0 });
   const fr = fridge();
   fr.position.set(kx - 0.05, 0, minZ + 6.5);
@@ -672,6 +981,88 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   group.add(shelf);
   colliders.push({ minX: maxX - 4.6, maxX: maxX - 2.4, minZ: minZ, maxZ: minZ + 0.6, top: 2.1 });
 
+  // Máquina de snacks al final de la cocina, de frente al piso.
+  const vend = vendingMachine(p.dark ? mix(p.accent, "#000000", 0.25) : p.accent);
+  vend.position.set(minX + WALL_T / 2 + 0.42, 0, minZ + 9.9);
+  vend.rotation.y = Math.PI / 2;
+  group.add(vend);
+  colliders.push({ minX, maxX: minX + 0.9, minZ: minZ + 9.4, maxZ: minZ + 10.4, top: 1.95 });
+
+  // ── Zona de juegos (suroeste): ping-pong, canasta de pelotas y diana ────
+  const gameAt = new THREE.Vector3(minX + 4.1, 0, minZ + 16.3);
+  group.add(mesh(roundedBox(6.2, 0.02, 6.2, 0.5), toon(p.dark ? mix(p.bg, "#2a9d8f", 0.35) : mix("#2a9d8f", "#ffffff", 0.6)), gameAt.x, 0.012, gameAt.z, false));
+  const pong = pingPongTable();
+  pong.position.copy(gameAt);
+  group.add(pong);
+  colliders.push({ minX: gameAt.x - 1.25, maxX: gameAt.x + 1.25, minZ: gameAt.z - 0.72, maxZ: gameAt.z + 0.72, top: 0.8 });
+  const basket = new THREE.Group();
+  basket.add(mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.34, 14, 1, true), toon("#8d99ae"), 0, 0.17, 0));
+  basket.add(mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.02, 14), toon("#8d99ae"), 0, 0.01, 0, false));
+  for (let i = 0; i < 7; i++) basket.add(mesh(new THREE.SphereGeometry(0.035, 8, 6), toon(i % 3 ? "#ffffff" : "#ff9f1c"), Math.cos(i * 2.3) * 0.1, 0.33 + (i % 2) * 0.04, Math.sin(i * 2.3) * 0.1, false));
+  basket.position.set(gameAt.x - 2.6, 0, gameAt.z - 2.1);
+  group.add(basket);
+  colliders.push({ minX: basket.position.x - 0.2, maxX: basket.position.x + 0.2, minZ: basket.position.z - 0.2, maxZ: basket.position.z + 0.2, top: 0.36 });
+  const dartTex = dartboardCanvas();
+  const dartMat = new THREE.MeshBasicMaterial({ map: dartTex });
+  disposables.push(dartTex, dartMat);
+  const dart = new THREE.Group();
+  dart.add(mesh(box(0.02, 0.9, 0.9), toon("#b08968"), 0, 0, 0, false));
+  const face = new THREE.Mesh(new THREE.CircleGeometry(0.3, 40), dartMat);
+  face.position.x = 0.02;
+  face.rotation.y = Math.PI / 2;
+  dart.add(face);
+  const rim = mesh(new THREE.TorusGeometry(0.31, 0.025, 8, 40), toon("#2b2d42"), 0.02, 0, 0, false);
+  rim.rotation.y = Math.PI / 2;
+  dart.add(rim);
+  for (const [y, z] of [
+    [0.05, -0.04],
+    [-0.12, 0.09],
+  ]) {
+    const d = mesh(new THREE.CylinderGeometry(0.008, 0.004, 0.14, 6), toon("#c9ced6"), 0.09, y, z, false);
+    d.rotation.z = Math.PI / 2;
+    dart.add(d);
+    dart.add(mesh(box(0.04, 0.05, 0.004), toon("#e63946"), 0.17, y, z, false));
+  }
+  dart.position.set(minX + WALL_T / 2 + 0.01, 1.75, gameAt.z);
+  group.add(dart);
+
+  // ── Esquina sureste: futbolín y máquina arcade ─────────────────────────
+  const foosAt = new THREE.Vector3(maxX - 4, 0, minZ + 17.2);
+  const foos = foosball();
+  foos.position.copy(foosAt);
+  group.add(foos);
+  colliders.push({ minX: foosAt.x - 0.65, maxX: foosAt.x + 0.65, minZ: foosAt.z - 0.42, maxZ: foosAt.z + 0.42, top: 0.84 });
+  const arcadeTex = arcadeCanvas(p.skins);
+  disposables.push(arcadeTex);
+  const arcade = arcadeCabinet(arcadeTex, p.accent);
+  arcade.position.set(maxX - WALL_T / 2 - 0.42, 0, minZ + 15.2);
+  arcade.rotation.y = -Math.PI / 2;
+  group.add(arcade);
+  arcade.traverse((o) => {
+    const m = (o as THREE.Mesh).material;
+    if (m instanceof THREE.MeshBasicMaterial) disposables.push(m);
+  });
+  colliders.push({ minX: maxX - 0.9, maxX, minZ: minZ + 14.8, maxZ: minZ + 15.6, top: 1.95 });
+
+  // ── Detalles: cuadros en la pared del fondo y perchero en la entrada ────
+  for (const [x, seed] of [
+    [cx - 10.25, 3],
+    [cx + 10.25, 8],
+  ]) {
+    const tex = artCanvas(p.skins, seed);
+    const mat = new THREE.MeshBasicMaterial({ map: tex });
+    disposables.push(tex, mat);
+    group.add(mesh(box(1.3, 1.6, 0.05), toon("#5a3a22"), x, 2.2, minZ + WALL_T / 2 + 0.025, false));
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(1.14, 1.44), mat);
+    art.position.set(x, 2.2, minZ + WALL_T / 2 + 0.055);
+    group.add(art);
+  }
+  const rackAt = { x: cx - DOOR_HALF - 1.9, z: maxZ - 0.8 };
+  const rack = coatRack(p.accent);
+  rack.position.set(rackAt.x, 0, rackAt.z);
+  group.add(rack);
+  colliders.push({ minX: rackAt.x - 0.25, maxX: rackAt.x + 0.25, minZ: rackAt.z - 0.25, maxZ: rackAt.z + 0.25, top: 1.8 });
+
   // ── Plantas y lámparas ─────────────────────────────────────────────────
   const plants: [number, number, number][] = [
     [minX + 0.8, maxZ - 0.9, 1.1],
@@ -734,6 +1125,14 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
         paintSky(d);
       }
       return d;
+    },
+    animate(t) {
+      for (const s of steam) {
+        const k = (t * 0.45 + s.phase) % 1;
+        s.sprite.position.set(s.base.x + Math.sin(t * 1.7 + s.phase * 9) * 0.03 * k, s.base.y + k * 0.45, s.base.z);
+        s.sprite.scale.setScalar(0.07 + k * 0.16);
+        s.mat.opacity = Math.sin(k * Math.PI) * 0.55;
+      }
     },
     dispose() {
       group.traverse((o) => {

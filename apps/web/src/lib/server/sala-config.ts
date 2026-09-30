@@ -21,11 +21,12 @@ export async function readSalaAgent(key: string): Promise<SalaAgentConfig | null
 
 /** agent_id resoluble de un personaje (o el motivo de que no lo sea). */
 export async function resolveSalaAgentId(key: string): Promise<{ agentId: string | null; hint: string }> {
-  if (key === "cast") {
+  if (key === "cast" || key === "office") {
     try {
       const raw = await readFile(SALA_PATH, "utf8").catch(() => null);
-      const cast = raw === null ? undefined : parseSalaConfig(JSON.parse(raw)).cast;
-      if (!cast) return { agentId: null, hint: "sala.json no define un elenco (cast)" };
+      const config = raw === null ? undefined : parseSalaConfig(JSON.parse(raw));
+      const cast = key === "cast" ? config?.cast : config?.office;
+      if (!cast) return { agentId: null, hint: `sala.json no define el elenco "${key}"` };
       return { agentId: cast.agent_id ?? null, hint: "El elenco aún no existe en ElevenLabs — corre pnpm setup:elevenlabs --sala" };
     } catch (err) {
       return { agentId: null, hint: `sala.json inválido: ${(err as Error).message}` };

@@ -463,7 +463,10 @@ export class OfficeWorld {
 
   // ── Personajes ─────────────────────────────────────────────────────────
 
-  setWorkers(workers: OfficeWorker[], seats: ReadonlyMap<string, string>) {
+  /** Quién suena ahora en la llamada del equipo (id + volumen 0..1); lo lee cada frame. */
+  speakingProbe: (() => { id: string; level: number } | null) | null = null;
+
+  setWorkers(workers: OfficeWorker[], seats: ReadonlyMap<string, string>, voices?: ReadonlyMap<string, string>) {
     const live = new Set<string>();
     for (const w of workers) {
       const deskId = seats.get(w.id);
@@ -498,7 +501,7 @@ export class OfficeWorld {
         this.confetti.burst(at.x, at.y + 1.3, at.z, 140);
       }
       s.status = w.status;
-      s.character.setState(w);
+      s.character.setState(w, voices?.get(w.id));
       s.character.setSelected(this.selected?.kind === "worker" && this.selected.id === w.id);
       s.laptop.setLines(w.lines);
     }
@@ -726,7 +729,9 @@ export class OfficeWorld {
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
 
     const explore = this.mode === "explore";
+    const speaking = this.speakingProbe?.() ?? null;
     for (const [id, s] of this.seated) {
+      s.character.setTalking(speaking?.id === id ? 0.35 + Math.min(1, speaking.level * 2.5) * 0.65 : 0);
       s.character.update(dt, t);
       const pos = s.character.root.getWorldPosition(this.tmp);
       const dist = pos.distanceTo(this.camera.position);
@@ -755,6 +760,7 @@ export class OfficeWorld {
       view.vacancy.scale.setScalar(hot ? 1.5 : 1);
     }
 
+    this.room?.animate(t);
     this.confetti.update(dt);
     this.effect.render(this.scene, this.camera);
     this.emitAnchors();

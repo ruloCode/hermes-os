@@ -94,7 +94,7 @@ import {
 import { mouseStatus } from "./input/mouse.js";
 import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
-import { listSalaAgents, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
+import { listSalaAgents, officeCast, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
 import { SalaValidationError } from "@hermes/shared";
@@ -2482,6 +2482,21 @@ app.get("/office/state", async (c) => {
   const remote = viaTunnel((h) => c.req.header(h));
   const state = await officeState();
   return c.json(remote ? { ...state, workers: state.workers.filter((w) => !w.private) } : state);
+});
+
+// Elenco de la Oficina (~/.hermes-os/sala.json → office): quién es el líder y
+// qué voces se reparten entre los runs vivos. El token sale de
+// /elevenlabs/token?agent=office. Sin bloque `office` → { ok:false } y la
+// oficina sigue con la llamada normal a Hermes.
+app.get("/office/cast", async (c) => {
+  if (!env.SALA_ENABLED) return c.json({ ok: false, error: "La sala está apagada (HERMES_SALA=off)" });
+  try {
+    const cast = await officeCast();
+    if (!cast) return c.json({ ok: false, error: "sala.json no define el elenco de la oficina (office)" });
+    return c.json({ ok: true, ...cast });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // Dictado de la Oficina: respaldo cuando el reconocedor del navegador falla

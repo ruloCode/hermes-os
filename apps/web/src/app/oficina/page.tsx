@@ -37,6 +37,7 @@ import { useWorkspace } from "@/state/WorkspaceContext";
 import { useAgentEvents } from "@/hooks/useAgentEvents";
 import { useHermesData } from "@/hooks/useHermesData";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
+import { useOfficeCast } from "@/hooks/useOfficeCast";
 import { useGamepad } from "@/hooks/useGamepad";
 import { useOfficeDictation } from "@/hooks/useOfficeDictation";
 import { VoiceClientTools } from "@/components/VoiceClientTools";
@@ -77,6 +78,7 @@ declare global {
     __hermesOficinaWalkTo?: (hit: OfficeHit) => void;
     /** QA sin micrófono: deja `text` como lo dictado (listo para enviar). */
     __hermesOficinaDictate?: (text: string) => void;
+    __hermesOficinaTeam?: { say: (text: string) => boolean; debug: () => unknown };
   }
 }
 
@@ -146,6 +148,9 @@ function toFeedLines(events: AgentActivityEvent[]): FeedLine[] {
       return { time, kind: KIND_LABEL[e.kind] ?? e.kind, text, tone };
     });
 }
+
+/** En simulación no hay llamada con el equipo: esos runs no existen. */
+const NO_WORKERS: OfficeWorker[] = [];
 
 /** Lo que Hermes sabe de dónde estás cuando lo llamas desde la Oficina. */
 const HERMES_SCOPE =
@@ -303,21 +308,67 @@ export default function OficinaPage() {
     }
   }, [hermes, voice]);
 
+  // ── Voz con el equipo (elenco multi-voz: cada agente con su voz) ────────
+  // Las tools del elenco llaman a estas funciones (definidas más abajo) por ref.
+  const instructRef = useRef<(w: OfficeWorker, text: string) => Promise<string>>(async () => "");
+  const hireAgentRef = useRef<(project: string, text: string) => Promise<string>>(async () => "");
+  const team = useOfficeCast({
+    workers: sim ? NO_WORKERS : workers,
+    projects,
+    projectName,
+    owner: OWNER,
+    instruct: (w, text) => instructRef.current(w, text),
+    hire: (project, text) => hireAgentRef.current(project, text),
+  });
+  const inCall = hermes.connected || team.status === "on";
+  /** Y: si existe el elenco de la oficina llama al equipo; si no, a Hermes. */
+  const toggleCall = useCallback(() => {
+    if (!team.available) return toggleHermes();
+    if (team.status === "on" || team.status === "connecting") void team.hangup();
+    else {
+      voice.cancel();
+      stopSpeaking();
+      if (hermes.connected || hermes.connecting) void hermes.disconnect();
+      void team.connect();
+    }
+  }, [team, toggleHermes, voice, hermes]);
+
   // ── Conversación con un agente ────────────────────────────────────────
   /** Abrir una conversación = el micrófono ya escuchando (salvo en llamada con Hermes). */
   const openConversation = useCallback(
     (hit: OfficeHit) => {
       setSelected(hit);
       stopSpeaking();
-      if (!hermes.connected) voice.start();
+      if (!inCall) voice.start();
     },
-    [hermes.connected, voice],
+    [inCall, voice],
   );
 
   const closeConversation = useCallback(() => {
     voice.cancel();
     setSelected(null);
   }, [voice]);
+
+  /** Instrucción a un personaje: continúa su sesión si es un run; si no, trabajo nuevo en su proyecto. */
+  const instructWorker = useCallback(
+    async (w: OfficeWorker, text: string): Promise<string> => {
+      if (w.source === "run" && w.sessionId) return (await claudeStartRun(text, ws.claudeConfig, w.project, w.sessionId)).runId;
+      if (w.project === GENERAL_PROJECT) return (await hermesPost<{ task_id?: string }>("/tasks", { prompt: text })).task_id ?? "";
+      return (await claudeStartRun(text, ws.claudeConfig, w.project)).runId;
+    },
+    [ws.claudeConfig],
+  );
+
+  const hireAgent = useCallback(
+    async (project: string, text: string): Promise<string> => {
+      if (project === GENERAL_PROJECT) return (await hermesPost<{ task_id?: string }>("/tasks", { prompt: text })).task_id ?? "";
+      return (await claudeStartRun(text, ws.claudeConfig, project)).runId;
+    },
+    [ws.claudeConfig],
+  );
+
+  instructRef.current = instructWorker;
+  hireAgentRef.current = hireAgent;
 
   const sendToWorker = useCallback(async () => {
     const w = selectedWorker;
@@ -326,14 +377,7 @@ export default function OficinaPage() {
     if (w.source === "run" && w.status !== "done" && w.status !== "error") return;
     setSending(true);
     try {
-      let id = "";
-      if (w.source === "run" && w.sessionId) {
-        id = (await claudeStartRun(text, ws.claudeConfig, w.project, w.sessionId)).runId;
-      } else if (w.project === GENERAL_PROJECT) {
-        id = (await hermesPost<{ task_id?: string }>("/tasks", { prompt: text })).task_id ?? "";
-      } else {
-        id = (await claudeStartRun(text, ws.claudeConfig, w.project)).runId;
-      }
+      const id = await instructWorker(w, text);
       if (id) {
         talkedRef.current.add(id);
         setPendingFocus(id);
@@ -347,7 +391,7 @@ export default function OficinaPage() {
       setSending(false);
     }
     // `pad` se declara abajo (su rumble lee el control al llamarse).
-  }, [selectedWorker, voice, sim, sending, ws.claudeConfig, toast]);
+  }, [selectedWorker, voice, sim, sending, instructWorker, toast]);
 
   // La respuesta del agente al que le hablaste, en voz alta (y el control vibra).
   useEffect(() => {
@@ -357,7 +401,7 @@ export default function OficinaPage() {
       spokenRef.current.add(w.id);
       pad.rumble(w.status === "done" ? "success" : "alert");
       toast(w.status === "done" ? "done" : "error", w.status === "done" ? `🔊 ${w.name} respondió` : `${w.name} falló`);
-      if (replyVoice && !hermes.connected) {
+      if (replyVoice && !inCall) {
         speak(w.status === "done" ? (w.lastText ?? w.task.summary) : `No pude terminar: ${w.task.summary}`, () => {
           // Ida y vuelta: si sigues en su panel, el micrófono vuelve a escucharte.
           const sel = selectedRef.current;
@@ -365,7 +409,7 @@ export default function OficinaPage() {
         });
       }
     }
-  }, [workers, replyVoice, hermes.connected, toast]);
+  }, [workers, replyVoice, inCall, toast]);
 
   const cycleAgent = useCallback(
     (dir: 1 | -1) => {
@@ -425,7 +469,7 @@ export default function OficinaPage() {
         setLookOpen(false);
         break;
       case "Y":
-        toggleHermes();
+        toggleCall();
         break;
       case "VIEW":
         world?.setMode(world.mode === "explore" ? "aerial" : "explore");
@@ -543,6 +587,8 @@ export default function OficinaPage() {
   };
 
   // Seams de QA: simular sin tokens, leer el estado, clics reales, vista, caminar y dictar.
+  const teamRef = useRef(team);
+  teamRef.current = team;
   const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad });
   debugRef.current = { workers, seats, selected, layout, near, voice, usingPad };
   useEffect(() => {
@@ -567,6 +613,7 @@ export default function OficinaPage() {
     window.__hermesOficinaFocus = (hit) => sceneRef.current?.world()?.focus(hit);
     window.__hermesOficinaMode = (m) => sceneRef.current?.world()?.setMode(m);
     window.__hermesOficinaWalkTo = (hit) => sceneRef.current?.world()?.walkTo(hit);
+    window.__hermesOficinaTeam = { say: (text: string) => teamRef.current.say(text), debug: () => teamRef.current.debug() };
     window.__hermesOficinaDictate = (text) => {
       voice.cancel();
       voice.edit(text);
@@ -579,6 +626,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaMode;
       delete window.__hermesOficinaWalkTo;
       delete window.__hermesOficinaDictate;
+      delete window.__hermesOficinaTeam;
     };
   }, [live.projects, live.machine, sim, voice]);
 
@@ -608,6 +656,8 @@ export default function OficinaPage() {
         onClick={onClick}
         onNear={setNear}
         onMode={setModeState}
+        voices={team.voiceNames}
+        speakingProbe={team.speakingWorker}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
@@ -631,10 +681,12 @@ export default function OficinaPage() {
               setReplyVoice(next);
               if (!next) stopSpeaking();
             }}
-            hermesCall={hermesCall}
-            onHermesCall={toggleHermes}
+            hermesCall={team.available ? (team.status === "on" ? "on" : team.status === "connecting" ? "connecting" : team.status === "unavailable" ? "unavailable" : "off") : hermesCall}
+            callLabel={team.available ? "Equipo" : "Hermes"}
+            onHermesCall={toggleCall}
           />
           {hermes.error ? <p className="pointer-events-auto rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{hermes.error}</p> : null}
+          {team.error ? <p className="pointer-events-auto max-w-sm rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{team.error}</p> : null}
           {lookOpen ? <LookPicker look={look} onChange={changeLook} onClose={() => setLookOpen(false)} /> : null}
           {!selectedWorker && !lookOpen ? (
             <TeamRoster
@@ -646,6 +698,17 @@ export default function OficinaPage() {
           ) : null}
         </div>
       </div>
+
+      {team.status === "on" ? (
+        <div className="pointer-events-none absolute bottom-20 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-accent/50 bg-panel/90 px-4 py-2 text-sm shadow-lg backdrop-blur">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inset-0 animate-ping rounded-full bg-accent opacity-60" />
+            <span className="relative h-2.5 w-2.5 rounded-full bg-accent" />
+          </span>
+          En llamada con el equipo · háblale a cada uno por su voz o a todos a la vez
+          {pad.connected ? <span className="ml-1 text-xs text-text-faint">(Y cuelga)</span> : null}
+        </div>
+      ) : null}
 
       {hermesCall === "on" ? (
         <div className="pointer-events-none absolute top-20 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-accent/50 bg-panel/90 px-4 py-2 text-sm shadow-lg backdrop-blur">

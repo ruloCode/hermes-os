@@ -36,6 +36,10 @@ interface Props {
   onClick: (hit: OfficeHit | null) => void;
   onNear: (hit: OfficeHit | null) => void;
   onMode: (mode: OfficeMode) => void;
+  /** Nombre de la voz que presta cada personaje en la llamada del equipo. */
+  voices?: ReadonlyMap<string, string>;
+  /** Quién suena ahora en esa llamada (lo lee el mundo cada frame). */
+  speakingProbe?: () => { id: string; level: number } | null;
 }
 
 function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "translate(-50%, -100%)") {
@@ -49,7 +53,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, voices, speakingProbe },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -94,8 +98,12 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
 
   useEffect(() => {
     worldRef.current?.setLayout(layout);
-    worldRef.current?.setWorkers(workers, seats);
-  }, [layout, workers, seats]);
+    worldRef.current?.setWorkers(workers, seats, voices);
+  }, [layout, workers, seats, voices]);
+
+  useEffect(() => {
+    if (worldRef.current) worldRef.current.speakingProbe = speakingProbe ?? null;
+  }, [speakingProbe]);
 
   useEffect(() => {
     worldRef.current?.setSelected(selected);

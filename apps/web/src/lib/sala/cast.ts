@@ -94,6 +94,7 @@ export class CastCall {
   private alignedMs = 0;
   private hasAlignment = false;
   private speakingSince = 0;
+  private quietSince = 0;
 
   constructor(private readonly opts: CastCallOptions) {
     this.labelToKey = Object.fromEntries(Object.entries(opts.labels).map(([k, l]) => [l, k]));
@@ -196,6 +197,23 @@ export class CastCall {
   }
 
   /**
+   * Un turno que NO dijo el humano (p. ej. "[aviso] Iván terminó…"): el modelo
+   * responde, pero la línea no se pinta como si la hubiera dicho el dueño.
+   */
+  notify(text: string): boolean {
+    if (!this.conv || this.status !== "connected") return false;
+    this.resetClock();
+    this.segments = [];
+    this.conv.sendUserMessage(text);
+    return true;
+  }
+
+  /** Hace cuánto (ms) que nadie suena: los avisos esperan un silencio real. */
+  quietFor(): number {
+    return this.mode === "speaking" ? 0 : performance.now() - this.quietSince;
+  }
+
+  /**
    * Micrófono abierto o cerrado. En el celular el mic NO puede estar siempre
    * abierto: el viajero va por la calle y todo lo que suene sería un turno.
    * De ahí el "mantén para hablar" de la app.
@@ -239,6 +257,7 @@ export class CastCall {
     // respuesta llega al principio. Aquí NO se reinicia el reloj: eso lo hace
     // un turno nuevo (texto del humano, "start" del streaming, interrupción).
     if (mode === "speaking" && this.mode !== "speaking") this.speakingSince = performance.now();
+    if (mode !== "speaking" && this.mode === "speaking") this.quietSince = performance.now();
     this.mode = mode;
     this.opts.onEvent({ kind: "mode", mode });
   }

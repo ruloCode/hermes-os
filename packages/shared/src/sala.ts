@@ -109,6 +109,8 @@ export interface SalaConfig {
   /** Tema de la tertulia (demo a tres voces): lo reciben los agentes al conectar. */
   topic?: string;
   cast?: SalaCast;
+  /** Elenco de la Oficina de agentes: voces que se reparten entre los runs vivos. */
+  office?: SalaCast;
   /** Presente = el elenco es el anfitrión de esta estación (modo tótem). */
   station?: SalaStation;
 }
@@ -244,36 +246,11 @@ export function parseSalaConfig(raw: unknown): SalaConfig {
     keys.add(a.key);
   }
   const topic = (raw as Record<string, unknown>).topic;
-  const castRaw = (raw as Record<string, unknown>).cast;
-  let cast: SalaCast | undefined;
-  if (castRaw !== undefined) {
-    if (!castRaw || typeof castRaw !== "object") fail("sala.json.cast: debe ser un objeto");
-    const c = castRaw as Record<string, unknown>;
-    if (!Array.isArray(c.members) || c.members.length < 1 || !c.members.every((m) => typeof m === "string")) {
-      fail("sala.json.cast.members: lista de claves (≥1)");
-    }
-    const members = c.members as string[];
-    const labels = new Set<string>();
-    for (const m of members) {
-      const a = parsed.find((x) => x.key === m);
-      if (!a) fail(`sala.json.cast: "${m}" no es un agente`);
-      if (a.voice.reuse) fail(`sala.json.cast: "${m}" reusa un agente; el elenco necesita voice_id propio`);
-      if (a.enabled === false) fail(`sala.json.cast: "${m}" está deshabilitado`);
-      const label = castLabel(a.name);
-      if (!label || labels.has(label)) fail(`sala.json.cast: etiqueta de voz repetida o vacía para "${m}"`);
-      labels.add(label);
-    }
-    if (c.default !== undefined && (typeof c.default !== "string" || !members.includes(c.default))) {
-      fail("sala.json.cast.default: debe ser uno de members");
-    }
-    const agentId =
-      c.agent_id === undefined || c.agent_id === null
-        ? null
-        : typeof c.agent_id === "string" && c.agent_id.trim()
-          ? c.agent_id.trim()
-          : fail("sala.json.cast.agent_id inválido");
-    cast = { agent_id: agentId, members, ...(typeof c.default === "string" ? { default: c.default } : {}) };
-  }
+  const cast = parseCast((raw as Record<string, unknown>).cast, parsed, "cast", false);
+  // Elenco de la OFICINA: mismas voces de la sala, repartidas entre los runs
+  // vivos. Un miembro apagado en la sala (enabled:false) sí puede prestar su
+  // voz aquí: en la oficina no tiene figura propia, solo voz.
+  const office = parseCast((raw as Record<string, unknown>).office, parsed, "office", true);
   const stationRaw = (raw as Record<string, unknown>).station;
   let station: SalaStation | undefined;
   if (stationRaw !== undefined) {
@@ -294,8 +271,40 @@ export function parseSalaConfig(raw: unknown): SalaConfig {
     agents: parsed,
     ...(topic !== undefined ? { topic: str(topic, "sala.json.topic", 400) } : {}),
     ...(cast ? { cast } : {}),
+    ...(office ? { office } : {}),
     ...(station ? { station } : {}),
   };
+}
+
+function parseCast(value: unknown, parsed: SalaAgentConfig[], field: "cast" | "office", allowDisabled: boolean): SalaCast | undefined {
+  if (value === undefined) return undefined;
+  const where = `sala.json.${field}`;
+  if (!value || typeof value !== "object") fail(`${where}: debe ser un objeto`);
+  const c = value as Record<string, unknown>;
+  if (!Array.isArray(c.members) || c.members.length < 1 || !c.members.every((m) => typeof m === "string")) {
+    fail(`${where}.members: lista de claves (≥1)`);
+  }
+  const members = c.members as string[];
+  const labels = new Set<string>();
+  for (const m of members) {
+    const a = parsed.find((x) => x.key === m);
+    if (!a) fail(`${where}: "${m}" no es un agente`);
+    if (a.voice.reuse) fail(`${where}: "${m}" reusa un agente; el elenco necesita voice_id propio`);
+    if (!allowDisabled && a.enabled === false) fail(`${where}: "${m}" está deshabilitado`);
+    const label = castLabel(a.name);
+    if (!label || labels.has(label)) fail(`${where}: etiqueta de voz repetida o vacía para "${m}"`);
+    labels.add(label);
+  }
+  if (c.default !== undefined && (typeof c.default !== "string" || !members.includes(c.default))) {
+    fail(`${where}.default: debe ser uno de members`);
+  }
+  const agentId =
+    c.agent_id === undefined || c.agent_id === null
+      ? null
+      : typeof c.agent_id === "string" && c.agent_id.trim()
+        ? c.agent_id.trim()
+        : fail(`${where}.agent_id inválido`);
+  return { agent_id: agentId, members, ...(typeof c.default === "string" ? { default: c.default } : {}) };
 }
 
 /** Idioma en que habla el personaje (el tutor reusado es inglés). */

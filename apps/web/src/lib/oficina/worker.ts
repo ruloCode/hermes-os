@@ -298,14 +298,22 @@ export class OfficeCharacter {
     this.root.add(this.hitbox);
   }
 
-  /** Aplica el estado real del personaje (lo que dice el agente). */
-  setState(w: OfficeWorker) {
+  /** Aplica el estado real del personaje (lo que dice el agente). `voice` = la voz que presta en el elenco de la oficina. */
+  setState(w: OfficeWorker, voice?: string) {
     const was = this.status;
     this.status = w.status;
     this.nextAction = w.status === "working" ? w.action : undefined;
     if (w.status === "done" && was !== "done") this.celebrate();
     this.paintBulb();
-    this.drawBubble(w.name, w.task.summary);
+    this.drawBubble(voice ? `🎙 ${voice} · ${w.name}` : w.name, w.task.summary);
+  }
+
+  private talk = 0;
+  private talkTarget = 0;
+
+  /** Su voz suena en la llamada del equipo: el cuerpo late con el volumen real. */
+  setTalking(level: number) {
+    this.talkTarget = Math.max(0, Math.min(1, level));
   }
 
   private cardScale = 1;
@@ -423,6 +431,13 @@ export class OfficeCharacter {
       this.body.scale.setScalar(pop);
       this.turnY += (s.turn - this.turnY) * Math.min(1, dt * 6);
     }
+    // Hablando: late con el volumen y se ilumina (sin pisar el brillo de "seleccionado").
+    this.talk += (this.talkTarget - this.talk) * Math.min(1, dt * 12);
+    if (this.talk > 0.01) {
+      const beat = 1 + this.talk * (0.06 + Math.abs(Math.sin(t * 14)) * 0.08);
+      this.body.scale.set(this.body.scale.x * (2 - beat) ** 0.3, this.body.scale.y * beat, this.body.scale.z * (2 - beat) ** 0.3);
+      this.skin.emissiveIntensity = Math.max(this.selected ? 0.28 : 0, this.talk * 0.35);
+    } else if (!this.selected && this.skin.emissiveIntensity !== 0) this.skin.emissiveIntensity = 0;
     this.body.position.y = lift;
     this.body.rotation.y = this.turnY + twirl;
     this.body.rotation.z = s.roll;

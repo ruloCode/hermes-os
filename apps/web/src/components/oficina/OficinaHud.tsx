@@ -128,6 +128,7 @@ export function Toolbar({
   replyVoice,
   onReplyVoice,
   hermesCall,
+  callLabel = "Hermes",
   onHermesCall,
 }: {
   mode: OfficeMode;
@@ -143,6 +144,8 @@ export function Toolbar({
   replyVoice: boolean;
   onReplyVoice: () => void;
   hermesCall: "off" | "connecting" | "on" | "unavailable";
+  /** A quién llama el botón: "Hermes" o "Equipo" (el elenco de la oficina). */
+  callLabel?: string;
   onHermesCall: () => void;
 }) {
   return (
@@ -154,8 +157,8 @@ export function Toolbar({
       ) : null}
       <div className={`flex items-center gap-0.5 rounded-xl p-1 ${glass}`}>
         {hermesCall !== "unavailable" ? (
-          <ToolButton active={hermesCall === "on"} onClick={onHermesCall} title="Llamar a Hermes por voz (Y en el control)">
-            {hermesCall === "on" ? "📞 Colgar" : hermesCall === "connecting" ? "📞 Conectando…" : "📞 Hermes"}
+          <ToolButton active={hermesCall === "on"} onClick={onHermesCall} title={`Llamar a ${callLabel} por voz (Y en el control)`}>
+            {hermesCall === "on" ? "📞 Colgar" : hermesCall === "connecting" ? "📞 Conectando…" : `📞 ${callLabel}`}
           </ToolButton>
         ) : null}
         <ToolButton active={replyVoice} onClick={onReplyVoice} title="Leer en voz alta la respuesta del agente al que le hablaste">
@@ -251,7 +254,7 @@ export function ControlsHint({ mode, pad, padConnected }: { mode: OfficeMode; pa
     [<PadGlyph key="k" b="RT" />, "correr"],
     [<PadGlyph key="k" b="A" />, "hablar / contratar"],
     [<PadGlyph key="k" b="X" />, "saltar"],
-    [<PadGlyph key="k" b="Y" />, "llamar a Hermes"],
+    [<PadGlyph key="k" b="Y" />, "llamar por voz"],
     [
       <span key="k" className="flex gap-0.5">
         <PadGlyph b="LB" />
@@ -309,7 +312,7 @@ const HELP: [string[], string][] = [
   [["A"], "Hablar con el agente o contratar en el escritorio cercano · en la conversación: escuchar, parar y enviar"],
   [["X"], "Saltar · en la conversación: volver a hablar"],
   [["B"], "Cancelar / cerrar"],
-  [["Y"], "Llamar a Hermes por voz (y colgar)"],
+  [["Y"], "Llamar por voz al equipo (o a Hermes) y colgar"],
   [["LB", "RB"], "Ir al agente anterior / siguiente"],
   [["View"], "Vista aérea / explorar"],
   [["Menu"], "Esta ayuda"],

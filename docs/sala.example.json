@@ -64,5 +64,12 @@
     "name": "Nombre de la estación",
     "line": "A",
     "default_language": "es"
+  },
+  "office": {
+    "agent_id": null,
+    "members": [
+      "ventas"
+    ],
+    "default": "ventas"
   }
 }

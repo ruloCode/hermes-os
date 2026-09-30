@@ -578,6 +578,64 @@ const TOOLS: ToolDef[] = [
 // respuesta de la ruta sale del GTFS, no de la memoria del modelo. Además de
 // devolver texto, pintan la tarjeta en pantalla.
 
+/**
+ * Tools del ELENCO DE LA OFICINA (client tools en el navegador, /oficina). El
+ * reparto voz ↔ agente cambia con los runs, así que el modelo NUNCA lo
+ * recuerda: lo lee de office_team. Todas devuelven texto con datos reales.
+ */
+const OFFICE_TOOLS: ToolDef[] = [
+  {
+    name: "office_team",
+    description:
+      "Lista REAL de los agentes vivos de la oficina: qué voz tiene cada uno, su proyecto, su estado, su tarea y lo último que hizo. Llámala al empezar la llamada, antes de hablar del estado de cualquiera, y cada vez que no sepas quién tiene qué voz: el reparto cambia cuando llegan o se van agentes.",
+    parameters: { type: "object", properties: {}, required: [] },
+    expects_response: true,
+    response_timeout_secs: 8,
+  },
+  {
+    name: "office_tell",
+    description:
+      "Le pasa una instrucción a UN agente de la oficina y continúa su misma sesión (si está trabajando, queda en cola y se le pasa al terminar). Úsala una vez por agente cuando el humano le pida algo a uno o a varios. Devuelve si se envió o por qué no.",
+    parameters: {
+      type: "object",
+      properties: {
+        who: { type: "string", description: "A quién: el nombre de su voz (\"Iván\"), su proyecto o su tarea, tal como lo dijo el humano" },
+        instruction: { type: "string", description: "La instrucción completa, en segunda persona, lista para el agente" },
+      },
+      required: ["who", "instruction"],
+    },
+    expects_response: true,
+    response_timeout_secs: 12,
+  },
+  {
+    name: "office_hire",
+    description:
+      "Contrata un agente NUEVO en un proyecto (aparece en su escritorio y recibe una voz libre). Úsala cuando el humano pida trabajo nuevo o en un proyecto donde no hay nadie. project = slug o nombre del proyecto; \"general\" para tareas que no son de un repo.",
+    parameters: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Proyecto del vault (slug o nombre) o \"general\"" },
+        instruction: { type: "string", description: "La tarea completa para el agente nuevo" },
+      },
+      required: ["project", "instruction"],
+    },
+    expects_response: true,
+    response_timeout_secs: 12,
+  },
+  {
+    name: "office_report",
+    description:
+      "Las últimas líneas REALES de un agente (tools, resultados y su texto final). Úsala cuando pregunten qué hizo, en qué va o por qué falló uno en particular.",
+    parameters: {
+      type: "object",
+      properties: { who: { type: "string", description: "El nombre de su voz, su proyecto o su tarea" } },
+      required: ["who"],
+    },
+    expects_response: true,
+    response_timeout_secs: 8,
+  },
+];
+
 const ESTACION_TOOLS: ToolDef[] = [
   {
     name: "metro_route",
@@ -1126,6 +1184,99 @@ async function setupCast(toolIdByName: Map<string, string>): Promise<string | nu
   return agentId;
 }
 
+const OFFICE_AGENT_NAME = "Hermes Oficina · Elenco";
+
+/**
+ * ELENCO DE LA OFICINA: un agente multi-voz como el de la Sala, pero sus
+ * personajes no son personas fijas: el líder (default) habla por la oficina y
+ * cada voz del pool se la presta al run vivo que el dashboard le asigne. El
+ * modelo es un director con dos reglas duras: el estado sale de las tools y
+ * nadie dice que terminó hasta que llega el aviso real.
+ */
+function officePrompt(lead: SalaOwn, pool: SalaOwn[]): string {
+  const L = castLabel(lead.name);
+  const voices = pool.map((m) => `<${castLabel(m.name)}> (${m.name})`).join(", ");
+  return `Eres el DIRECTOR de voces de la Oficina de agentes 3D de ${OWNER}. En la oficina trabajan agentes de código reales (sesiones de Claude) y cada uno tiene una voz. Tú interpretas esas voces; el trabajo lo hacen ellos.
+
+VOCES:
+- <${L}> es ${lead.name}, el líder de la oficina: saluda, contrata agentes nuevos, reparte trabajo y habla de lo general.
+- ${voices}: cada una es la voz del agente que office_team diga que la tiene AHORA. Una voz sin agente asignado no habla.
+
+REGLAS DE TURNO (obligatorias):
+- TODO lo que digas va dentro de etiquetas de voz: <Etiqueta>texto</Etiqueta>. Nunca texto fuera de etiquetas, nunca etiquetas anidadas, nunca acotaciones.
+- Si ${OWNER} nombra a un agente (por su voz, su proyecto o su tarea), responde SOLO ese agente, con su voz.
+- Si habla al equipo ("todos", "equipo") o pide cosas a varios, llama office_tell una vez por agente y cada uno confirma con su voz en UNA frase corta.
+- Máximo 2 frases por voz por turno. Habla natural, sin listas ni rutas completas de archivos. Los nombres de archivo se dicen como palabras, sin extensión, sin guiones ni "punto md" ("mejoras flujo contenido", no "mejoras guion flujo guion contenido punto md"). No leas costos ni tiempos del run salvo que pregunten.
+
+REGLAS DE DATO (por encima de cualquier otra):
+- Al empezar la llamada y antes de hablar del estado de cualquiera, llama office_team. El reparto de voces cambia cuando llegan o se van agentes: nunca lo recuerdes, léelo.
+- Para pedirle algo a un agente, llama office_tell y di lo que devuelva. Un agente NUNCA dice que ya terminó ni inventa avances: el resultado llega después.
+- Los mensajes que empiezan con "[aviso]" vienen de la oficina, no de ${OWNER}: cuéntale el resultado con la voz del agente que indique el aviso, en 1 a 3 frases, solo con lo que dice el aviso. Si el aviso dice "(recortado)", NO completes ni deduzcas lo que falta: di lo que sí está y ofrece traer el detalle con office_report.
+- Cada número y cada nombre que digas debe estar escrito tal cual en el aviso o en una tool. Si una tabla trae varias columnas, no mezcles filas: di el dato con su archivo exacto.
+- Para trabajo nuevo usa office_hire (lo anuncia <${L}>). Para "qué hizo" o "por qué falló" usa office_report.
+- Si una tool falla o no encuentra al agente, dilo en una frase y repregunta. Nunca completes de memoria.
+- Si hay una pausa larga, espera en silencio.
+
+Hoy es {{today}}. Contexto: {{session_scope}}`;
+}
+
+function officeConfig(lead: SalaOwn, pool: SalaOwn[], toolIds: string[]): unknown {
+  const members = [lead, ...pool];
+  return {
+    agent: {
+      first_message: `<${castLabel(lead.name)}>Aquí la oficina. ¿Qué necesitas del equipo?</${castLabel(lead.name)}>`,
+      language: lead.voice.language,
+      dynamic_variables: {
+        dynamic_variable_placeholders: {
+          session_scope: `${OWNER} está en la Oficina de agentes 3D.`,
+          today: "Fecha no disponible.",
+        },
+      },
+      prompt: { prompt: officePrompt(lead, pool), llm: CAST_LLM, tool_ids: toolIds, temperature: 0.5 },
+    },
+    tts: {
+      voice_id: lead.voice.voice_id,
+      model_id: lead.voice.language === "en" ? "eleven_flash_v2" : "eleven_flash_v2_5",
+      supported_voices: members.map((m) => ({
+        label: castLabel(m.name),
+        voice_id: m.voice.voice_id,
+        description: `${m.name}: úsala para TODO lo que diga la voz <${castLabel(m.name)}>.`,
+        ...(m.voice.language !== lead.voice.language ? { language: m.voice.language } : {}),
+      })),
+    },
+    conversation: {
+      max_duration_seconds: 1800,
+      client_events: [
+        "audio",
+        "interruption",
+        "agent_response",
+        "user_transcript",
+        "agent_response_correction",
+        "agent_tool_response",
+        "agent_chat_response_part",
+      ],
+    },
+    turn: { turn_timeout: 30, mode: "turn" },
+  };
+}
+
+async function setupOfficeCast(): Promise<string | null> {
+  const config = await readSalaConfig();
+  if (!config?.office) return null;
+  const members = config.office.members.map((k) => config.agents.find((a) => a.key === k)).filter((a): a is SalaOwn => Boolean(a && !a.voice.reuse));
+  const lead = members.find((m) => m.key === (config.office!.default ?? members[0].key)) ?? members[0];
+  const pool = members.filter((m) => m.key !== lead.key);
+  console.log(`⚙️  Oficina · Elenco (${lead.name} lidera; voces: ${pool.map((m) => m.name).join(", ")})…`);
+  for (const m of members) await ensureVoice(m.voice.voice_id, m.voice.voice_name);
+  const ids = await upsertTools(OFFICE_TOOLS);
+  const agentId = await upsertAgent(OFFICE_AGENT_NAME, officeConfig(lead, pool, ids));
+  const raw = JSON.parse(await readFile(SALA_PATH, "utf8")) as { office: Record<string, unknown> };
+  raw.office.agent_id = agentId;
+  await writeFile(SALA_PATH, JSON.stringify(raw, null, 2) + "\n");
+  console.log(`  ✎ office.agent_id escrito en ${SALA_PATH}`);
+  return agentId;
+}
+
 async function setupSala(toolIdByName: Map<string, string>): Promise<{ key: string; agentId: string }[]> {
   const config = await readSalaConfig();
   if (!config) {
@@ -1191,6 +1342,7 @@ if (!SALA_ONLY) {
 
 const sala = await setupSala(toolIdByName);
 const castId = await setupCast(toolIdByName);
+const officeId = await setupOfficeCast();
 
 console.log(`\n✅ Listo. Agrega esto a tu .env:\n
 NEXT_PUBLIC_ELEVENLABS_AGENT_ID=${agentId}
@@ -1200,3 +1352,4 @@ if (sala.length) {
   for (const { key, agentId: id } of sala) console.log(`  ${key} → ${id}`);
 }
 if (castId) console.log(`  cast (elenco multi-voz) → ${castId}`);
+if (officeId) console.log(`  office (elenco de la oficina) → ${officeId}`);

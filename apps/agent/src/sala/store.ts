@@ -8,6 +8,7 @@ import {
   type ProjectStatus,
   type SalaAgentConfig,
   type SalaAgentPublic,
+  type OfficeCastPublic,
   type SalaCastPublic,
   type SalaConfig,
   type SalaStation,
@@ -65,11 +66,12 @@ export function salaAgentId(agent: SalaAgentConfig): string | null {
 export async function resolveSalaAgentId(key: string): Promise<{ agentId: string | null; hint: string }> {
   const config = await readSalaConfig();
   if (!config) return { agentId: null, hint: `No existe ${SALA_PATH} (plantilla en docs/sala.example.json)` };
-  if (key === "cast") {
-    if (!config.cast) return { agentId: null, hint: "sala.json no define un elenco (cast)" };
+  if (key === "cast" || key === "office") {
+    const cast = key === "cast" ? config.cast : config.office;
+    if (!cast) return { agentId: null, hint: `sala.json no define el elenco "${key}"` };
     return {
-      agentId: config.cast.agent_id ?? null,
-      hint: config.cast.agent_id ? "" : "El elenco aún no existe en ElevenLabs — corre pnpm setup:elevenlabs --sala",
+      agentId: cast.agent_id ?? null,
+      hint: cast.agent_id ? "" : "El elenco aún no existe en ElevenLabs — corre pnpm setup:elevenlabs --sala",
     };
   }
   const agent = config.agents.find((a) => a.key === key);
@@ -94,6 +96,22 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /** Elenco público (o null si sala.json no lo define). */
+/**
+ * Elenco de la OFICINA tal como lo usa el dashboard: el líder (default, habla
+ * por la oficina) y el pool de voces que se reparten entre los runs vivos.
+ */
+export async function officeCast(): Promise<OfficeCastPublic | null> {
+  const config = await readSalaConfig();
+  if (!config?.office) return null;
+  const voices = config.office.members
+    .map((k) => config.agents.find((a) => a.key === k))
+    .filter((a): a is NonNullable<typeof a> => Boolean(a))
+    .map((a) => ({ key: a.key, name: a.name, label: castLabel(a.name) }));
+  const leadKey = config.office.default ?? config.office.members[0];
+  const lead = voices.find((v) => v.key === leadKey) ?? voices[0];
+  return { ready: Boolean(config.office.agent_id), lead, pool: voices.filter((v) => v.key !== lead.key) };
+}
+
 export async function salaCast(): Promise<SalaCastPublic | null> {
   const config = await readSalaConfig();
   if (!config?.cast) return null;
