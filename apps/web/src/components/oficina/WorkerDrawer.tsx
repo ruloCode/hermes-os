@@ -8,10 +8,12 @@
 // exacto) y los dos botones: el run está pausado hasta que decidas.
 
 import { useEffect, useRef, useState } from "react";
-import type { OfficeWorker, OfficeWorkerStatus } from "@hermes/shared";
+import { PLAN_TOOL, officeModeLabel, type OfficeMode, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
+import { Markdown } from "@/components/Markdown";
 import { claudeKillRun, claudeRunStreamUrl } from "@/lib/hermes";
 import type { OfficeDictation } from "@/hooks/useOfficeDictation";
 import { VoiceComposer } from "./VoiceComposer";
+import { ModePicker, modeNote } from "./ModePicker";
 
 const STATUS_LABEL: Record<OfficeWorkerStatus, string> = {
   starting: "Arrancando",
@@ -110,6 +112,9 @@ export function WorkerDrawer({
   onSend,
   deciding,
   onDecide,
+  mode,
+  onModeChange,
+  model,
 }: {
   worker: OfficeWorker;
   projectName: string;
@@ -121,6 +126,10 @@ export function WorkerDrawer({
   onSend: () => void;
   deciding: boolean;
   onDecide: (allow: boolean) => void;
+  /** Modo con que correrá lo próximo que le digas (continuar su sesión). */
+  mode: OfficeMode;
+  onModeChange: (mode: OfficeMode) => void;
+  model: string;
 }) {
   const isRun = worker.source === "run" && !simulated;
   const stream = useRunStream(isRun ? worker.id : null);
@@ -128,6 +137,10 @@ export function WorkerDrawer({
   const [stopping, setStopping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const active = worker.status !== "done" && worker.status !== "error";
+  const plan = worker.approval?.tool === PLAN_TOOL;
+  // Un plan aprobado se ejecuta en el modo elegido para el agente (Auto si ese modo es Plan).
+  const runMode: OfficeMode = mode === "plan" ? "auto" : mode;
+  const dictated = voice.text.trim();
 
   useEffect(() => {
     if (!active) return;
@@ -157,6 +170,7 @@ export function WorkerDrawer({
           </div>
           <p className="mt-0.5 text-xs text-text-dim">
             {projectName} · {SOURCE_LABEL[worker.source]}
+            {worker.mode ? ` · modo ${officeModeLabel(worker.mode)}` : ""}
           </p>
         </div>
         <button
@@ -187,12 +201,18 @@ export function WorkerDrawer({
       {worker.approval ? (
         <section className="border-b border-line bg-accent/10 px-4 py-3" aria-live="assertive">
           <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm font-medium text-text">✋ Pide permiso para ejecutar</p>
+            <p className="text-sm font-medium text-text">{plan ? "📋 Propone este plan" : "✋ Pide permiso para ejecutar"}</p>
             <p className="shrink-0 text-xs text-text-dim tabular-nums">se niega sola en {remaining(worker.approval.expiresAt)}</p>
           </div>
-          <pre className="mt-2 max-h-40 overflow-y-auto rounded-md border border-line bg-panel px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap text-text">
-            {worker.approval.detail}
-          </pre>
+          {plan ? (
+            <div className="mt-2 max-h-72 overflow-y-auto rounded-md border border-line bg-panel px-3 py-2 text-sm">
+              <Markdown source={worker.approval.detail} />
+            </div>
+          ) : (
+            <pre className="mt-2 max-h-40 overflow-y-auto rounded-md border border-line bg-panel px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap text-text">
+              {worker.approval.detail}
+            </pre>
+          )}
           <div className="mt-3 flex gap-2">
             <button
               type="button"
@@ -200,7 +220,8 @@ export function WorkerDrawer({
               onClick={() => onDecide(true)}
               className="flex-1 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
-              Aprobar{padConnected ? " (A)" : ""}
+              {plan ? `Aprobar y ejecutar en ${officeModeLabel(runMode)}` : "Aprobar"}
+              {padConnected ? " (A)" : ""}
             </button>
             <button
               type="button"
@@ -208,9 +229,15 @@ export function WorkerDrawer({
               onClick={() => onDecide(false)}
               className="flex-1 rounded-md border border-line px-3 py-2 text-sm text-text hover:border-red hover:text-red disabled:opacity-50"
             >
-              Negar{padConnected ? " (B)" : ""}
+              {plan ? "Pedir cambios" : "Negar"}
+              {padConnected ? " (B)" : ""}
             </button>
           </div>
+          <p className="mt-2 text-xs text-text-dim">
+            {dictated
+              ? `Al ${plan ? "pedir cambios" : "negar"} le llega lo que dictaste: “${dictated.length > 80 ? `${dictated.slice(0, 79)}…` : dictated}”`
+              : `Dicta abajo ${plan ? "qué cambiar" : "por qué no"} (${padConnected ? "X" : "el micrófono"}) y le llega con tu decisión.`}
+          </p>
         </section>
       ) : null}
 
@@ -235,6 +262,16 @@ export function WorkerDrawer({
 
       {/* Conversación por voz: continúa la sesión del run (o abre uno nuevo en su proyecto). */}
       <section className="border-t border-line bg-panel-2/40 px-4 py-3">
+        {worker.source === "run" ? (
+          <div className="mb-3">
+            <ModePicker value={mode} onChange={onModeChange} padConnected={padConnected} note={modeNote(mode, model)} />
+            {plan ? (
+              <p className="mt-1 text-xs text-text-faint">Así ejecutará el plan cuando lo apruebes (Plan = Auto).</p>
+            ) : active ? (
+              <p className="mt-1 text-xs text-text-faint">Un run que ya corre no cambia de modo: se aplica cuando le vuelvas a hablar.</p>
+            ) : null}
+          </div>
+        ) : null}
         <VoiceComposer
           voice={voice}
           padConnected={padConnected}

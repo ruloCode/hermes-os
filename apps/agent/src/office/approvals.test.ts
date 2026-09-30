@@ -2,8 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   APPROVAL_TIMEOUT_MS,
+  DEFAULT_OFFICE_MODE,
   THINKING_AFTER_MS,
   denialMessage,
+  nextOfficeMode,
+  officeModeFromCli,
+  officeModeLabel,
+  setWorkerMode,
   describeApproval,
   isReadOnlyBash,
   needsApproval,
@@ -176,5 +181,69 @@ describe("setWorkerApproval: levantar y bajar la mano", () => {
 
   it("un personaje que no existe no levanta la mano", () => {
     assert.equal(setWorkerApproval(new Map(), "nadie", approval()), null);
+  });
+});
+
+describe("modos de la oficina (los de Claude Code)", () => {
+  it("el modo que reporta el CLI se traduce sin inventar etiquetas", () => {
+    assert.equal(officeModeFromCli("auto"), "auto");
+    assert.equal(officeModeFromCli("acceptEdits"), "acceptEdits");
+    assert.equal(officeModeFromCli("plan"), "plan");
+    assert.equal(officeModeFromCli("manual"), "manual");
+    // "default" es el nombre viejo de manual (con Haiku, auto arranca así).
+    assert.equal(officeModeFromCli("default"), "manual");
+    assert.equal(officeModeFromCli("bypassPermissions"), undefined);
+    assert.equal(officeModeFromCli(undefined), undefined);
+  });
+
+  it("Shift+Tab recorre los cuatro y vuelve al principio", () => {
+    const seen = [DEFAULT_OFFICE_MODE];
+    for (let i = 0; i < 4; i++) seen.push(nextOfficeMode(seen[seen.length - 1]));
+    assert.deepEqual(seen, ["auto", "acceptEdits", "plan", "manual", "auto"]);
+    assert.equal(officeModeLabel("acceptEdits"), "Editar");
+  });
+
+  it("un plan se describe por su título y se muestra entero", () => {
+    const plan = "# Plan: agregar la línea adiós\n\n## Pasos\n1. Editar a.txt";
+    const d = describeApproval("ExitPlanMode", { plan });
+    assert.equal(d.summary, "Plan: agregar la línea adiós");
+    assert.equal(d.detail, plan);
+    assert.equal(describeApproval("ExitPlanMode", { plan: "" }).detail, "(el agente no escribió el plan)");
+  });
+
+  it("pedir cambios a un plan le dice que siga planeando", () => {
+    assert.match(denialMessage("plan-changes", "hazlo en dos commits"), /sigue en modo plan/);
+    assert.match(denialMessage("plan-changes", "hazlo en dos commits"), /dos commits/);
+  });
+
+  it("la tarjeta de un plan dice que propone, no que pide permiso", () => {
+    const workers = working();
+    const w = setWorkerApproval(workers, "r1", { ...approval("Plan: migrar la tabla"), tool: "ExitPlanMode" }, "allowed", T0 + 2000)!;
+    assert.equal(w.task.summary, "Propone un plan: migrar la tabla");
+    assert.equal(setWorkerApproval(workers, "r1", null, "plan-changes", T0 + 3000)!.lines.at(-1), "↺ pediste cambios al plan");
+  });
+
+  it("el modo real se guarda y solo publica cuando cambia", () => {
+    const workers = working();
+    assert.equal(setWorkerMode(workers, "r1", "plan")?.mode, "plan");
+    assert.equal(setWorkerMode(workers, "r1", "plan"), null);
+    assert.equal(setWorkerMode(workers, "r1", undefined), null);
+    assert.equal(setWorkerMode(workers, "r1", "auto")?.mode, "auto");
+  });
+
+  it("lo que el modo Auto niega solo se ve como bloqueado, con su motivo", () => {
+    const workers = working();
+    reduceOfficeEvent(
+      workers,
+      ev("tool_result", T0 + 2000, {
+        detail: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Data Exfiltration]. If you have other tasks",
+      }),
+    );
+    const w = workers.get("r1")!;
+    assert.equal(w.status, "blocked");
+    assert.equal(w.task.summary, "El modo Auto lo negó: Data Exfiltration");
+    // La siguiente tool lo devuelve a trabajar, como cualquier bloqueo.
+    reduceOfficeEvent(workers, ev("tool_call", T0 + 3000, { toolName: "Read", detail: JSON.stringify({ file_path: "/a.ts" }) }));
+    assert.equal(workers.get("r1")!.status, "working");
   });
 });

@@ -15,11 +15,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   APPROVAL_TIMEOUT_MS,
+  PLAN_TOOL,
   denialMessage,
   describeApproval,
   type ApprovalDecision,
   type ApprovalOutcome,
   type OfficeApproval,
+  type OfficeMode,
 } from "@hermes/shared";
 import { setOfficeApproval } from "./state.js";
 
@@ -38,13 +40,20 @@ const DECIDED_TTL_MS = 60_000;
 /** token del run → id del personaje (run). */
 const runTokens = new Map<string, string>();
 
-function close(id: string, outcome: ApprovalOutcome, note?: string): boolean {
+function close(id: string, outcome: ApprovalOutcome, note?: string, mode?: OfficeMode): boolean {
   const p = pending.get(id);
   if (!p) return false;
   pending.delete(id);
   clearTimeout(p.timer);
   const decision: ApprovalDecision =
-    outcome === "allowed" ? { behavior: "allow", updatedInput: p.input } : { behavior: "deny", message: denialMessage(outcome, note) };
+    outcome === "allowed"
+      ? {
+          behavior: "allow",
+          updatedInput: p.input,
+          // Aprobar puede cambiar el modo de la sesión: un plan aprobado se ejecuta en Auto (o el que elijas).
+          ...(mode ? { updatedPermissions: [{ type: "setMode" as const, mode, destination: "session" as const }] } : {}),
+        }
+      : { behavior: "deny", message: denialMessage(outcome, note) };
   decided.set(id, { decision, workerId: p.workerId });
   setTimeout(() => decided.delete(id), DECIDED_TTL_MS).unref();
   setOfficeApproval(p.workerId, null, outcome);
@@ -84,9 +93,15 @@ export function requestApproval(
   return { id, decision };
 }
 
-/** El humano decidió. false = ya no existía (decidida, vencida o cerrada). */
-export function decideApproval(id: string, allow: boolean, note?: string): boolean {
-  return close(id, allow ? "allowed" : "denied", note);
+/**
+ * El humano decidió. false = ya no existía (decidida, vencida o cerrada).
+ * En un plan, negar es "pedir cambios" (sigue planeando) y aprobar lo ejecuta
+ * en `mode` (Auto si no se dice otro, como el "sí" por defecto de Claude Code).
+ */
+export function decideApproval(id: string, allow: boolean, note?: string, mode?: OfficeMode): boolean {
+  const plan = pending.get(id)?.approval.tool === PLAN_TOOL;
+  if (!allow) return close(id, plan ? "plan-changes" : "denied", note);
+  return close(id, "allowed", undefined, plan ? (mode && mode !== "plan" ? mode : "auto") : mode);
 }
 
 /** El run terminó o se detuvo: lo que esperaba se cierra sin ejecutarse. */

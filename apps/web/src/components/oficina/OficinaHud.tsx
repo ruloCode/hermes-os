@@ -316,7 +316,7 @@ const HELP: [string[], string][] = [
   [["B"], "Cancelar / cerrar"],
   [["Y"], "Llamar por voz al equipo (o a Hermes) y colgar"],
   [["LB", "RB"], "Ir al agente anterior / siguiente"],
-  [["View"], "Vista aérea / explorar"],
+  [["View"], "Vista aérea / explorar · en la conversación: cambiar de modo (Auto, Editar, Plan, Preguntar)"],
   [["Menu"], "Esta ayuda"],
 ];
 

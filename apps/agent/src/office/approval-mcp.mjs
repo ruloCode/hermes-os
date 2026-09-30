@@ -45,6 +45,8 @@ async function http(method, path, body) {
 /** Pide la decisión al agente y espera (el agente aplica el tope de espera). */
 async function decide(toolName, input) {
   if (FAKE === "allow") return { behavior: "allow", updatedInput: input };
+  if (FAKE.startsWith("allow-mode:"))
+    return { behavior: "allow", updatedInput: input, updatedPermissions: [{ type: "setMode", mode: FAKE.slice(11), destination: "session" }] };
   if (FAKE === "deny") return deny("Negado (modo de prueba)");
   if (!URL_BASE || !TOKEN) return deny("Aprobaciones sin configurar: no hay a quién preguntarle");
   try {

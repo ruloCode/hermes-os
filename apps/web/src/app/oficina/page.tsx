@@ -17,12 +17,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_OFFICE_MODE,
   GENERAL_PROJECT,
+  PLAN_TOOL,
   assignSeats,
+  isOfficeMode,
+  nextOfficeMode,
+  officeModeLabel,
   buildOfficeLayout,
   officeCounts,
   TRIGGER_ON,
   type AgentActivityEvent,
+  type OfficeMode as AgentMode,
   type OfficeProject,
   type OfficeState,
   type OfficeUpdate,
@@ -156,6 +162,9 @@ const NO_WORKERS: OfficeWorker[] = [];
 const HERMES_SCOPE =
   "El usuario está en la Oficina de agentes 3D, caminando entre sus agentes con un control. Si pide trabajo en un proyecto, usa work_on_project con ese proyecto: el agente aparece en su escritorio. Si pide algo general, run_task. Responde corto.";
 
+/** Modo de los agentes que contratas (localStorage: es una preferencia de este navegador). */
+const OFFICE_MODE_KEY = "hermes-office-mode";
+
 export default function OficinaPage() {
   const theme = useTheme();
   const ws = useWorkspace();
@@ -177,6 +186,11 @@ export default function OficinaPage() {
   const [daylight, setDaylight] = useState("");
   const [usingPad, setUsingPad] = useState(false);
   const [replyVoice, setReplyVoiceState] = useState(true);
+  // Modo de los agentes que contratas (Auto por defecto, como Claude Code) y el
+  // de cada agente al volver a hablarle, por sesión: una conversación que sigue
+  // conserva el modo que le pusiste.
+  const [officeMode, setOfficeModeState] = useState<AgentMode>(DEFAULT_OFFICE_MODE);
+  const [modeBySession, setModeBySession] = useState<Record<string, AgentMode>>({});
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const sceneRef = useRef<OficinaSceneHandle>(null);
@@ -188,10 +202,18 @@ export default function OficinaPage() {
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
   const spokenRef = useRef(new Set<string>());
+  const cycleModeRef = useRef<() => void>(() => {});
+  const conversationOpenRef = useRef(false);
 
   useEffect(() => {
     setLook(loadLook());
     setReplyVoiceState(replyVoiceEnabled());
+    try {
+      const saved = localStorage.getItem(OFFICE_MODE_KEY);
+      if (isOfficeMode(saved)) setOfficeModeState(saved);
+    } catch {
+      /* sin storage: queda Auto */
+    }
   }, []);
   useEffect(() => {
     const tick = () => setDaylight(daylightAt(new Date()).label);
@@ -267,6 +289,7 @@ export default function OficinaPage() {
   const selectedDesk = selected?.kind === "desk" ? layout.desks.find((d) => d.id === selected.id) : undefined;
   const hiring = !!selectedDesk && !sim;
   const conversationOpen = hiring || !!selectedWorker;
+  conversationOpenRef.current = conversationOpen;
 
   const nearLabel = useMemo(() => {
     if (!near) return null;
@@ -355,21 +378,41 @@ export default function OficinaPage() {
   }, [voice]);
 
   /** Instrucción a un personaje: continúa su sesión si es un run; si no, trabajo nuevo en su proyecto. */
+  const setOfficeMode = useCallback((mode: AgentMode) => {
+    setOfficeModeState(mode);
+    try {
+      localStorage.setItem(OFFICE_MODE_KEY, mode);
+    } catch {
+      /* sin storage: solo esta visita */
+    }
+  }, []);
+
+  /** Modo con que correrá lo próximo que le digas a este agente. */
+  const modeFor = useCallback(
+    (w: OfficeWorker): AgentMode => modeBySession[w.sessionId ?? w.id] ?? w.mode ?? officeMode,
+    [modeBySession, officeMode],
+  );
+
+  const setWorkerMode = useCallback((w: OfficeWorker, mode: AgentMode) => {
+    setModeBySession((prev) => ({ ...prev, [w.sessionId ?? w.id]: mode }));
+  }, []);
+
   const instructWorker = useCallback(
     async (w: OfficeWorker, text: string): Promise<string> => {
-      if (w.source === "run" && w.sessionId) return (await claudeStartRun(text, ws.claudeConfig, w.project, w.sessionId)).runId;
+      const cfg = { ...ws.claudeConfig, permissionMode: modeFor(w) };
+      if (w.source === "run" && w.sessionId) return (await claudeStartRun(text, cfg, w.project, w.sessionId)).runId;
       if (w.project === GENERAL_PROJECT) return (await hermesPost<{ task_id?: string }>("/tasks", { prompt: text })).task_id ?? "";
-      return (await claudeStartRun(text, ws.claudeConfig, w.project)).runId;
+      return (await claudeStartRun(text, cfg, w.project)).runId;
     },
-    [ws.claudeConfig],
+    [ws.claudeConfig, modeFor],
   );
 
   const hireAgent = useCallback(
     async (project: string, text: string): Promise<string> => {
       if (project === GENERAL_PROJECT) return (await hermesPost<{ task_id?: string }>("/tasks", { prompt: text })).task_id ?? "";
-      return (await claudeStartRun(text, ws.claudeConfig, project)).runId;
+      return (await claudeStartRun(text, { ...ws.claudeConfig, permissionMode: officeMode }, project)).runId;
     },
-    [ws.claudeConfig],
+    [ws.claudeConfig, officeMode],
   );
 
   instructRef.current = instructWorker;
@@ -410,7 +453,14 @@ export default function OficinaPage() {
             ...prev,
             workers: prev.workers.map((x) =>
               x.id === w.id
-                ? { ...x, approval: undefined, status: "working", task: { ...x.task, summary: allow ? "aprobado por ti" : "negado por ti" }, lines: [...x.lines, allow ? "✓ aprobado por ti" : "✗ negado por ti"] }
+                ? {
+                    ...x,
+                    approval: undefined,
+                    status: "working",
+                    mode: allow && a.tool === PLAN_TOOL ? "auto" : x.mode,
+                    task: { ...x.task, summary: allow ? "aprobado por ti" : "negado por ti" },
+                    lines: [...x.lines, allow ? "✓ aprobado por ti" : "✗ negado por ti"],
+                  }
                 : x,
             ),
           },
@@ -419,12 +469,25 @@ export default function OficinaPage() {
         return;
       }
       setDeciding(true);
+      const plan = a.tool === PLAN_TOOL;
+      // Lo que dictaste va con tu decisión: el porqué de un "no" o qué cambiar del plan.
+      const note = !allow && voice.text.trim() ? voice.text.trim() : undefined;
+      const chosen = modeFor(w);
+      const mode = plan ? (chosen === "plan" ? "auto" : chosen) : undefined;
       try {
-        const r = await hermesPost<{ ok: boolean; error?: string }>(`/office/approvals/${encodeURIComponent(a.id)}/decide`, { allow });
+        const r = await hermesPost<{ ok: boolean; error?: string }>(`/office/approvals/${encodeURIComponent(a.id)}/decide`, { allow, note, mode });
         if (!r.ok) toast("error", r.error ?? "No se pudo decidir");
         else {
+          if (note) voice.cancel();
           pad.rumble(allow ? "success" : "tap");
-          toast(allow ? "done" : "error", `${allow ? "Aprobado" : "Negado"}: ${a.summary}`);
+          toast(
+            allow ? "done" : "error",
+            plan
+              ? allow
+                ? `Plan aprobado: ${w.name} lo ejecuta en ${officeModeLabel(mode ?? "auto")}`
+                : `Pediste cambios al plan de ${w.name}`
+              : `${allow ? "Aprobado" : "Negado"}: ${a.summary}`,
+          );
         }
       } catch (err) {
         toast("error", `No se pudo decidir: ${err instanceof Error ? err.message : String(err)}`);
@@ -433,7 +496,7 @@ export default function OficinaPage() {
       }
       // `pad` se declara abajo (su rumble lee el control al llamarse).
     },
-    [sim, deciding, toast],
+    [sim, deciding, toast, voice, modeFor],
   );
 
   // La respuesta del agente al que le hablaste, en voz alta (y el control vibra).
@@ -472,6 +535,13 @@ export default function OficinaPage() {
     [workers, selected, near, voice],
   );
 
+  /** Shift+Tab / View: el siguiente modo del agente abierto (o del que vas a contratar). */
+  const cycleMode = () => {
+    if (hiring) setOfficeMode(nextOfficeMode(officeMode));
+    else if (selectedWorker?.source === "run") setWorkerMode(selectedWorker, nextOfficeMode(modeFor(selectedWorker)));
+  };
+  cycleModeRef.current = cycleMode;
+
   const onPadPress = (b: PadButton) => {
     markPad(true);
     const world = sceneRef.current?.world();
@@ -482,6 +552,11 @@ export default function OficinaPage() {
     // Un agente con la mano levantada: A aprueba, B niega (antes que la voz).
     if (conversationOpen && selectedWorker?.approval && (b === "A" || b === "B")) {
       void decideApproval(selectedWorker, b === "A");
+      return;
+    }
+    if (conversationOpen && b === "VIEW") {
+      cycleMode();
+      pad.rumble("tap");
       return;
     }
     if (conversationOpen) {
@@ -624,6 +699,12 @@ export default function OficinaPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Shift+Tab cambia de modo, como en Claude Code (solo con una conversación abierta).
+      if (e.key === "Tab" && e.shiftKey && conversationOpenRef.current) {
+        e.preventDefault();
+        cycleModeRef.current();
+        return;
+      }
       if (e.key !== "Escape") return;
       closeConversation();
       setLookOpen(false);
@@ -649,7 +730,7 @@ export default function OficinaPage() {
       const d = debugRef.current;
       const world = sceneRef.current?.world();
       return {
-        workers: d.workers.map((w) => ({ id: w.id, project: w.project, status: w.status, action: w.action, name: w.name, continues: w.continues })),
+        workers: d.workers.map((w) => ({ id: w.id, project: w.project, status: w.status, action: w.action, name: w.name, continues: w.continues, mode: w.mode })),
         seats: Object.fromEntries(d.seats),
         selected: d.selected,
         desks: d.layout.desks.length,
@@ -793,6 +874,9 @@ export default function OficinaPage() {
           onSend={() => void sendToWorker()}
           deciding={deciding}
           onDecide={(allow) => void decideApproval(selectedWorker, allow)}
+          mode={modeFor(selectedWorker)}
+          onModeChange={(m) => setWorkerMode(selectedWorker, m)}
+          model={ws.claudeConfig.model}
         />
       ) : null}
 
@@ -803,6 +887,8 @@ export default function OficinaPage() {
           projects={projects}
           voice={voice}
           padConnected={pad.connected}
+          mode={officeMode}
+          onModeChange={setOfficeMode}
           onClose={closeConversation}
           onLaunched={(id) => {
             voice.cancel();

@@ -24,7 +24,8 @@ import { notifyMac } from "../notify.js";
 import { emit } from "../events.js";
 import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
 import { childEnv } from "./child-env.js";
-import { registerOfficeWorker } from "../office/state.js";
+import { registerOfficeWorker, setOfficeMode } from "../office/state.js";
+import { officeModeFromCli } from "@hermes/shared";
 import { closeApprovalsFor, issueRunToken, revokeRunToken } from "../office/approvals.js";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
@@ -38,12 +39,11 @@ const MODELS = new Set([
   "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
 ]);
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+// Los modos del CLI (2.1.285): "auto" es el modo con clasificador (antes era
+// un alias de acceptEdits en esta UI; ahora el CLI lo trae de verdad) y
+// "manual" es el nombre nuevo de "default", que se sigue aceptando.
 const PERMISSIONS = new Set(["default", "acceptEdits", "plan", "manual", "auto"]);
-// Valores de UI/legacy → modos reales del CLI.
-const PERMISSION_CLI_MAP: Record<string, string> = {
-  manual: "default",
-  auto: "acceptEdits",
-};
+const PERMISSION_CLI_MAP: Record<string, string> = {};
 
 export interface ClaudeExecOpts {
   prompt: string;
@@ -433,6 +433,12 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
         // (cubre el caso en que el CLI forkee a un id distinto del asignado).
         if (ev?.type === "system" && ev?.subtype === "init" && typeof ev.session_id === "string") {
           run.sdkSessionId = ev.session_id;
+        }
+        // El modo REAL de la sesión (al arrancar y cuando cambia: un plan
+        // aprobado pasa a auto). Con Haiku, "auto" arranca como default: la
+        // oficina muestra lo que el CLI dice, no lo que se pidió.
+        if (ev?.type === "system" && (ev?.subtype === "init" || ev?.subtype === "status") && ev.permissionMode) {
+          setOfficeMode(run.id, officeModeFromCli(ev.permissionMode));
         }
         // Métricas reales del run (costo/duración/turnos) → Orquestador y
         // acumulado diario. El CLI las reporta solo en el evento result final.

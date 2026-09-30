@@ -6,6 +6,9 @@ Recorre la oficina como un usuario, en los dos temas:
      dueño va junto a un agente, "E" abre su panel y Esc lo cierra.
   2b. El agente con la mano levantada: su panel muestra el comando exacto que
      pide y "Aprobar" le baja la mano (vuelve a trabajar).
+  2c. El agente en modo Plan: su panel muestra el plan, Shift+Tab cambia el
+     modo con que lo ejecutará y "Aprobar y ejecutar" lo pasa a trabajar.
+  4b. Contratar abre con el modo Auto elegido (los de Claude Code).
   3. "V" cambia a VISTA AÉREA: clic real en un personaje abre su panel.
   4. En vivo: clic en un escritorio libre (aérea) y "E" frente a uno libre
      (explorar) abren "Contratar" — sin enviar nada.
@@ -93,7 +96,7 @@ def main() -> int:
             time.sleep(2.5)
             d = dbg()
             n = len(d["workers"])
-            check(n == 9 and len(set(d["seats"].values())) == n, f"[{theme}] simulación: 9 agentes, uno por escritorio ({n})")
+            check(n == 10 and len(set(d["seats"].values())) == n, f"[{theme}] simulación: 10 agentes, uno por escritorio ({n})")
             wid = d["workers"][0]["id"]
             page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'worker', id })", wid)
             time.sleep(1.2)
@@ -125,6 +128,34 @@ def main() -> int:
                 after = next(w for w in dbg()["workers"] if w["id"] == ask["id"])
                 check(after["status"] == "working", f"[{theme}] Aprobar le baja la mano ({after['status']})")
                 check(page.get_by_text("Pide permiso para ejecutar").count() == 0, f"[{theme}] el bloque de permiso desaparece")
+                page.keyboard.press("Escape")
+                time.sleep(0.4)
+
+            # 2c. Plan: se lee entero, Shift+Tab cambia el modo de ejecución, aprobar lo ejecuta.
+            planner = next((w for w in dbg()["workers"] if w["name"] == "Agrega modo oscuro"), None)
+            check(planner is not None and planner["mode"] == "plan", f"[{theme}] hay un agente en modo Plan")
+            if planner:
+                page.evaluate("(id) => window.__hermesOficinaWalkTo({ kind: 'worker', id })", planner["id"])
+                time.sleep(1.4)
+                page.keyboard.press("e")
+                time.sleep(0.6)
+                check(page.get_by_text("Propone este plan").count() == 1, f"[{theme}] el panel muestra el plan")
+                check(page.get_by_text("Pasar los colores a variables").count() >= 1, f"[{theme}] con sus pasos")
+                checked = lambda: page.locator('[role=radio][aria-checked=true]').first.inner_text()
+                before = checked()
+                page.keyboard.press("Shift+Tab")
+                time.sleep(0.3)
+                after = checked()
+                check(before == "Plan" and after == "Preguntar", f"[{theme}] Shift+Tab cambia el modo ({before} → {after})")
+                page.get_by_role("radio", name="Editar").click()
+                time.sleep(0.3)
+                btn = page.get_by_role("button", name="Aprobar y ejecutar en Editar")
+                check(btn.count() == 1, f"[{theme}] aprobar dice en qué modo se ejecuta")
+                page.screenshot(path=str(out / f"oficina-plan-{tag}.png"))
+                btn.click()
+                time.sleep(0.6)
+                p2 = next(w for w in dbg()["workers"] if w["id"] == planner["id"])
+                check(p2["status"] == "working", f"[{theme}] el plan aprobado pasa a trabajar ({p2['status']})")
                 page.keyboard.press("Escape")
                 time.sleep(0.4)
 
@@ -175,6 +206,9 @@ def main() -> int:
                 page.keyboard.press("e")
                 time.sleep(0.6)
                 check(page.get_by_text("Contratar un agente").count() == 1, f"[{theme}] E frente a escritorio libre → contratar")
+                radios = page.locator('[role=radio][aria-checked=true]')
+                if radios.count():
+                    check(radios.first.inner_text() == "Auto", f"[{theme}] contratar arranca en Auto")
                 page.screenshot(path=str(out / f"oficina-contratar-{tag}.png"))
                 # Escribir en el diálogo no mueve al personaje.
                 before = dbg()["player"]

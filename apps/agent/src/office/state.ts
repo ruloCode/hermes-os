@@ -13,7 +13,9 @@ import {
   reduceOfficeEvent,
   registerWorker,
   setWorkerApproval,
+  setWorkerMode,
   tickOffice,
+  type OfficeMode,
   type ApprovalOutcome,
   type OfficeApproval,
   type OfficeProject,
@@ -74,6 +76,12 @@ export function setOfficeApproval(id: string, approval: OfficeApproval | null, o
   if (!w) return false;
   publish({ type: "worker", worker: w });
   return true;
+}
+
+/** El CLI reportó el modo de permisos de la sesión: la tarjeta lo muestra tal cual. */
+export function setOfficeMode(id: string, mode: OfficeMode | undefined): void {
+  const w = setWorkerMode(workers, id, mode);
+  if (w) publish({ type: "worker", worker: w });
 }
 
 // Quién está mirando la Oficina: pedir permiso solo tiene sentido si alguien

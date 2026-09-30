@@ -11,7 +11,7 @@
 // con estados propios (pensando/bloqueado) y colores del tema.
 
 import * as THREE from "three";
-import type { OfficeAction, OfficeWorker, OfficeWorkerStatus } from "@hermes/shared";
+import { officeModeLabel, type OfficeAction, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
 import { cardSprite, disposeSprite, mesh, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 
@@ -343,6 +343,8 @@ export class OfficeCharacter {
     this.nextAction = w.status === "working" ? w.action : undefined;
     if (w.status === "done" && was !== "done") this.celebrate();
     this.paintBulb();
+    // El modo va en el chip solo si no es Auto (el default): así se ve quién está en Plan o Preguntar.
+    this.modeTag = w.mode && w.mode !== "auto" ? ` · ${officeModeLabel(w.mode)}` : "";
     this.drawBubble(voice ? `🎙 ${voice} · ${w.name}` : w.name, w.task.summary);
   }
 
@@ -388,8 +390,10 @@ export class OfficeCharacter {
     this.bulb.emissive.set(c).multiplyScalar(0.7);
   }
 
+  private modeTag = "";
+
   private drawBubble(name: string, summary: string) {
-    const key = `${this.status}|${name}|${summary}`;
+    const key = `${this.status}|${this.modeTag}|${name}|${summary}`;
     if (key === this.bubbleKey) return;
     this.bubbleKey = key;
     if (this.bubble) {
@@ -399,7 +403,7 @@ export class OfficeCharacter {
     const p = this.palette;
     const bulb = p.bulb[this.status];
     this.bubble = cardSprite({
-      chip: { text: CHIP[this.status], bg: bulb, color: "#1d1d1d" },
+      chip: { text: CHIP[this.status] + this.modeTag, bg: bulb, color: "#1d1d1d" },
       title: name,
       body: summary || undefined,
       bg: p.card[this.status],

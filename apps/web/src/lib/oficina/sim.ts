@@ -3,12 +3,15 @@
 // SIMULACIÓN en el HUD — la regla del dashboard (todo dato visible es real)
 // se respeta diciendo qué no lo es.
 
-import { APPROVAL_TIMEOUT_MS, type OfficeAction, type OfficeProject, type OfficeState, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
+import { APPROVAL_TIMEOUT_MS, describeApproval, type OfficeAction, type OfficeMode, type OfficeProject, type OfficeState, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
 
 interface Seed {
   project: string;
   name: string;
   status: OfficeWorkerStatus;
+  mode?: OfficeMode;
+  /** Solicitud abierta: la tool y lo que pide (el comando o el plan). */
+  ask?: { tool: string; detail: string };
   action?: OfficeAction;
   summary: string;
   lines: string[];
@@ -65,8 +68,23 @@ const SEEDS: Seed[] = [
     project: "",
     name: "Publica la rama",
     status: "needs_you",
+    mode: "acceptEdits",
+    ask: { tool: "Bash", detail: "git push origin fix/login" },
     summary: "Pide permiso: git push origin fix/login",
     lines: ["❯ Sube el arreglo del login", "⚙ Bash git status", "⚙ Bash git push origin fix/login", "✋ git push origin fix/login"],
+  },
+  {
+    project: "",
+    name: "Agrega modo oscuro",
+    status: "needs_you",
+    mode: "plan",
+    ask: {
+      tool: "ExitPlanMode",
+      detail:
+        "# Plan: modo oscuro en la configuración\n\n## Contexto\nLa app solo tiene tema claro; los colores están escritos a mano en 14 componentes.\n\n## Pasos\n1. Pasar los colores a variables en `theme.css`.\n2. Agregar el interruptor en `Settings.tsx` y guardar la preferencia.\n3. Probar los 14 componentes en los dos temas.\n\n## Verificación\n- `pnpm test` y capturas en claro y oscuro.",
+    },
+    summary: "Propone un plan: modo oscuro en la configuración",
+    lines: ["❯ Agrega modo oscuro a la app", "⚙ Grep color:", "⚙ Read src/theme.css", "📋 Plan: modo oscuro en la configuración"],
   },
   {
     project: "",
@@ -108,17 +126,16 @@ export function demoOfficeState(projects: OfficeProject[], machine: string): Off
       failStreak: 0,
       machine,
       lines: s.lines,
-      approval:
-        s.status === "needs_you"
-          ? {
-              id: `sim-approval-${i}`,
-              tool: "Bash",
-              summary: s.summary.replace(/^Pide permiso: /, ""),
-              detail: s.summary.replace(/^Pide permiso: /, ""),
-              since: at,
-              expiresAt: new Date(Date.parse(at) + APPROVAL_TIMEOUT_MS).toISOString(),
-            }
-          : undefined,
+      mode: s.mode ?? "auto",
+      approval: s.ask
+        ? {
+            id: `sim-approval-${i}`,
+            tool: s.ask.tool,
+            ...describeApproval(s.ask.tool, s.ask.tool === "Bash" ? { command: s.ask.detail } : { plan: s.ask.detail }),
+            since: at,
+            expiresAt: new Date(Date.parse(at) + APPROVAL_TIMEOUT_MS).toISOString(),
+          }
+        : undefined,
     };
   });
   return { workers, projects, machine, ts: new Date(now).toISOString() };

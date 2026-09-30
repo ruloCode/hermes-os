@@ -25,6 +25,8 @@ export const CLAUDE_EFFORTS = [
 ] as const;
 
 export const CLAUDE_PERMISSIONS = [
+  // "auto" = el modo con clasificador del CLI (Sonnet/Opus; con Haiku arranca en manual).
+  { label: "Auto", value: "auto" },
   { label: "Auto-editar", value: "acceptEdits" },
   { label: "Plan (solo lee)", value: "plan" },
   { label: "Manual", value: "manual" },

@@ -97,7 +97,7 @@ import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input
 import { listSalaAgents, officeCast, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
-import { NOBODY_WATCHING, SalaValidationError, needsApproval } from "@hermes/shared";
+import { NOBODY_WATCHING, PLAN_PRESENTED, PLAN_TOOL, SalaValidationError, isOfficeMode, needsApproval } from "@hermes/shared";
 import {
   openInBrowser,
   listTabs,
@@ -2539,7 +2539,9 @@ app.post("/office/approvals/ask", async (c) => {
   const tool = String(body.tool_name ?? "");
   const input = body.input && typeof body.input === "object" ? body.input : {};
   if (!needsApproval(tool, input)) return c.json({ decision: { behavior: "allow", updatedInput: input } });
-  if (!officeWatched()) return c.json({ decision: { behavior: "deny", message: NOBODY_WATCHING } });
+  if (!officeWatched()) {
+    return c.json({ decision: { behavior: "deny", message: tool === PLAN_TOOL ? PLAN_PRESENTED : NOBODY_WATCHING } });
+  }
   const { id } = requestApproval(runId, tool, input);
   return c.json({ id });
 });
@@ -2558,9 +2560,15 @@ app.get("/office/approvals/:id", (c) => {
 app.post("/office/approvals/:id/decide", async (c) => {
   // Un token de run jamás decide, ni siquiera sobre otro run.
   if (c.req.header("X-Hermes-Approval")) return c.json({ ok: false, error: "un run no puede decidir" }, 403);
-  const body = (await c.req.json().catch(() => ({}))) as { allow?: boolean; note?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { allow?: boolean; note?: string; mode?: string };
   if (typeof body.allow !== "boolean") return c.json({ ok: false, error: "allow (boolean) requerido" }, 400);
-  const ok = decideApproval(c.req.param("id"), body.allow, typeof body.note === "string" ? body.note.slice(0, 500) : undefined);
+  if (body.mode !== undefined && !isOfficeMode(body.mode)) return c.json({ ok: false, error: "modo desconocido" }, 400);
+  const ok = decideApproval(
+    c.req.param("id"),
+    body.allow,
+    typeof body.note === "string" ? body.note.slice(0, 500) : undefined,
+    isOfficeMode(body.mode) ? body.mode : undefined,
+  );
   return c.json(ok ? { ok: true } : { ok: false, error: "La solicitud ya se cerró (decidida, vencida o el run terminó)" });
 });
 

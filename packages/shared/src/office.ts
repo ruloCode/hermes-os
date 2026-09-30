@@ -10,7 +10,7 @@
 
 import type { AgentActivityEvent } from "./types.js";
 import { FAILS_TO_DESPAIR, outputFailed, toolAction, type OfficeAction } from "./office-actions.js";
-import type { ApprovalOutcome, OfficeApproval } from "./office-approvals.js";
+import { PLAN_TOOL, type ApprovalOutcome, type OfficeApproval, type OfficeMode } from "./office-approvals.js";
 
 export type OfficeWorkerStatus = "starting" | "working" | "thinking" | "blocked" | "needs_you" | "done" | "error";
 
@@ -56,6 +56,8 @@ export interface OfficeWorker {
   continues?: string;
   /** Permiso que espera AHORA (status "needs_you"): el run está pausado hasta que decidas. */
   approval?: OfficeApproval;
+  /** Modo de permisos REAL de la sesión, tal como lo reporta el CLI (auto, editar, plan, preguntar). */
+  mode?: OfficeMode;
 }
 
 export interface OfficeProject {
@@ -352,6 +354,16 @@ export function reduceOfficeEvent(
       return w;
     }
     case "tool_result": {
+      // El modo Auto no pregunta: lo que su clasificador juzga riesgoso lo niega
+      // solo. Eso se ve como bloqueado, con el motivo que dio.
+      const autoDenied = ev.detail ? AUTO_DENIED.exec(ev.detail) : null;
+      if (autoDenied && !isTerminal(w.status)) {
+        const reason = autoDenied[1] ? `: ${autoDenied[1]}` : "";
+        w.status = "blocked";
+        w.task.summary = `El modo Auto lo negó${reason}`;
+        pushLine(w, `✗ el modo Auto lo negó${reason}`);
+        return w;
+      }
       if (ev.detail) pushLine(w, `↩ ${oneLine(ev.detail, LINE_MAX - 2)}`);
       if (w.tool && toolAction(w.tool.name, { command: w.tool.target }) === "test") {
         w.failStreak = ev.detail && outputFailed(ev.detail) ? w.failStreak + 1 : 0;
@@ -408,9 +420,13 @@ function finish(w: OfficeWorker, status: "done" | "error", at: string, detail?: 
   pushLine(w, `${status === "done" ? "✓" : "✗"} ${oneLine(detail || (status === "done" ? "terminado" : "falló"), LINE_MAX - 2)}`);
 }
 
+// "…denied by the Claude Code auto mode classifier. Reason: [Data Exfiltration]…"
+const AUTO_DENIED = /denied by the Claude Code auto mode classifier\.?(?:\s*Reason:\s*\[([^\]]+)\])?/i;
+
 const OUTCOME_LINE: Record<ApprovalOutcome, string> = {
   allowed: "✓ aprobado por ti",
   denied: "✗ negado por ti",
+  "plan-changes": "↺ pediste cambios al plan",
   timeout: "✗ nadie respondió: se negó sola",
   gone: "✗ la solicitud se cerró",
 };
@@ -433,7 +449,7 @@ export function setWorkerApproval(
   if (approval) {
     w.approval = approval;
     w.status = "needs_you";
-    w.task.summary = `Pide permiso: ${approval.summary}`;
+    w.task.summary = approval.tool === PLAN_TOOL ? `Propone un plan: ${approval.summary.replace(/^Plan: /, "")}` : `Pide permiso: ${approval.summary}`;
     pushLine(w, `✋ ${oneLine(approval.summary, LINE_MAX - 2)}`);
     return w;
   }
@@ -442,6 +458,14 @@ export function setWorkerApproval(
   if (w.status === "needs_you") w.status = "working";
   w.task.summary = OUTCOME_LINE[outcome].slice(2);
   pushLine(w, OUTCOME_LINE[outcome]);
+  return w;
+}
+
+/** El CLI reportó el modo de la sesión (al arrancar o al cambiar, p. ej. plan aprobado → auto). */
+export function setWorkerMode(workers: Map<string, OfficeWorker>, id: string, mode: OfficeMode | undefined): OfficeWorker | null {
+  const w = workers.get(id);
+  if (!w || !mode || w.mode === mode) return null;
+  w.mode = mode;
   return w;
 }
 

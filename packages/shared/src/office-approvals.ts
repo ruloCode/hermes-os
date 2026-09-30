@@ -9,6 +9,54 @@
 // niega lo que pediría permiso), así una tarea por voz a las 3 a. m. no se
 // queda colgada esperando a un humano que no está.
 
+// ── Modos de permisos (los mismos de Claude Code) ────────────────────────
+// Verificado contra el CLI 2.1.285 en -p con el puente de aprobaciones:
+// - auto: el clasificador del CLI decide; lo riesgoso lo NIEGA solo (no
+//   pregunta). Solo con Sonnet/Opus: con Haiku el CLI arranca en "default".
+// - acceptEdits: edita sin preguntar; los comandos que no están permitidos
+//   en settings preguntan.
+// - plan: solo lee; al terminar llama ExitPlanMode, que SÍ pregunta → el
+//   agente levanta la mano con su plan. Aprobado, sigue en el mismo run.
+// - manual: pregunta cada edición y cada comando no permitido.
+
+export type OfficeMode = "auto" | "acceptEdits" | "plan" | "manual";
+
+export const OFFICE_MODES: ReadonlyArray<{ value: OfficeMode; label: string; hint: string }> = [
+  { value: "auto", label: "Auto", hint: "Claude decide qué es seguro; lo riesgoso lo niega solo" },
+  { value: "acceptEdits", label: "Editar", hint: "Edita sin preguntar; los comandos te piden permiso" },
+  { value: "plan", label: "Plan", hint: "Solo lee y te propone un plan; al aprobarlo lo ejecuta" },
+  { value: "manual", label: "Preguntar", hint: "Te pide permiso para cada edición y cada comando" },
+];
+
+export const DEFAULT_OFFICE_MODE: OfficeMode = "auto";
+
+export function isOfficeMode(v: unknown): v is OfficeMode {
+  return typeof v === "string" && OFFICE_MODES.some((m) => m.value === v);
+}
+
+export function officeModeLabel(mode: OfficeMode): string {
+  return OFFICE_MODES.find((m) => m.value === mode)?.label ?? mode;
+}
+
+/** Siguiente modo, como Shift+Tab en Claude Code. */
+export function nextOfficeMode(mode: OfficeMode): OfficeMode {
+  const i = OFFICE_MODES.findIndex((m) => m.value === mode);
+  return OFFICE_MODES[(i + 1) % OFFICE_MODES.length].value;
+}
+
+/**
+ * El modo que REPORTA el CLI (init o cambio de estado) → el de la oficina.
+ * "default" es el nombre viejo de "manual". bypassPermissions/dontAsk no se
+ * ofrecen en la oficina: se devuelven como undefined (no se inventa etiqueta).
+ */
+export function officeModeFromCli(mode: unknown): OfficeMode | undefined {
+  if (mode === "default") return "manual";
+  return isOfficeMode(mode) ? mode : undefined;
+}
+
+/** El agente en modo plan presenta su plan con esta tool: aprobarla = ejecutarlo. */
+export const PLAN_TOOL = "ExitPlanMode";
+
 /** Tiempo máximo que un agente espera tu decisión antes de negarse solo. */
 export const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
@@ -25,13 +73,20 @@ export interface OfficeApproval {
 }
 
 export type ApprovalDecision =
-  | { behavior: "allow"; updatedInput: Record<string, unknown> }
+  | {
+      behavior: "allow";
+      updatedInput: Record<string, unknown>;
+      /** Cambiar el modo de la sesión al aprobar (el plan aprobado sigue en Auto). */
+      updatedPermissions?: Array<{ type: "setMode"; mode: OfficeMode; destination: "session" }>;
+    }
   | { behavior: "deny"; message: string };
 
 /** Cómo se cerró la solicitud: lo que ve el humano en la laptop del personaje. */
-export type ApprovalOutcome = "allowed" | "denied" | "timeout" | "gone";
+export type ApprovalOutcome = "allowed" | "denied" | "plan-changes" | "timeout" | "gone";
 
 const DETAIL_MAX = 600;
+/** Un plan se lee entero en el panel: cabe mucho más que un comando. */
+const PLAN_MAX = 8000;
 const SUMMARY_MAX = 90;
 
 // Comandos que solo leen. Todo lo que no se reconoce PIDE permiso: equivocarse
@@ -104,6 +159,16 @@ function clip(s: string, max: number): string {
 
 /** Qué se muestra en la tarjeta: la acción exacta, no una paráfrasis del modelo. */
 export function describeApproval(tool: string, input: Record<string, unknown>): { summary: string; detail: string } {
+  if (tool === PLAN_TOOL) {
+    const plan = String(input.plan ?? "").trim();
+    // Título del plan: el primer encabezado o la primera línea con texto, sin "Plan:" de relleno.
+    const first = plan.split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find(Boolean) ?? "";
+    const title = first.replace(/^plan\s*[:·-]?\s*/i, "") || "sin título";
+    return {
+      summary: clip(`Plan: ${title}`, SUMMARY_MAX),
+      detail: plan.length > PLAN_MAX ? `${plan.slice(0, PLAN_MAX - 1)}…` : plan || "(el agente no escribió el plan)",
+    };
+  }
   let detail: string;
   if (tool === "Bash") detail = String(input.command ?? "");
   else if (typeof input.file_path === "string") detail = `${tool} ${input.file_path}`;
@@ -118,18 +183,25 @@ export function describeApproval(tool: string, input: Record<string, unknown>): 
   return { summary: clip(raw, SUMMARY_MAX), detail: raw.length > DETAIL_MAX ? `${raw.slice(0, DETAIL_MAX - 1)}…` : raw };
 }
 
-/** Lo que recibe el MODELO cuando no se aprueba: le dice por qué, para que cambie de plan en vez de reintentar igual. */
+/**
+ * Lo que recibe el MODELO cuando no se aprueba: le dice por qué, para que cambie de plan en vez de reintentar igual. */
 export function denialMessage(outcome: Exclude<ApprovalOutcome, "allowed">, note?: string): string {
   const extra = note?.trim() ? ` Indicación del humano: ${note.trim()}` : "";
   switch (outcome) {
     case "denied":
       return `El humano NEGÓ esta acción desde la Oficina. No la repitas igual: explica qué ibas a hacer o sigue por otro camino.${extra}`;
+    case "plan-changes":
+      return `El humano NO aprobó el plan todavía: sigue en modo plan, ajústalo y vuelve a presentarlo.${extra}`;
     case "timeout":
       return `Nadie respondió en ${Math.round(APPROVAL_TIMEOUT_MS / 60_000)} minutos, así que la acción se negó sola. No la reintentes: deja listo lo demás y di qué quedó pendiente de aprobar.`;
     case "gone":
       return "La solicitud de permiso se cerró (el agente o el run se reinició). No se ejecutó.";
   }
 }
+
+/** Un plan terminado sin nadie en la Oficina (la consola en modo plan): se presenta y el run termina ahí. */
+export const PLAN_PRESENTED =
+  "Tu plan quedó presentado y el humano lo revisará. No lo ejecutes: termina aquí con un resumen corto del plan.";
 
 /** Sin nadie mirando la Oficina: el run de claude -p se niega como antes, pero diciendo por qué. */
 export const NOBODY_WATCHING =

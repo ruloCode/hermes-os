@@ -3,16 +3,18 @@
 // Contratar desde un escritorio libre, con la VOZ primero: al abrirse ya está
 // escuchando (el micrófono lo abre la página); dices la tarea, la ves en vivo
 // y la envías (A, Enter o el botón). Lanza un run REAL: con proyecto →
-// claude -p en la carpeta del proyecto con la config de la consola; en
+// claude -p en la carpeta del proyecto con el modelo de la consola y el MODO
+// que elijas aquí (Auto por defecto, como Claude Code); en
 // "General" → una tarea de Hermes (POST /tasks, el mismo run_task de la voz).
 // El personaje aparece cuando el agente lo anuncia, no antes.
 
 import { forwardRef, useImperativeHandle, useState } from "react";
-import { GENERAL_PROJECT, type OfficeProject } from "@hermes/shared";
+import { GENERAL_PROJECT, type OfficeMode, type OfficeProject } from "@hermes/shared";
 import { claudeStartRun, hermesPost } from "@/lib/hermes";
 import { useWorkspace } from "@/state/WorkspaceContext";
 import type { OfficeDictation } from "@/hooks/useOfficeDictation";
 import { VoiceComposer } from "./VoiceComposer";
+import { ModePicker, modeNote } from "./ModePicker";
 
 export interface HireDialogHandle {
   submit: () => void;
@@ -25,10 +27,12 @@ export const HireDialog = forwardRef<
     projects: OfficeProject[];
     voice: OfficeDictation;
     padConnected: boolean;
+    mode: OfficeMode;
+    onModeChange: (mode: OfficeMode) => void;
     onClose: () => void;
     onLaunched: (id: string) => void;
   }
->(function HireDialog({ project, projects, voice, padConnected, onClose, onLaunched }, ref) {
+>(function HireDialog({ project, projects, voice, padConnected, mode, onModeChange, onClose, onLaunched }, ref) {
   const { claudeConfig } = useWorkspace();
   const [target, setTarget] = useState(project);
   const [sending, setSending] = useState(false);
@@ -45,7 +49,7 @@ export const HireDialog = forwardRef<
         const r = await hermesPost<{ task_id?: string }>("/tasks", { prompt: text });
         onLaunched(r.task_id ?? "");
       } else {
-        const r = await claudeStartRun(text, claudeConfig, target);
+        const r = await claudeStartRun(text, { ...claudeConfig, permissionMode: mode }, target);
         onLaunched(r.runId);
       }
     } catch (e) {
@@ -68,7 +72,7 @@ export const HireDialog = forwardRef<
         <p className="mt-1 text-xs text-text-dim">
           {general
             ? "Tarea de Hermes: corre con sus tools (memoria, vault, Linear…)."
-            : `Claude Code en la carpeta del proyecto · ${claudeConfig.model} · esfuerzo ${claudeConfig.effort} · ${claudeConfig.permissionMode}`}
+            : `Claude Code en la carpeta del proyecto · ${claudeConfig.model} · esfuerzo ${claudeConfig.effort}`}
         </p>
 
         <label className="mt-4 block text-xs text-text-dim" htmlFor="hire-project">
@@ -87,6 +91,14 @@ export const HireDialog = forwardRef<
             </option>
           ))}
         </select>
+
+        {general ? (
+          <p className="mb-4 text-xs text-text-dim">Las tareas de Hermes no tienen modo: las cuida su guardrail y, si miras la oficina, te piden permiso para los comandos con efectos.</p>
+        ) : (
+          <div className="mb-4">
+            <ModePicker value={mode} onChange={onModeChange} padConnected={padConnected} note={modeNote(mode, claudeConfig.model)} />
+          </div>
+        )}
 
         <VoiceComposer
           voice={voice}
