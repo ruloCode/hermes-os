@@ -12,7 +12,7 @@ Inspirada en [agent-office](https://github.com/AgentSystemLabs/agent-office) (Ag
 
 ## Recorrer la oficina
 
-El dueño es un personaje dentro de la oficina, un humano portado del `Person` de agent-office. Su nombre sale de `NEXT_PUBLIC_HERMES_OWNER_NAME` y su apariencia se elige en **Tu personaje** (piel, pelo, peinado, camiseta), guardada en el navegador.
+El dueño es un personaje dentro de la oficina, un humano portado del `Person` de agent-office. Su nombre sale de `NEXT_PUBLIC_HERMES_OWNER_NAME` y su apariencia se elige en **Tu personaje** (piel, pelo, peinado, camiseta y rasgos: barba, gafas, collar y arete), guardada en el navegador. El default es el avatar del dueño: **rulos** con volumen arriba y reflejos cobrizos, piel trigueña, barba corta con bigote, gafas de marco transparente con patillas azules, arete, collar con dije azul y camiseta blanca.
 
 | Tecla | Explorar (tercera persona) | Vista aérea |
 | --- | --- | --- |
