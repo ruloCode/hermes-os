@@ -103,6 +103,26 @@ Las tools, todas con datos reales:
 
 En la escena, la tarjeta de cada personaje dice su voz (🎙 Iván · …) y el cuerpo late con el volumen real mientras su voz suena. QA sin micrófono: `window.__hermesOficinaTeam.say(texto)` y `.debug()` (voces, runs vigilados, cola, avisos pendientes). En simulación no hay llamada con el equipo: esos runs no existen.
 
+## El agente levanta la mano (aprobaciones)
+
+Cuando un agente va a hacer algo con efectos (un `git push`, un `pnpm install`, borrar un archivo), **se pausa de verdad** y te pide permiso en la Oficina. El personaje medio se pone de pie y saluda con un guante blanco por encima de la cabeza, su bombilla late en terracota, su tarjeta dice "✋ te necesita" con el comando, el HUD cuenta "N te necesitan", sale un aviso y el control vibra.
+
+- **Decidir:** acércate y abre su panel (**E** o **A**, o clic en vista aérea). Arriba ves el comando EXACTO que va a ejecutar y cuánto falta para que se niegue solo. **Aprobar** (o **A**) lo deja correr; **Negar** (o **B**) se lo niega. El panel no prende el micrófono: lo que toca es decidir.
+- **Lo que recibe el modelo al negar:** que el humano lo negó y que no lo repita igual, así cambia de plan en vez de reintentar. Si nadie responde en **10 minutos**, se niega solo y el modelo lo sabe.
+- **Solo pregunta si alguien está mirando la Oficina** (una conexión viva a `/office/events`). Sin nadie, todo se comporta como antes: las tareas del SDK las decide el guardrail y los runs de `claude -p` niegan lo que pediría permiso, ahora diciendo por qué. Una tarea por voz a las 3 a. m. no se queda colgada. Ojo: una pestaña de la Oficina olvidada abierta cuenta como alguien mirando.
+- **Qué pide permiso:** Bash que no sea de solo lectura (`isReadOnlyBash` en `packages/shared/src/office-approvals.ts`: `ls`, `cat`, `git status/log/diff`… pasan; lo que no se reconoce, pregunta; redirigir a un archivo ya es escribir). En los runs de `claude -p` también pregunta lo que el modo de permisos del CLI haría preguntar (con `acceptEdits`, que es el default de la consola, las ediciones pasan solas).
+
+**Dos caminos, un mismo personaje** (`apps/agent/src/office/approvals.ts` guarda las solicitudes vivas en memoria):
+
+| Camino | Cómo se pausa |
+| --- | --- |
+| Tareas del SDK (General, `POST /tasks`) | `canUseTool` en `session.ts` espera `requestApproval()` |
+| Runs de `claude -p` (pods de proyecto) | `--permission-prompt-tool mcp__hermes-approval__ask`: el CLI le pregunta al puente `office/approval-mcp.mjs` (MCP por stdio, sin dependencias), que hace `POST /office/approvals/ask` y consulta la decisión. El puente va oculto al modelo con `--disallowedTools` |
+
+**Seguridad:** cada run recibe un token propio (`--mcp-config`) que solo sirve para **pedir** y leer sus propias decisiones; **decidir** (`POST /office/approvals/:id/decide`) exige la credencial del dashboard, y un request con token de run se rechaza aunque traiga más. El hijo no hereda el `.env`, así que el modelo no puede aprobarse a sí mismo. Rutas: `GET /office/approvals` (pendientes + si alguien mira), `GET /office/approvals/:id`, `POST /office/approvals/ask`, `POST /office/approvals/:id/decide {allow, note?}`.
+
+Verificado con runs reales de haiku: sin nadie mirando se niega con motivo; mirando, el run queda en `needs_you` sin ejecutar nada hasta que apruebas (el archivo aparece después); negando con una nota, el modelo la recibe y cambia de plan; decidir dos veces o sin credencial falla. La tarea del SDK en General pasa por el mismo flujo.
+
 ## La sala
 
 `lib/oficina/room.ts` recrea a nuestra manera la oficina de agent-office. Tiene piso de tablones, paredes con ventanas y un frente abierto con muro bajo de vidrio y entrada, para que la cámara siempre vea adentro. La cocina tiene mesón, cafetera, nevera, dispensador y mesa con bancos. El lounge tiene sofá, mesa, pufs y TV. Completan la sala una estantería, plantas y lámparas con luz cálida.
@@ -143,7 +163,7 @@ Lo que muestra datos es real:
 
 ## Estados honestos
 
-Hermes no tiene un "esperando tu respuesta" real, porque `canUseTool` decide solo. Por eso no se inventa:
+Cada estado sale de algo que pasó de verdad. "Te necesita" existe solo mientras hay una solicitud de permiso viva y el run está pausado esperándote:
 
 | Estado | Cuándo |
 | --- | --- |
@@ -151,6 +171,7 @@ Hermes no tiene un "esperando tu respuesta" real, porque `canUseTool` decide sol
 | Trabajando | Llegó una tool o texto en los últimos 12 s |
 | Pensando | Sigue vivo pero lleva 12 s sin eventos (`THINKING_AFTER_MS`) |
 | Bloqueado | Un guardrail o el Chrome CDP negaron una tool. Dura hasta la siguiente tool |
+| Te necesita | Hay una solicitud de permiso abierta (`office/approvals.ts`). Ni el silencio ni una tool tardía le bajan la mano: solo tu decisión, el tope de 10 min o el fin del run |
 | Listo | `task_done` (o ✓ de una programada) |
 | Error | `error` terminal: el cierre de un run o un fallo del SDK. `startTask` emite `task_done` aun cuando falló, y el error manda |
 
@@ -207,6 +228,7 @@ scripts/oficina-demo.sh --kill      # detener lo que siga corriendo
 3. Lanza `scripts/oficina-demo.sh` con dos o tres proyectos. Llegan equipos nuevos y cada uno actúa su tool.
 4. Por voz: "Hermes, trabaja en el proyecto X…" (`work_on_project`). Aparece otro personaje.
 5. Clic en uno: su salida en vivo. Espera el ✓ y el confeti.
+6. La mano levantada: contrata en un proyecto algo con efectos, por ejemplo "crea la rama `demo/oficina` y dime en qué rama quedaste". Al llegar al `git checkout -b` el personaje se pausa y levanta la mano; acércate, muéstrales el comando exacto y apruébalo con **A** (o niégalo con **B** diciendo por qué). Ensayo sin tokens: `__hermesOficinaSim("demo")` trae a "Publica la rama" esperando permiso.
 
 Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo, contrata con una tarea de varios pasos, por ejemplo "revisa X, corre los tests y propón un arreglo sin editar".
 
