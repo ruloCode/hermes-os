@@ -123,6 +123,23 @@ Cuando un agente va a hacer algo con efectos (un `git push`, un `pnpm install`, 
 
 Verificado con runs reales de haiku: sin nadie mirando se niega con motivo; mirando, el run queda en `needs_you` sin ejecutar nada hasta que apruebas (el archivo aparece después); negando con una nota, el modelo la recibe y cambia de plan; decidir dos veces o sin credencial falla. La tarea del SDK en General pasa por el mismo flujo.
 
+## Modos de los agentes (los de Claude Code)
+
+Cada agente de proyecto corre en uno de los cuatro modos de Claude Code. **Auto es el default.** Se elige al contratar (queda guardado en el navegador para los siguientes) y por agente en su panel; **Shift+Tab** los recorre como en la terminal y **View** hace lo mismo con el control, dentro de una conversación. La tarjeta lleva el modo en el chip cuando no es Auto (`✋ te necesita · Plan`) y el panel dice el modo REAL que reportó el CLI.
+
+| Modo | CLI | Qué pasa cuando el agente quiere hacer algo con efectos |
+| --- | --- | --- |
+| **Auto** | `auto` | El clasificador del CLI decide. Lo seguro pasa; lo riesgoso **lo niega solo, sin preguntar** (el personaje queda "bloqueado" con el motivo: "El modo Auto lo negó: Data Exfiltration"). Solo Opus/Sonnet: con Haiku el CLI arranca en Preguntar y el selector lo avisa |
+| **Editar** | `acceptEdits` | Edita sin preguntar; un comando que no esté permitido levanta la mano |
+| **Plan** | `plan` | Solo lee. Al terminar levanta la mano con **su plan completo** (markdown en el panel). "Aprobar y ejecutar en X" lo ejecuta en el MISMO run, cambiando la sesión al modo elegido (Auto si el agente estaba en Plan); "Pedir cambios" le manda lo que dictaste y sigue planeando |
+| **Preguntar** | `manual` | Levanta la mano para cada edición y cada comando no permitido |
+
+Verificado contra el CLI 2.1.285: el plan pasa por el puente (`ExitPlanMode` → `--permission-prompt-tool`) y aprobarlo con `updatedPermissions: [{type:"setMode", mode:"auto"}]` hace que el CLI reporte `status → auto` y siga editando sin preguntar. Run real en producción: plan con la mano levantada → aprobado → la oficina vio `plan → auto` → archivo editado.
+
+Ojo con `~/.claude/settings.json` del usuario: los runs heredan sus reglas `allow`. Si ahí dice `Bash(git commit *)` o `Bash(git push *)`, esos comandos pasan sin preguntar en Editar y Preguntar.
+
+Las tareas de General (`POST /tasks`, Agent SDK) no tienen modo: las cuida el guardrail y, si miras la oficina, piden permiso para los comandos con efectos.
+
 ## La sala
 
 `lib/oficina/room.ts` recrea a nuestra manera la oficina de agent-office. Tiene piso de tablones, paredes con ventanas y un frente abierto con muro bajo de vidrio y entrada, para que la cámara siempre vea adentro. La cocina tiene mesón, cafetera, nevera, dispensador y mesa con bancos. El lounge tiene sofá, mesa, pufs y TV. Completan la sala una estantería, plantas y lámparas con luz cálida.
@@ -228,7 +245,7 @@ scripts/oficina-demo.sh --kill      # detener lo que siga corriendo
 3. Lanza `scripts/oficina-demo.sh` con dos o tres proyectos. Llegan equipos nuevos y cada uno actúa su tool.
 4. Por voz: "Hermes, trabaja en el proyecto X…" (`work_on_project`). Aparece otro personaje.
 5. Clic en uno: su salida en vivo. Espera el ✓ y el confeti.
-6. La mano levantada: contrata en un proyecto algo con efectos, por ejemplo "crea la rama `demo/oficina` y dime en qué rama quedaste". Al llegar al `git checkout -b` el personaje se pausa y levanta la mano; acércate, muéstrales el comando exacto y apruébalo con **A** (o niégalo con **B** diciendo por qué). Ensayo sin tokens: `__hermesOficinaSim("demo")` trae a "Publica la rama" esperando permiso.
+6. La mano levantada con un plan: contrata en un proyecto en modo **Plan** (Shift+Tab o View en el diálogo), por ejemplo "agrega una sección de FAQ al README". Lee, planea y levanta la mano con el plan; acércate, muéstrales el plan en el panel y apruébalo con **A**: lo ejecuta ahí mismo en Auto y la tarjeta cambia de modo. Para "Pedir cambios", dicta qué cambiar (**X**) y presiona **B**. Ojo: `git checkout`/`commit`/`push` NO sirven para mostrar la mano en Editar/Preguntar porque tu `~/.claude/settings.json` los permite. Ensayo sin tokens: `__hermesOficinaSim("demo")` trae a "Agrega modo oscuro" con un plan y a "Publica la rama" pidiendo un comando.
 
 Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo, contrata con una tarea de varios pasos, por ejemplo "revisa X, corre los tests y propón un arreglo sin editar".
 
