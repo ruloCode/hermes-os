@@ -83,13 +83,15 @@ export function mulberry32(seed: number): () => number {
 }
 
 /**
- * Cuánta gente de ambiente: 6 con la oficina casi vacía y menos a medida que
- * llegan sesiones vivas (con muchos agentes la oficina ya se ve llena).
+ * Cuánta gente de ambiente: 9 con la oficina casi vacía y menos a medida que
+ * llegan sesiones vivas (con muchos agentes la oficina ya se ve llena). Subió de
+ * 6/5/4 cuando el edificio creció a 33 lugares (zonas nuevas): con 6 repartidos
+ * en tres pisos, el piso donde estás se sentía vacío.
  */
 export function ambientPopulation(liveSessions: number): number {
-  if (liveSessions <= 2) return 6;
-  if (liveSessions <= 5) return 5;
-  return 4;
+  if (liveSessions <= 2) return 9;
+  if (liveSessions <= 5) return 8;
+  return 6;
 }
 
 export type AmbientPhase = "idle" | "going" | "staying" | "waiting";

@@ -51,11 +51,11 @@ function simulate(people: number, seconds: number, seed: number, each?: (p: Ambi
 }
 
 describe("ambientPopulation", () => {
-  it("6 con la oficina vacía y baja con las sesiones vivas, sin pasar de 4", () => {
-    assert.equal(ambientPopulation(0), 6);
+  it("9 con la oficina vacía y baja con las sesiones vivas, sin pasar de 6", () => {
+    assert.equal(ambientPopulation(0), 9);
     assert.ok(ambientPopulation(4) < ambientPopulation(0));
-    assert.equal(ambientPopulation(10), 4);
-    assert.equal(ambientPopulation(50), 4);
+    assert.equal(ambientPopulation(10), 6);
+    assert.equal(ambientPopulation(50), 6);
   });
 });
 

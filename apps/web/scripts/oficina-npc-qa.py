@@ -85,7 +85,7 @@ def main() -> int:
             ambient = [n for n in d["npcs"] if not n["role"]]
             staff = {n["role"] for n in d["npcs"] if n["role"]}
             check(staff == {"reception", "barista", "rooftop", "queue"}, f"[{theme}] Recepción, Barista, Respiro y Coordinación en su lugar ({sorted(staff)})")
-            check(4 <= len(ambient) <= 6, f"[{theme}] 4 a 6 personas de ambiente ({len(ambient)})")
+            check(6 <= len(ambient) <= 9, f"[{theme}] 6 a 9 personas de ambiente ({len(ambient)})")
             floors = Counter(n["floor"] for n in ambient)
             check(len(floors) >= 2, f"[{theme}] gente en al menos dos pisos ({dict(floors)})")
             check(not d["pois"]["dropped"], f"[{theme}] todos los lugares tienen piso firme (descartados: {d['pois']['dropped']})")

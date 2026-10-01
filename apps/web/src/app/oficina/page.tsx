@@ -219,8 +219,13 @@ const HERMES_SCOPE =
 
 /** Modo de los agentes que contratas (localStorage: es una preferencia de este navegador). */
 const OFFICE_MODE_KEY = "hermes-office-mode";
-/** Interruptor "Ambiente" (prendido por defecto): preferencia de este navegador. */
-const AMBIENT_KEY = "hermes-oficina-ambiente";
+/**
+ * Interruptor "Ambiente" (prendido por defecto): preferencia de este navegador.
+ * v2: los botones Sonido/Capas quedaron junto a Ambiente y un clic de más lo
+ * dejaba apagado y guardado (la oficina "sin gente" al recargar). El "off" viejo
+ * se ignora una vez; desde aquí se recuerda como siempre.
+ */
+const AMBIENT_KEY = "hermes-oficina-ambiente-v2";
 /** Interruptor "Capas" (todas prendidas por defecto): preferencia de este navegador. */
 const LAYERS_KEY = "hermes-oficina-capas";
 const DEFAULT_LAYERS: OfficeLayers = { data: true, ceo: true, zones: true, games: true };
@@ -403,6 +408,7 @@ export default function OficinaPage() {
     try {
       const saved = localStorage.getItem(OFFICE_MODE_KEY);
       if (isOfficeMode(saved)) setOfficeModeState(saved);
+      localStorage.removeItem("hermes-oficina-ambiente");
       if (localStorage.getItem(AMBIENT_KEY) === "off") setAmbientState(false);
       const savedLayers = JSON.parse(localStorage.getItem(LAYERS_KEY) ?? "null") as Partial<OfficeLayers> | null;
       if (savedLayers && typeof savedLayers === "object") setLayersState({ ...DEFAULT_LAYERS, ...savedLayers });
@@ -1634,22 +1640,6 @@ export default function OficinaPage() {
                 <ToolButton active={soundOn} onClick={() => void toggleSound()} title="Sonido de ambiente procedural (apagado por defecto; baja solo durante una llamada)">
                   {soundOn ? "🔈 Sonido" : "🔇 Sonido"}
                 </ToolButton>
-                {soundOn ? (
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={volume}
-                    aria-label="Volumen del ambiente"
-                    className="w-16 accent-accent"
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      setVolume(v);
-                      audioRef.current?.setVolume(v);
-                    }}
-                  />
-                ) : null}
                 <ToolButton active={layersOpen} onClick={() => setLayersOpen((v) => !v)} title="Capas nuevas: pantallas y uso, oficina de CEO, zonas y minijuegos">
                   Capas
                 </ToolButton>
@@ -1659,7 +1649,21 @@ export default function OficinaPage() {
           {hermes.error ? <p className="pointer-events-auto rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{hermes.error}</p> : null}
           {team.error ? <p className="pointer-events-auto max-w-sm rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{team.error}</p> : null}
           {lookOpen ? <LookPicker look={look} onChange={changeLook} onClose={() => setLookOpen(false)} /> : null}
-          {layersOpen ? <LayersPicker layers={layers} onChange={setLayers} onClose={() => setLayersOpen(false)} /> : null}
+          {layersOpen ? (
+            <LayersPicker
+              layers={layers}
+              onChange={setLayers}
+              onClose={() => setLayersOpen(false)}
+              sound={{
+                on: soundOn,
+                volume,
+                onVolume: (v) => {
+                  setVolume(v);
+                  audioRef.current?.setVolume(v);
+                },
+              }}
+            />
+          ) : null}
           {!selectedWorker && !lookOpen ? (
             <TeamRoster
               workers={workers}

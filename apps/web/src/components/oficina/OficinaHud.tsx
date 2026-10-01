@@ -185,7 +185,6 @@ export function Toolbar({
       </div>
       <div className={`flex items-center gap-0.5 rounded-xl p-1 ${glass}`}>
         {mode === "aerial" ? <ToolButton onClick={onFrame}>Encuadrar</ToolButton> : null}
-        {extra}
         <ToolButton
           active={ambient}
           onClick={onAmbient}
@@ -199,6 +198,8 @@ export function Toolbar({
         <ToolButton active={lookOpen} onClick={onLook} title="Cambiar la apariencia de tu personaje">
           Tu personaje
         </ToolButton>
+        {/* Sonido y Capas lejos de Ambiente: junto a él, un clic de más lo apagaba (y se guardaba). */}
+        {extra}
         <ToolButton onClick={onTheme} title="Cambiar apariencia">
           {themeIcon}
         </ToolButton>
@@ -519,7 +520,18 @@ const LAYER_LABEL: { key: keyof OfficeLayers; label: string; hint: string }[] = 
   { key: "games", label: "Minijuegos", hint: "Dardos, ping-pong, futbolín, canasta y la arcade de la azotea" },
 ];
 
-export function LayersPicker({ layers, onChange, onClose }: { layers: OfficeLayers; onChange: (l: OfficeLayers) => void; onClose: () => void }) {
+export function LayersPicker({
+  layers,
+  onChange,
+  onClose,
+  sound,
+}: {
+  layers: OfficeLayers;
+  onChange: (l: OfficeLayers) => void;
+  onClose: () => void;
+  /** Volumen del sonido (va aquí y no en la barra: un control que aparece corría los botones). */
+  sound?: { on: boolean; volume: number; onVolume: (v: number) => void };
+}) {
   return (
     <section role="dialog" aria-label="Capas" className={`pointer-events-auto w-72 rounded-xl p-3 ${glass}`}>
       <div className="mb-2 flex items-center justify-between">
@@ -541,6 +553,22 @@ export function LayersPicker({ layers, onChange, onClose }: { layers: OfficeLaye
           </li>
         ))}
       </ul>
+      {sound ? (
+        <label className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-sm text-text">
+          Volumen
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={sound.volume}
+            aria-label="Volumen del ambiente"
+            className="flex-1 accent-accent"
+            onChange={(e) => sound.onVolume(Number(e.target.value))}
+          />
+          <span className="w-16 text-right text-xs text-text-dim">{sound.on ? `${Math.round(sound.volume * 100)}%` : "apagado"}</span>
+        </label>
+      ) : null}
     </section>
   );
 }
