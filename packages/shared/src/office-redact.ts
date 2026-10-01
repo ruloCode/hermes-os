@@ -25,6 +25,8 @@ export interface PublicViewContext {
   hiddenTerms: string[];
   /** Valores exactos de secretos que el servidor conoce (sus variables de entorno). Nunca viajan al navegador. */
   exactSecrets?: string[];
+  /** Nombres y slugs de los proyectos PÚBLICOS: no se tocan aunque contengan un término oculto ("rulocode-web" con "rulocode" oculto). */
+  publicTerms?: string[];
 }
 
 export interface PublicViewConfig {
@@ -45,6 +47,14 @@ export function hiddenTermsFor(projects: { slug: string; name?: string }[], conf
     for (const t of [p.slug, p.name ?? ""]) if (t.trim().length >= 4) out.add(t.trim());
   }
   for (const t of config.extraHidden ?? []) if (t.trim().length >= 4) out.add(t.trim());
+  return [...out];
+}
+
+/** Nombres y slugs de los proyectos que sí se muestran (se protegen de los términos ocultos). */
+export function publicTermsFor(projects: { slug: string; name?: string }[], config: PublicViewConfig): string[] {
+  const pub = new Set(config.publicProjects.map((s) => s.toLowerCase()));
+  const out = new Set<string>();
+  for (const p of projects) if (pub.has(p.slug.toLowerCase())) for (const t of [p.slug, p.name ?? ""]) if (t.trim().length >= 4) out.add(t.trim());
   return [...out];
 }
 
@@ -132,11 +142,19 @@ export function redactText(text: string, ctx: PublicViewContext): string {
   }
   for (const rule of RULES) out = out.replace(rule.re, rule.replace as (substring: string, ...args: string[]) => string);
   const terms = [...ctx.hiddenTerms].filter((t) => t.length >= 4).sort((a, b) => b.length - a.length);
+  // Lo público se aparta antes (y vuelve después): un término oculto no puede comerse un nombre público que lo contiene.
+  const keep: string[] = [];
+  const pubTerms = [...(ctx.publicTerms ?? [])].filter((t) => t.length >= 4 && terms.some((h) => t.toLowerCase().includes(h.toLowerCase()))).sort((a, b) => b.length - a.length);
+  if (terms.length && pubTerms.length) {
+    const re = new RegExp(`(?<![A-Za-z0-9])(?:${pubTerms.map(escapeRe).join("|")})(?![A-Za-z0-9])`, "gi");
+    out = out.replace(re, (m) => `\u0001${keep.push(m) - 1}\u0001`);
+  }
   if (terms.length) {
     // El usuario del sistema en una ruta de home (/Users/<x>/, /home/<x>/) no es un proyecto aunque se llame igual.
     const re = new RegExp(`(?<![A-Za-z0-9])(?<!/Users/)(?<!/home/)(?:${terms.map(escapeRe).join("|")})(?![A-Za-z0-9])`, "gi");
     out = out.replace(re, CLIENT_LABEL);
   }
+  if (keep.length) out = out.replace(/\u0001(\d+)\u0001/g, (_m, i) => keep[Number(i)]);
   return out;
 }
 

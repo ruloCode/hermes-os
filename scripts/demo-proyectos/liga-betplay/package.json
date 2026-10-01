@@ -1,0 +1,9 @@
+{
+  "name": "liga-betplay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "tabla": "node src/imprimir.js"
+  }
+}

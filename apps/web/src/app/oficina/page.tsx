@@ -619,7 +619,7 @@ export default function OficinaPage() {
     }
   }, []);
   const redact = useRedactor(publicView, publicInfo);
-  const publicCtx = useMemo(() => ({ hiddenTerms: publicInfo?.hiddenTerms ?? [] }), [publicInfo]);
+  const publicCtx = useMemo(() => ({ hiddenTerms: publicInfo?.hiddenTerms ?? [], publicTerms: publicInfo?.publicTerms ?? [] }), [publicInfo]);
   const viewProjectName = useCallback(
     (slug: string) => (publicView && !projectIsPublic(slug, publicInfo) ? CLIENT_PROJECT_NAME : projectName(slug)),
     [publicView, publicInfo, projectName],

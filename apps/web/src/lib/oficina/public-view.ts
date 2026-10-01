@@ -22,6 +22,8 @@ import type { FeedLine } from "@/lib/oficina/room";
 export interface PublicViewInfo {
   publicProjects: string[];
   hiddenTerms: string[];
+  /** Nombres de proyectos públicos: se protegen de los términos ocultos. */
+  publicTerms?: string[];
   configured: boolean;
   path: string;
   /** El agente no respondió: se oculta todo proyecto que no sea general (mejor de más que de menos). */
@@ -49,7 +51,7 @@ export type Redact = (s: string) => string;
 export function useRedactor(on: boolean, info: PublicViewInfo | null): Redact {
   return useMemo(() => {
     if (!on) return (s: string) => s;
-    const ctx: PublicViewContext = { hiddenTerms: info?.hiddenTerms ?? [] };
+    const ctx: PublicViewContext = { hiddenTerms: info?.hiddenTerms ?? [], publicTerms: info?.publicTerms ?? [] };
     const cache = new Map<string, string>();
     return (s: string) => {
       if (!s) return s;

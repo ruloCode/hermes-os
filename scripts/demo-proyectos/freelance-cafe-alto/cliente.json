@@ -1,0 +1,8 @@
+{
+  "cliente": "Café Alto (cliente ficticio)",
+  "ciudad": "Manizales",
+  "contacto": "compras@cafealto.example",
+  "tarifa_hora_cop": 95000,
+  "retencion_honorarios": 0.1,
+  "nota": "Datos de prueba para la demo"
+}

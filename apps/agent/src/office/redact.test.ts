@@ -73,6 +73,11 @@ describe("vista pública: correos, teléfonos y clientes", () => {
     assert.equal(out, "/Users/rulocode/dev/side/[cliente]/README.md y /home/rulocode/x");
   });
 
+  it("un proyecto público que contiene un término oculto queda intacto (rulocode-web con rulocode oculto)", () => {
+    const out = redactText("cd ~/dev/demo/rulocode-web · RuloCode Web · el proyecto rulocode", { hiddenTerms: ["rulocode", "RuloCode"], publicTerms: ["rulocode-web", "RuloCode Web"] });
+    assert.equal(out, "cd ~/dev/demo/rulocode-web · RuloCode Web · el proyecto [cliente]");
+  });
+
   it("los términos ocultos salen de los proyectos que NO están en la lista pública", () => {
     const terms = hiddenTermsFor(
       [

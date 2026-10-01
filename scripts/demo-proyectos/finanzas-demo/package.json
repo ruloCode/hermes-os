@@ -1,0 +1,9 @@
+{
+  "name": "finanzas-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "reporte": "node src/reporte.js"
+  }
+}

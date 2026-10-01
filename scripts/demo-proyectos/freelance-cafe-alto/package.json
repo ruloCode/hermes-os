@@ -1,0 +1,9 @@
+{
+  "name": "freelance-cafe-alto",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "cobro": "node src/generar.js"
+  }
+}

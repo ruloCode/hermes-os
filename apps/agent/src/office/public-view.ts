@@ -9,7 +9,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DEFAULT_PUBLIC_PROJECTS, hiddenTermsFor, type PublicViewConfig, type PublicViewContext } from "@hermes/shared";
+import { DEFAULT_PUBLIC_PROJECTS, hiddenTermsFor, publicTermsFor, type PublicViewConfig, type PublicViewContext } from "@hermes/shared";
 import { HERMES_HOME } from "../home.js";
 import { readProjects } from "../vault/projects.js";
 
@@ -36,7 +36,7 @@ function envSecrets(): string[] {
 }
 
 /** Lo que el navegador necesita para redactar: la lista pública y los términos a ocultar (nunca los secretos). */
-export async function publicViewForClient(): Promise<{ publicProjects: string[]; hiddenTerms: string[]; configured: boolean; path: string }> {
+export async function publicViewForClient(): Promise<{ publicProjects: string[]; hiddenTerms: string[]; publicTerms: string[]; configured: boolean; path: string }> {
   const { config, configured } = await publicViewConfig();
   let projects: { slug: string; name?: string }[] = [];
   try {
@@ -44,11 +44,11 @@ export async function publicViewForClient(): Promise<{ publicProjects: string[];
   } catch {
     /* sin vault: solo los términos extra */
   }
-  return { publicProjects: config.publicProjects, hiddenTerms: hiddenTermsFor(projects, config), configured, path: PUBLIC_VIEW_PATH };
+  return { publicProjects: config.publicProjects, hiddenTerms: hiddenTermsFor(projects, config), publicTerms: publicTermsFor(projects, config), configured, path: PUBLIC_VIEW_PATH };
 }
 
 /** Contexto del servidor: además de los términos, los secretos exactos del entorno. */
 export async function serverPublicContext(): Promise<PublicViewContext> {
-  const { hiddenTerms } = await publicViewForClient();
-  return { hiddenTerms, exactSecrets: envSecrets() };
+  const { hiddenTerms, publicTerms } = await publicViewForClient();
+  return { hiddenTerms, publicTerms, exactSecrets: envSecrets() };
 }

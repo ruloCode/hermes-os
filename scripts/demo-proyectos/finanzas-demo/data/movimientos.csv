@@ -1,0 +1,26 @@
+fecha,cuenta,descripcion,categoria,monto,moneda
+2026-09-01,bancolombia,Nómina septiembre,salario,6500000,COP
+2026-09-02,ontop,Pago cliente EE.UU. (freelance),freelance,1200,USD
+2026-09-02,bancolombia,Arriendo apartamento,vivienda,-2100000,COP
+2026-09-03,bancolombia,Transferencia a Nequi,transferencia,-500000,COP
+2026-09-03,nequi,Transferencia desde Bancolombia,transferencia,500000,COP
+2026-09-04,nu,Mercado Éxito,mercado,-386400,COP
+2026-09-05,nequi,Almuerzo corrientazo,comida,-18000,COP
+2026-09-06,nu,Netflix,suscripciones,-26900,COP
+2026-09-06,nu,Claude Max,suscripciones,-100,USD
+2026-09-08,nequi,Uber al aeropuerto,transporte,-42500,COP
+2026-09-09,bancolombia,Servicios públicos (EPM),vivienda,-284300,COP
+2026-09-11,nu,Mercado D1,mercado,-152800,COP
+2026-09-12,nequi,Café de especialidad,comida,-14000,COP
+2026-09-13,bancolombia,Gimnasio (mensualidad),salud,-120000,COP
+2026-09-15,ontop,Pago cliente EE.UU. (freelance),freelance,800,USD
+2026-09-15,ontop,Retiro Ontop a Bancolombia,transferencia,-500,USD
+2026-09-15,bancolombia,Abono desde Ontop,transferencia,2000000,COP
+2026-09-18,nu,Cena cumpleaños,comida,-210000,COP
+2026-09-20,nequi,Bus intermunicipal,transporte,-35000,COP
+2026-09-22,nu,Curso de inglés,educacion,-189000,COP
+2026-09-25,nu,Mercado Éxito,mercado,-298700,COP
+2026-09-27,bancolombia,Plan de celular,servicios,-65000,COP
+2026-09-29,nequi,Domicilio Rappi,comida,-48900,COP
+2026-10-01,bancolombia,Nómina octubre,salario,6500000,COP
+2026-10-02,bancolombia,Arriendo apartamento,vivienda,-2100000,COP
