@@ -175,11 +175,11 @@ def main() -> int:
             check(errs.get(2, {}).get("fixedBy", {}) and errs[2]["fixedBy"]["step"] == 8, "el test fallido lo corrige el `npm test` del paso 8")
             check(errs.get(4, {}).get("fixedBy", {}) and errs[4]["fixedBy"]["step"] == 6, "el Edit fallido lo corrige el Edit del paso 6 (no el Read)")
             check(d["trace"]["summary"].startswith("9 vueltas · 8 tools · 2 errores, ambos corregidos (pasos 6 y 8)"), f"resumen con datos de la traza: {d['trace']['summary']}")
-            page.keyboard.press("Home")
             # Fila del error del Edit (su tool_result) → data-fixed-by = el resultado del paso 6.
-            page.locator("[data-trace-list]").evaluate("el => el.scrollTop = 0")
-            time.sleep(0.3)
+            # El chip del error en el encabezado salta a su fila y deja de seguir el final (como lo haría alguien en tarima).
+            page.locator("[data-stage-errors] button").nth(1).click()
             row = page.locator(f"[data-trace-row='{steps[4]['resultSeq']}']")
+            row.wait_for(timeout=10000)
             check(row.get_attribute("data-error") == "true" and row.get_attribute("data-fixed-by") == str(steps[6]["resultSeq"]), "la fila del error va en rojo y apunta al paso que lo corrigió")
             row.locator("[data-jump]").click()
             time.sleep(0.5)
