@@ -13,6 +13,7 @@ import { readOfficePalette } from "@/lib/oficina/palette";
 import { OfficeWorld, type OfficeHit, type OfficeMode, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
 import type { GameEvent, GameHud } from "@/lib/oficina/games";
 import type { OfficeLayers } from "./OficinaHud";
+import type { OfficeAudio } from "@/lib/oficina/audio";
 import type * as THREE from "three";
 import type { BoardStat, FeedLine } from "@/lib/oficina/room";
 import type { OwnerLook } from "@/lib/oficina/look";
@@ -70,6 +71,8 @@ interface Props {
   calendar?: UpcomingCalendar | null;
   /** Capas nuevas (interruptor "Capas"). */
   layers?: OfficeLayers;
+  /** Sonido de ambiente (vive en la página: sobrevive a los cambios de tema). */
+  audio?: OfficeAudio | null;
 }
 
 const NPC_ROLES = Object.keys(OFFICE_NPCS) as OfficeNpcRole[];
@@ -85,7 +88,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar, layers },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar, layers, audio },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -196,6 +199,10 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   useEffect(() => {
     worldRef.current?.setCalendar(calendar ?? null);
   }, [calendar]);
+
+  useEffect(() => {
+    worldRef.current?.setAudio(audio ?? null);
+  }, [audio]);
 
   useEffect(() => {
     if (!layers) return;

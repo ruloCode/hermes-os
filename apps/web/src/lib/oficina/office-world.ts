@@ -51,6 +51,7 @@ import { SpendBoard } from "./spendboard";
 import { ControlWall } from "./controlwall";
 import { DeskMonitor } from "./monitor";
 import { CeoAgenda, CeoInbox, MeetingScreen } from "./ceo-screens";
+import type { AudioSource, OfficeAudio } from "./audio";
 import { createGame, paintArcadeIdle, type GameEvent, type GameHud, type MiniGame } from "./games";
 import { PlayerController, isTyping, type Collider } from "./player";
 import { ALL_LAYERS, buildRoom, type BoardStat, type FeedLine, type Room, type RoomLayers, FLOOR_Y, floorAt } from "./room";
@@ -590,6 +591,15 @@ export class OfficeWorld {
   }
   private lastSeats: ReadonlyMap<string, string> = new Map();
   private gamesOn = true;
+  /** Sonido de ambiente (lo crea la página: sobrevive a los cambios de tema). */
+  private audio: OfficeAudio | null = null;
+  private typists: AudioSource[] = [];
+  private typistsAt = 0;
+  private readonly espressoAt = new THREE.Vector3();
+
+  setAudio(audio: OfficeAudio | null) {
+    this.audio = audio;
+  }
 
   /** Capa "Minijuegos": apagada, los juegos de la azotea no se alcanzan con "E" (y el que corre se cierra). */
   setGamesEnabled(on: boolean) {
@@ -1465,6 +1475,7 @@ export class OfficeWorld {
       const ev = g.update(dt, input);
       if (ev) {
         this.lastGameEvent = ev;
+        this.audio?.game(ev);
         this.hooks.onGameEvent?.(ev, new THREE.Vector3(g.camera.target.x, g.camera.target.y, g.camera.target.z));
       }
       if (g.over && !this.gameSaved) {
@@ -1571,6 +1582,7 @@ export class OfficeWorld {
     }
     this.room?.animate(t);
     this.confetti.update(dt);
+    if (this.audio?.on) this.feedAudio(now);
     this.effect.render(this.scene, this.camera);
     this.emitAnchors();
 
@@ -1580,6 +1592,27 @@ export class OfficeWorld {
       this.frames = 0;
       this.fpsAt = now;
     }
+  }
+
+  /** Lo que el sonido necesita de la escena (quién teclea se recalcula 4 veces por segundo). */
+  private feedAudio(now: number) {
+    if (now - this.typistsAt > 250) {
+      this.typistsAt = now;
+      this.typists = [];
+      for (const [id, s] of this.seated) {
+        if (s.leaving || s.status !== "working") continue;
+        this.typists.push({ id, pos: s.character.root.getWorldPosition(new THREE.Vector3()) });
+      }
+    }
+    const e = this.room?.espresso;
+    if (e) this.espressoAt.set(e.x, e.y, e.z);
+    this.audio!.frame({
+      camera: this.camera,
+      floor: Math.max(0, this.shownFloor),
+      owner: { pos: this.player.pos, speed: this.mode === "explore" && !this.game && !this.ceoOn ? this.player.speed : 0, grounded: this.player.grounded, running: this.player.speed > 1.2 },
+      typists: this.typists,
+      espresso: e ? this.espressoAt : null,
+    });
   }
 
   private emitAnchors() {

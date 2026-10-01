@@ -67,6 +67,11 @@ export class PingPongGame implements MiniGame {
     this.ball.position.set(t.x + s.ball.x, t.y + (s.serve > 0 ? 0.25 : h), t.z + s.ball.z);
   }
 
+  debug() {
+    const s = this.s;
+    return { ball: s.ball, you: s.you, cpu: s.cpu, rally: s.rally, serve: s.serve, scoreCpu: s.scoreCpu };
+  }
+
   hud() {
     const s = this.s;
     return {

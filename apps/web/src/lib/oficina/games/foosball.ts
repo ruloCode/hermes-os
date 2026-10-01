@@ -76,6 +76,11 @@ export class FoosballGame implements MiniGame {
     this.ball.position.set(f.x + s.ball.x, f.y + FOOS.ballR, f.z + s.ball.z);
   }
 
+  debug() {
+    const s = this.s;
+    return { ball: s.ball, you: s.you, cpu: s.cpu, kick: s.kick, scoreCpu: s.scoreCpu, serve: s.serve, rods: FOOS_RODS.you };
+  }
+
   hud() {
     const s = this.s;
     return {

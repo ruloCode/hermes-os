@@ -176,6 +176,8 @@ export interface Room {
   /** Pantalla de la sala de juntas (piso 2): la próxima junta del calendario. null sin la capa de zonas. */
   meetingSpot: BoardSpot | null;
   layers: RoomLayers;
+  /** La cafetera del café (mundo): de ahí sale su sonido. */
+  espresso: { x: number; y: number; z: number };
   /** Minijuegos de la azotea: dónde se juega cada uno. */
   gameSpots: Record<GameId, GameSpot>;
   arcadeScreen: ArcadeScreen;
@@ -2293,6 +2295,10 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     controlSpot,
     spendSpot,
     gameSpots,
+    espresso: (() => {
+      const v = machine.getWorldPosition(new THREE.Vector3());
+      return { x: v.x, y: v.y, z: v.z };
+    })(),
     arcadeScreen: arcadeScr,
     ceo,
     meetingSpot,

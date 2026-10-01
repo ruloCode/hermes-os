@@ -254,28 +254,48 @@ export function stepPong(prev: PongState, dt: number, input: GameInput): PongSta
 }
 
 // ── Futbolín (vista desde arriba: x a lo largo, z a lo ancho; tú atacas hacia +x) ──
+// Las ocho varillas de la mesa de la sala (rojo = tú, azul = la CPU), en el mismo
+// orden: portero, defensa, ataque rival, medio, medio rival, ataque, defensa
+// rival, portero rival. Con cuatro varillas quedaba una franja muerta de 36 cm
+// al centro donde la pelota se dormía y nadie la alcanzaba.
 
-export const FOOS = { L: 1.2, W: 0.7, goal: 0.13, ballR: 0.018, rodSpeed: 1.1, cpuSpeed: 0.55, kickSpeed: 2.4, friction: 0.45, lose: 3 } as const;
-/** Tus varillas (x) y las del rival; cada una con sus muñecos (offsets en z). */
+/** La CPU reacciona cada `cpuThink` s (no ve el futuro) y mueve sus varillas a `cpuSpeed`: se le puede ganar. */
+export const FOOS = { L: 1.2, W: 0.7, goal: 0.13, ballR: 0.018, rodSpeed: 1.1, cpuSpeed: 0.32, cpuThink: 0.3, kickSpeed: 2.4, friction: 0.3, lose: 3, slide: 0.12 } as const;
+
+function men(n: number): number[] {
+  if (n === 1) return [0];
+  const span = n === 2 ? 0.3 : n === 3 ? 0.44 : 0.56;
+  return Array.from({ length: n }, (_, i) => -span / 2 + (span * i) / (n - 1));
+}
+
+const TABLE = [
+  { team: "you", n: 1 },
+  { team: "you", n: 2 },
+  { team: "cpu", n: 3 },
+  { team: "you", n: 5 },
+  { team: "cpu", n: 5 },
+  { team: "you", n: 3 },
+  { team: "cpu", n: 2 },
+  { team: "cpu", n: 1 },
+] as const;
+
+const ALL_RODS = TABLE.map((r, i) => ({ team: r.team, x: -0.525 + i * 0.15, men: men(r.n) }));
 export const FOOS_RODS = {
-  you: [
-    { x: -0.42, men: [-0.15, 0.15] },
-    { x: 0.18, men: [-0.22, 0, 0.22] },
-  ],
-  cpu: [
-    { x: 0.42, men: [-0.15, 0.15] },
-    { x: -0.18, men: [-0.22, 0, 0.22] },
-  ],
-} as const;
+  you: ALL_RODS.filter((r) => r.team === "you").map(({ x, men }) => ({ x, men })),
+  cpu: ALL_RODS.filter((r) => r.team === "cpu").map(({ x, men }) => ({ x, men })),
+};
 
 export interface FoosState {
   ball: { x: number; z: number; vx: number; vz: number };
-  /** Desplazamiento en z de tus varillas y de las del rival (todas juntas). */
+  /** Desplazamiento en z de tus varillas y de las del rival (cada equipo, todas juntas). */
   you: number;
   cpu: number;
-  /** Giro de tus varillas (0 quietas, 1 pateando) y su temporizador. */
+  /** Giro de tus varillas (0 quietas; >0 pateando) y el enfriamiento de las del rival. */
   kick: number;
   cpuKick: number;
+  /** A dónde quiere llevar sus varillas la CPU y cuándo vuelve a decidir. */
+  cpuWant: number;
+  cpuThinkIn: number;
   scoreYou: number;
   scoreCpu: number;
   serve: number;
@@ -285,70 +305,84 @@ export interface FoosState {
   seed: number;
 }
 
-const FOOS_SLIDE = 0.12;
-
 export function newFoos(seed = 1): FoosState {
-  return { ball: { x: 0, z: 0, vx: 0, vz: 0 }, you: 0, cpu: 0, kick: 0, cpuKick: 0, scoreYou: 0, scoreCpu: 0, serve: 0.8, still: 0, over: false, event: "", seed };
+  const s: FoosState = { ball: { x: 0, z: 0, vx: 0, vz: 0 }, you: 0, cpu: 0, kick: 0, cpuKick: 0, cpuWant: 0, cpuThinkIn: 0, scoreYou: 0, scoreCpu: 0, serve: 0.8, still: 0, over: false, event: "", seed };
+  foosServe(s);
+  return s;
 }
 
 function foosServe(s: FoosState) {
   const r = mulberry32(s.seed + s.scoreYou * 13 + s.scoreCpu * 29);
-  s.ball = { x: 0, z: (r() - 0.5) * 0.3, vx: (r() - 0.5) * 0.6, vz: (r() - 0.5) * 0.8 };
+  // Saque por el centro, con algo de velocidad hacia un lado al azar.
+  s.ball = { x: 0, z: (r() - 0.5) * 0.3, vx: (r() < 0.5 ? -1 : 1) * (0.3 + r() * 0.3), vz: (r() - 0.5) * 0.6 };
   s.serve = 0.8;
   s.still = 0;
 }
 
 /** ¿Algún muñeco de esta varilla toca la pelota? Devuelve el desplazamiento relativo o null. */
-function manAt(rodX: number, men: readonly number[], slide: number, b: { x: number; z: number }): number | null {
-  if (Math.abs(b.x - rodX) > 0.035) return null;
-  for (const m of men) {
+function manAt(rodX: number, rodMen: readonly number[], slide: number, b: { x: number; z: number }): number | null {
+  if (Math.abs(b.x - rodX) > 0.04) return null;
+  for (const m of rodMen) {
     const dz = b.z - (m + slide);
     if (Math.abs(dz) <= 0.045) return dz;
   }
   return null;
 }
 
+/** El muñeco (offset) de la varilla rival a la que se acerca la pelota que mejor la alcanza. */
+function cpuTarget(b: { x: number; z: number; vx: number }): number {
+  const ahead = FOOS_RODS.cpu.filter((r) => (b.vx <= 0 ? r.x <= b.x + 0.05 : r.x >= b.x - 0.05));
+  const rods = ahead.length ? ahead : FOOS_RODS.cpu;
+  const rod = rods.reduce((a, r) => (Math.abs(r.x - b.x) < Math.abs(a.x - b.x) ? r : a));
+  return rod.men.reduce((a, m) => (Math.abs(m - b.z) < Math.abs(a - b.z) ? m : a));
+}
+
 export function stepFoos(prev: FoosState, dt: number, input: GameInput): FoosState {
   const s: FoosState = { ...prev, ball: { ...prev.ball }, event: "" };
   if (s.over) return s;
-  s.you = clamp(s.you - input.y * FOOS.rodSpeed * dt, -FOOS_SLIDE, FOOS_SLIDE);
+  s.you = clamp(s.you - input.y * FOOS.rodSpeed * dt, -FOOS.slide, FOOS.slide);
   if (input.pressed && s.kick <= 0) s.kick = 0.25;
   s.kick = Math.max(0, s.kick - dt);
-  // El rival alinea su muñeco más cercano con la pelota.
-  const want = clamp(s.ball.z - nearestMan(FOOS_RODS.cpu, s.ball), -FOOS_SLIDE, FOOS_SLIDE);
-  s.cpu = clamp(s.cpu + clamp(want - s.cpu, -FOOS.cpuSpeed * dt, FOOS.cpuSpeed * dt), -FOOS_SLIDE, FOOS_SLIDE);
+  // El rival decide cada cpuThink s qué muñeco alinear con la pelota y va, a su velocidad tope.
+  s.cpuThinkIn -= dt;
+  if (s.cpuThinkIn <= 0) {
+    s.cpuThinkIn = FOOS.cpuThink;
+    s.cpuWant = clamp(s.ball.z - cpuTarget(s.ball), -FOOS.slide, FOOS.slide);
+  }
+  s.cpu = clamp(s.cpu + clamp(s.cpuWant - s.cpu, -FOOS.cpuSpeed * dt, FOOS.cpuSpeed * dt), -FOOS.slide, FOOS.slide);
   s.cpuKick = Math.max(0, s.cpuKick - dt);
   if (s.serve > 0) {
     s.serve = Math.max(0, s.serve - dt);
     return s;
   }
   const b = s.ball;
-  // Patadas: tus varillas mandan la pelota a +x, las del rival a −x.
-  if (s.kick > 0.1) {
-    for (const rod of FOOS_RODS.you) {
-      const dz = manAt(rod.x, rod.men, s.you, b);
-      if (dz !== null) {
-        b.vx = FOOS.kickSpeed;
-        b.vz = dz * 18;
-        b.x = rod.x + 0.04;
-        s.event = "kick";
-      }
-    }
-  } else {
-    for (const rod of FOOS_RODS.you) {
-      // Varilla quieta: la pelota rebota en el muñeco.
-      const dz = manAt(rod.x, rod.men, s.you, b);
-      if (dz !== null && Math.sign(b.vx) === Math.sign(rod.x - b.x + 1e-6)) b.vx = -b.vx * 0.6;
+  for (const rod of FOOS_RODS.you) {
+    const dz = manAt(rod.x, rod.men, s.you, b);
+    if (dz === null) continue;
+    if (s.kick > 0.1) {
+      // Tus varillas giran: la pelota sale hacia el arco rival (+x).
+      b.vx = FOOS.kickSpeed;
+      b.vz = dz * 18;
+      b.x = rod.x + 0.045;
+      s.event = "kick";
+    } else if (Math.sign(b.vx) === Math.sign(rod.x - b.x + 1e-6)) {
+      // Quieta: la pelota rebota en el muñeco.
+      b.vx = -b.vx * 0.6;
+      b.x = rod.x - Math.sign(rod.x - b.x + 1e-6) * 0.045;
     }
   }
   for (const rod of FOOS_RODS.cpu) {
     const dz = manAt(rod.x, rod.men, s.cpu, b);
-    if (dz !== null && s.cpuKick <= 0) {
+    if (dz === null) continue;
+    if (s.cpuKick <= 0) {
       b.vx = -FOOS.kickSpeed * 0.8;
       b.vz = dz * 14;
-      b.x = rod.x - 0.04;
-      s.cpuKick = 0.5;
+      b.x = rod.x - 0.045;
+      s.cpuKick = 0.6;
       s.event = "kick";
+    } else if (Math.sign(b.vx) === Math.sign(rod.x - b.x + 1e-6)) {
+      b.vx = -b.vx * 0.6;
+      b.x = rod.x - Math.sign(rod.x - b.x + 1e-6) * 0.045;
     }
   }
   b.x += b.vx * dt;
@@ -380,15 +414,15 @@ export function stepFoos(prev: FoosState, dt: number, input: GameInput): FoosSta
     b.vx = -b.vx * 0.8;
     s.event = s.event || "wall";
   }
-  // Pelota muerta (quieta lejos de todos): se vuelve a sacar.
-  s.still = Math.hypot(b.vx, b.vz) < 0.05 ? s.still + dt : 0;
-  if (s.still > 4) foosServe(s);
+  // La mesa tiene una leve pendiente: una pelota casi quieta rueda hacia la varilla más cercana.
+  s.still = Math.hypot(b.vx, b.vz) < 0.12 ? s.still + dt : 0;
+  if (s.still > 1.2) {
+    const nearest = ALL_RODS.reduce((a, r) => (Math.abs(r.x - b.x) < Math.abs(a.x - b.x) ? r : a));
+    b.vx += Math.sign(nearest.x - b.x || 1) * 0.25;
+    b.vz += (mulberry32(s.seed + Math.round(b.x * 1000))() - 0.5) * 0.2;
+    s.still = 0;
+  }
   return s;
-}
-
-function nearestMan(rods: readonly { x: number; men: readonly number[] }[], b: { x: number; z: number }): number {
-  const rod = rods.reduce((a, r) => (Math.abs(r.x - b.x) < Math.abs(a.x - b.x) ? r : a));
-  return rod.men.reduce((a, m) => (Math.abs(m - b.z) < Math.abs(a - b.z) ? m : a));
 }
 
 // ── Arcade: "Lluvia de tokens" (diseño propio) ─────────────────────────────

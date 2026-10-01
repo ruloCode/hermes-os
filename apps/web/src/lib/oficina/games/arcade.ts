@@ -127,6 +127,10 @@ export class ArcadeGame implements MiniGame {
     this.scr.tex.needsUpdate = true;
   }
 
+  debug() {
+    return { cursor: this.s.cursor, lives: this.s.lives, items: this.s.items.map((i) => ({ x: +i.x.toFixed(3), y: +i.y.toFixed(3), bug: i.bug })) };
+  }
+
   hud() {
     const s = this.s;
     return {

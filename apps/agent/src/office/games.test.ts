@@ -110,6 +110,16 @@ describe("minijuegos de la azotea", () => {
     assert.ok(s.ball.vx < 0);
   });
 
+  it("futbolín: una pelota quieta no se duerme entre varillas y, sin jugar, la CPU gana", () => {
+    let s: FoosState = { ...newFoos(5), serve: 0, ball: { x: 0.0, z: 0.3, vx: 0, vz: 0 } };
+    for (let i = 0; i < 60 * 4; i++) s = stepFoos(s, 1 / 60, input());
+    assert.ok(Math.abs(s.ball.x) > 0.02 || s.event !== "", "la pendiente la mueve hacia una varilla");
+    let idle = newFoos(3);
+    for (let i = 0; i < 60 * 300 && !idle.over; i++) idle = stepFoos(idle, 1 / 60, input());
+    assert.equal(idle.over, true);
+    assert.equal(idle.scoreCpu, FOOS.lose);
+  });
+
   it("lluvia de tokens: atrapar suma, un bug quita vida y a las 0 termina", () => {
     let s = newRain(7);
     s.items = [{ x: 0.5, y: 0.9, bug: false, v: 0.3 }];

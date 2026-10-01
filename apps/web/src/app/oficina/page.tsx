@@ -101,6 +101,7 @@ import { demoOfficeState } from "@/lib/oficina/sim";
 import { DEFAULT_LOOK, loadLook, saveLook, type OwnerLook } from "@/lib/oficina/look";
 import { daylightAt, type FeedLine } from "@/lib/oficina/room";
 import { isTyping } from "@/lib/oficina/player";
+import { OfficeAudio } from "@/lib/oficina/audio";
 import { replyVoiceEnabled, setReplyVoice, speak, stopSpeaking } from "@/lib/oficina/speech";
 import type { OfficeHit, OfficeMode } from "@/lib/oficina/office-world";
 
@@ -133,6 +134,8 @@ declare global {
       state: () => unknown;
       exit: () => void;
     };
+    /** QA del sonido: su estado (apagado al cargar; prende con un gesto real). */
+    __hermesOficinaAudio?: () => unknown;
     /** QA del modo CEO: sentarse (true) o levantarse (false); devuelve si quedó sentado. */
     __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
@@ -356,6 +359,11 @@ export default function OficinaPage() {
   const [ceo, setCeo] = useState(false);
   const [layers, setLayersState] = useState<OfficeLayers>(DEFAULT_LAYERS);
   const [layersOpen, setLayersOpen] = useState(false);
+  // Sonido de ambiente: arranca APAGADO y prende con el clic en "Sonido" (autoplay); el volumen se recuerda.
+  const audioRef = useRef<OfficeAudio | null>(null);
+  if (!audioRef.current && typeof window !== "undefined") audioRef.current = new OfficeAudio();
+  const [soundOn, setSoundOn] = useState(false);
+  const [volume, setVolume] = useState(0.6);
   const [ceoPick, setCeoPick] = useState<string | null>(null);
   const ceoRef = useRef(false);
   ceoRef.current = ceo;
@@ -797,6 +805,10 @@ export default function OficinaPage() {
     hire: (project, text) => hireAgentRef.current(project, text),
   });
   const inCall = hermes.connected || team.status === "on";
+  // Con una llamada activa el ambiente baja: nunca tapa la voz de Hermes ni la del equipo.
+  useEffect(() => {
+    audioRef.current?.setDucked(inCall);
+  }, [inCall]);
   /** Y: si existe el elenco de la oficina llama al equipo; si no, a Hermes. */
   const toggleCall = useCallback(() => {
     if (!team.available) return toggleHermes();
@@ -1198,6 +1210,22 @@ export default function OficinaPage() {
     }
   }, [workers, sim, snapshots, projectName, toast]);
 
+  // Sonido: un tono cuando alguien te necesita y otro cuando alguien termina (también en simulación: es sonido, no dato).
+  const chimeRef = useRef<Map<string, OfficeWorker["status"]> | null>(null);
+  useEffect(() => {
+    const prev = chimeRef.current;
+    chimeRef.current = new Map(workers.map((w) => [w.id, w.status]));
+    if (!prev) return;
+    for (const w of workers) {
+      const was = prev.get(w.id);
+      if (was === undefined || was === w.status) continue;
+      if (w.status === "needs_you") audioRef.current?.chime("needs");
+      else if (w.status === "done") audioRef.current?.chime("done");
+    }
+  }, [workers]);
+
+  useEffect(() => () => audioRef.current?.dispose(), []);
+
   useEffect(() => {
     if (selected?.kind === "worker" && !selectedWorker && !pendingFocus) setSelected(null);
   }, [selected, selectedWorker, pendingFocus]);
@@ -1373,6 +1401,16 @@ export default function OficinaPage() {
     }
   };
 
+  const toggleSound = async () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.on) {
+      a.stop();
+      setSoundOn(false);
+    } else setSoundOn(await a.start());
+    setVolume(a.getVolume());
+  };
+
   const changeLook = (l: OwnerLook) => {
     setLook(l);
     saveLook(l);
@@ -1453,6 +1491,7 @@ export default function OficinaPage() {
       state: () => sceneRef.current?.world()?.gameState() ?? null,
       exit: () => sceneRef.current?.world()?.exitGame(),
     };
+    window.__hermesOficinaAudio = () => audioRef.current?.state() ?? null;
     window.__hermesOficinaCeo = (on) => {
       const world = sceneRef.current?.world();
       if (!world) return false;
@@ -1479,6 +1518,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaShareTest;
       delete window.__hermesOficinaGame;
       delete window.__hermesOficinaCeo;
+      delete window.__hermesOficinaAudio;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 
@@ -1526,6 +1566,7 @@ export default function OficinaPage() {
         }}
         calendar={snapshot?.calendar ?? null}
         layers={layers}
+        audio={audioRef.current}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
@@ -1589,9 +1630,30 @@ export default function OficinaPage() {
             ambient={ambient}
             onAmbient={() => setAmbient(!ambient)}
             extra={
-              <ToolButton active={layersOpen} onClick={() => setLayersOpen((v) => !v)} title="Capas nuevas: pantallas y uso, oficina de CEO, zonas y minijuegos">
-                Capas
-              </ToolButton>
+              <>
+                <ToolButton active={soundOn} onClick={() => void toggleSound()} title="Sonido de ambiente procedural (apagado por defecto; baja solo durante una llamada)">
+                  {soundOn ? "🔈 Sonido" : "🔇 Sonido"}
+                </ToolButton>
+                {soundOn ? (
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={volume}
+                    aria-label="Volumen del ambiente"
+                    className="w-16 accent-accent"
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setVolume(v);
+                      audioRef.current?.setVolume(v);
+                    }}
+                  />
+                ) : null}
+                <ToolButton active={layersOpen} onClick={() => setLayersOpen((v) => !v)} title="Capas nuevas: pantallas y uso, oficina de CEO, zonas y minijuegos">
+                  Capas
+                </ToolButton>
+              </>
             }
           />
           {hermes.error ? <p className="pointer-events-auto rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{hermes.error}</p> : null}
