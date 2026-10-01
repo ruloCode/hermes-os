@@ -164,7 +164,8 @@ export function WorkerDrawer({
   const scrollRef = useRef<HTMLDivElement>(null);
   const active = worker.status !== "done" && worker.status !== "error";
   // Clic en un personaje con error (o bloqueado): el panel abre en la traza, sobre el error.
-  const [tab, setTab] = useState<DrawerTab>(() => (worker.status === "error" || worker.status === "blocked" ? "trace" : "out"));
+  // Abre en el Log (lo que hace, completo y en vivo); con error o bloqueado, en la Traza sobre el error.
+  const [tab, setTab] = useState<DrawerTab>(() => (worker.status === "error" || worker.status === "blocked" ? "trace" : "log"));
   const traceView = useTraceView(tab === "out" ? null : worker.id, { on: publicView, ctx: publicCtx });
   const listRef = useRef<TraceListHandle | null>(null);
   const [focusSeq, setFocusSeq] = useState<number | null>(null);
