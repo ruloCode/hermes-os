@@ -479,7 +479,9 @@ Ladrillo, concreto pulido, deck, madera, tela y tiza a 1024 px y sin costura, m�
 | O | — | Vista pública prendida / apagada |
 | R | — | Plan B: repetir la última traza real (R otra vez vuelve a lo vivo) |
 
-El panel de cada agente (fuera de la tarima) tiene las mismas vistas en pestañas: **Salida · Traza · Tools · Prompt**. Si el personaje está en error o bloqueado, el panel abre en la Traza, sobre el error.
+El panel de cada agente (fuera de la tarima) tiene las mismas vistas en pestañas: **Salida · Log · Traza · Tools · Prompt**. Si el personaje está en error o bloqueado, el panel abre en la Traza, sobre el error.
+
+**Log completo de cada agente** (pestaña **Log** del panel y **Logs** en la tarima): todos los eventos de su traza en orden, con hora, vuelta y paso, y el contenido ENTERO de cada uno (el input de cada tool, lo que le devolvió, el texto del modelo, los permisos y quién los decidió). Son las mismas filas de la traza (`buildRows`), desplegadas, así que respetan la vista pública. **⤓ .txt** lo baja entero. Antes, "Salida" de una tarea del SDK mostraba solo sus últimas 12 líneas. Las sesiones que no graban traza (Estudio, juntas) caen al stream de su run o a sus últimas líneas, y el panel lo dice.
 
 ### La traza: captura completa en los dos caminos
 
