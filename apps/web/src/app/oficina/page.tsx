@@ -154,6 +154,8 @@ declare global {
     __hermesOficinaSay?: (id: string, line: string) => boolean;
     /** QA visual: porcentaje de píxeles casi negros del canvas (sin HUD), arriba y en el borde. */
     __hermesOficinaPixels?: () => unknown;
+    /** Recorrido de presentación: la cámara pasea sola por la ciudad y los tres pisos (false lo detiene). */
+    __hermesOficinaTour?: (on: boolean) => unknown;
     /** QA del modo CEO: sentarse (true) o levantarse (false); devuelve si quedó sentado. */
     __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
@@ -1715,6 +1717,13 @@ export default function OficinaPage() {
     };
     window.__hermesOficinaSay = (id, line) => peopleVoicesRef.current?.say(id, CHAT_LINES[line] ?? line, { volume: 1, line }) ?? false;
     window.__hermesOficinaPixels = () => sceneRef.current?.world()?.pixelStats() ?? null;
+    window.__hermesOficinaTour = (on) => {
+      const w = sceneRef.current?.world();
+      if (!w) return null;
+      if (on) w.startTour();
+      else w.stopTour();
+      return w.tourState;
+    };
     window.__hermesOficinaVoices = (catalog) => {
       peopleVoicesRef.current?.setOverride(catalog);
       return peopleVoicesRef.current?.debug() ?? null;
@@ -1750,6 +1759,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaVoices;
       delete window.__hermesOficinaSay;
       delete window.__hermesOficinaPixels;
+      delete window.__hermesOficinaTour;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 
@@ -1942,6 +1952,10 @@ export default function OficinaPage() {
               layers={layers}
               onChange={setLayers}
               onClose={() => setLayersOpen(false)}
+              onTour={() => {
+                setLayersOpen(false);
+                sceneRef.current?.world()?.startTour();
+              }}
               voices={{
                 on: peopleVoicesOn,
                 soundOn,

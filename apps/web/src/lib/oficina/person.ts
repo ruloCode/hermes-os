@@ -24,8 +24,38 @@ export const PERSON_SEAT_OFFSET = 0.32;
  */
 export type PersonPose = "stand" | "sit" | "cup" | "sitcup" | "paddle" | "hands" | "point" | "lookup" | "throw" | "window" | "dance" | "eat" | "talk" | "listen" | "clap";
 
+/** Sombra de contacto compartida por todas las personas: un gradiente bajo los pies (una textura, una geometría). */
+let blobAssets: { geo: THREE.PlaneGeometry; mat: THREE.MeshBasicMaterial } | null = null;
+function blobShadow(): THREE.Mesh {
+  if (!blobAssets) {
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d")!;
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, "rgba(0,0,0,0.42)");
+    grad.addColorStop(0.6, "rgba(0,0,0,0.18)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(c);
+    const geo = new THREE.PlaneGeometry(0.9, 0.9);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+    mat.userData.outlineParameters = { visible: false };
+    blobAssets = { geo, mat };
+  }
+  const m = new THREE.Mesh(blobAssets.geo, blobAssets.mat);
+  m.position.y = 0.015;
+  m.renderOrder = 1;
+  return m;
+}
+
 export class Person {
+  /** Sombras de contacto prendidas (las enciende la capa "Texturas y arte"). */
+  static contactShadows = true;
   readonly root = new THREE.Group();
+  /** Sombra de contacto: se queda en el piso aunque el cuerpo rebote o se siente. */
+  private blob: THREE.Mesh;
   private body = new THREE.Group();
   private head = new THREE.Group();
   private hair = new THREE.Group();
@@ -68,6 +98,8 @@ export class Person {
     const ink = toon("#1d1d1d");
 
     this.root.add(this.body);
+    this.blob = blobShadow();
+    this.root.add(this.blob);
     this.body.add(mesh(new THREE.CapsuleGeometry(0.26, 0.28, 6, 12), this.shirt, 0, 0.72, 0));
     // Cuello de la camiseta, para que se lea como ropa.
     const collar = mesh(new THREE.TorusGeometry(0.15, 0.035, 6, 16), this.collarMat, 0, 1.02, 0, false);
@@ -391,6 +423,9 @@ export class Person {
     if (!moving && this.pose === "paddle") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 5)) * 0.04;
     if (!moving && this.pose === "dance") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 7)) * 0.08;
     this.head.rotation.z = moving ? Math.sin(this.walkPhase) * 0.04 : 0;
+    this.blob.visible = Person.contactShadows && !airborne;
+    // Quien la crea suele recorrer el cuerpo con castShadow = true: la mancha nunca proyecta (sería un cuadro).
+    this.blob.castShadow = false;
     // La boca sigue a la voz (con un mínimo para que se lea "está hablando" aunque la síntesis no dé volumen).
     if (this.mouth && this.smile) {
       const open = this.talkLevel > 0.01 ? 0.25 + this.talkLevel * (0.6 + 0.4 * Math.abs(Math.sin(t * 17 + this.phase))) : 0;
@@ -515,6 +550,7 @@ export class Person {
 
   dispose() {
     this.prop = null;
+    this.root.remove(this.blob); // compartida: no se libera con la persona
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) m.geometry.dispose();

@@ -114,7 +114,7 @@ function panoramaCylinder(): THREE.Mesh<THREE.CylinderGeometry, THREE.ShaderMate
   const height = tileW / (21 / 9);
   const geo = new THREE.CylinderGeometry(PANO_R, PANO_R, height, 96, 1, true);
   // La base queda bajo el horizonte de la cámara: la línea de techos del panorama cae un poco abajo de los ojos.
-  geo.translate(0, height / 2 - height * 0.3, 0);
+  geo.translate(0, height / 2 - height * 0.38, 0);
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uZenith: { value: new THREE.Color() },
@@ -157,7 +157,7 @@ function panoramaCylinder(): THREE.Mesh<THREE.CylinderGeometry, THREE.ShaderMate
         // Arriba se funde con el domo; abajo, con el horizonte (donde la niebla entrega el suelo).
         vec3 sky = skyColor(normalize(vDir));
         c = mix(c, sky, smoothstep(0.72, 0.98, vUv.y));
-        c = mix(c, uHorizon, smoothstep(0.12, 0.0, vUv.y));
+        c = mix(c, uHorizon, smoothstep(0.06, 0.0, vUv.y));
         gl_FragColor = vec4(c * uDim, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -439,7 +439,7 @@ export class Outdoor {
     const pad = 1.5;
     // Alturas pensadas para que desde la azotea (ojos a ~9 m) se vean los cerros del panorama por encima.
     addRow(out3.minX - 20, out3.maxX + 20, out3.minZ - pad, out3.minZ - pad - 1, "x", 4.5, 10); // atrás
-    addRow(out3.minX - 34, out3.maxX + 34, out3.minZ - pad - 22, out3.minZ - pad - 23, "x", 8, 14); // segunda fila, más lejos
+    addRow(out3.minX - 34, out3.maxX + 34, out3.minZ - pad - 22, out3.minZ - pad - 23, "x", 6, 10.5); // segunda fila, más lejos (bajo los ojos en la azotea)
     addRow(out3.maxX + pad, out3.maxX + pad + 1, out3.minZ - 10, out3.maxZ + 6, "z", 4, 9); // este
     addRow(out3.minX - pad, out3.minX - pad - 1, out3.minZ - 10, out3.maxZ + 6, "z", 4, 9); // oeste
     addRow(out3.minX - 20, out3.maxX + 20, out3.maxZ + pad + 6, out3.maxZ + pad + 7, "x", 3.5, 5.5); // frente, bajos y lejos

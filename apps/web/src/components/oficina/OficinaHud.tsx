@@ -539,12 +539,15 @@ export function LayersPicker({
   onClose,
   sound,
   voices,
+  onTour,
 }: {
   layers: OfficeLayers;
   onChange: (l: OfficeLayers) => void;
   onClose: () => void;
   /** "Voces de la gente": cada persona habla con su voz (requiere el sonido prendido). */
   voices?: { on: boolean; soundOn: boolean; onToggle: (on: boolean) => void };
+  /** Recorrido de presentación (la cámara pasea sola; un clic o una tecla lo detienen). */
+  onTour?: () => void;
   /** Volumen del sonido (va aquí y no en la barra: un control que aparece corría los botones). */
   sound?: { on: boolean; volume: number; onVolume: (v: number) => void };
 }) {
@@ -569,6 +572,12 @@ export function LayersPicker({
           </li>
         ))}
       </ul>
+      {onTour ? (
+        <button type="button" onClick={onTour} data-tour className="mt-3 w-full rounded-lg border border-line px-3 py-1.5 text-left text-sm text-text hover:bg-panel-2">
+          ▶ Recorrido de presentación
+          <span className="block text-xs text-text-dim">La cámara pasea sola por la ciudad y los tres pisos; un clic o una tecla lo detienen</span>
+        </button>
+      ) : null}
       {voices ? (
         <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-line pt-3 text-sm text-text" title="Cada persona habla con su propia voz, que no se repite. Nunca encima de una llamada.">
           <input type="checkbox" className="mt-0.5 accent-accent" checked={voices.on} onChange={(e) => voices.onToggle(e.target.checked)} data-layer="voices" />

@@ -42,6 +42,7 @@ import {
   type SkyState,
 } from "@hermes/shared";
 import { Outdoor } from "./outdoor";
+import { OfficeParticles } from "./particles";
 import { hdMegabytes, hdReady, hdState, preloadHd } from "./hd";
 import type { PeopleVoices } from "./people-voice";
 import { buildDesk, buildPodRug, type DeskView } from "./desk";
@@ -228,6 +229,10 @@ export class OfficeWorld {
   private readonly outside: THREE.Mesh;
   /** Capa "Exterior": cielo, ciudad y calle que siguen la hora real. */
   private outdoor: Outdoor | null = null;
+  /** Polvo en la luz del día y hojas en la azotea (con el Exterior). */
+  private particles: OfficeParticles | null = null;
+  /** Recorrido de presentación: la cámara pasea sola por la ciudad y los tres pisos. */
+  private tour: { i: number; t0: number } | null = null;
   private exteriorOn = true;
   private panoramaLoading = false;
   /** Hora forzada (QA y capturas: __hermesOficinaHour); null = la del reloj. */
@@ -343,7 +348,11 @@ export class OfficeWorld {
     this.controls.maxDistance = 70;
     this.controls.screenSpacePanning = false;
     this.controls.enabled = false;
-    this.controls.addEventListener("start", () => (this.focusGoal = null));
+    // Arrastrar la cámara la toma el usuario: el encuadre y el recorrido se sueltan.
+    this.controls.addEventListener("start", () => {
+      this.focusGoal = null;
+      this.tour = null;
+    });
 
     // ── Luz: sol con sombras finas, cielo y lámparas (la sala pone las suyas) ──
     const dark = palette.dark;
@@ -642,6 +651,7 @@ export class OfficeWorld {
     const same = next.data === this.layers.data && next.ceo === this.layers.ceo && next.zones === this.layers.zones && next.hd === this.layers.hd;
     if (same) return;
     this.layers = next;
+    Person.contactShadows = next.hd !== false;
     if (this.ceoOn && !layers.ceo) this.exitCeo();
     // Los monitores de los escritorios son de la capa de datos.
     if (!layers.data) for (const st of this.seated.values()) {
@@ -1108,6 +1118,8 @@ export class OfficeWorld {
       stairs: this.room?.stairs ?? [],
       fps: this.fps,
       render: this.renderInfo(),
+      tour: this.tourState,
+      particles: this.particles?.visibleCount ?? 0,
       voices: this.peopleVoices?.debug() ?? null,
       hd: { on: !!this.layers.hd, state: hdState(), applied: !!this.room?.key.endsWith("1"), megabytes: hdMegabytes() },
       exterior: { on: this.exteriorOn, hour: +this.sky.hour.toFixed(2), forced: this.hourOverride !== null, ...(this.outdoor?.state ?? {}), counts: this.outdoor?.counts ?? null },
@@ -1286,6 +1298,7 @@ export class OfficeWorld {
       this.room = buildRoom(layout, this.palette, this.ownerName, this.layers);
       this.room.setOutdoorViews(this.exteriorOn);
       this.outdoor?.setBounds(this.room.bounds);
+      this.particles?.setWorld(this.room.bounds, FLOOR_Y);
       this.shownFloor = -1;
       this.room.group.traverse((o) => {
         const m = o as THREE.Mesh;
@@ -1705,6 +1718,8 @@ export class OfficeWorld {
   // ── Entrada ────────────────────────────────────────────────────────────
 
   private onKey = (e: KeyboardEvent) => {
+    // Cualquier tecla (salvo modificadores) termina el recorrido de presentación.
+    if (this.tour && !isTyping(e) && !["Shift", "Meta", "Control", "Alt"].includes(e.key)) this.stopTour();
     if (this.game && !isTyping(e) && !e.metaKey && !e.ctrlKey && !e.altKey) {
       // En un minijuego las teclas son del juego: Esc sale; flechas y Espacio no mueven la página.
       if (e.code === "Escape") {
@@ -1845,6 +1860,7 @@ export class OfficeWorld {
   };
 
   private onWheel = (e: WheelEvent) => {
+    this.stopTour();
     if (this.mode !== "explore") return;
     e.preventDefault();
     this.player.zoom(e.deltaY);
@@ -1904,6 +1920,70 @@ export class OfficeWorld {
     this.room.showFloors(shown);
     this.applyFloorLamps();
     this.hooks.onFloor?.(shown);
+  }
+
+  // ── Recorrido de presentación ─────────────────────────────────────────
+
+  /** Cuánto dura cada toma del recorrido (s). */
+  static readonly TOUR_SHOT = 7;
+
+  /** Las tomas: la ciudad, los tres pisos y la azotea mirando a los cerros (se calculan sobre la planta real). */
+  private tourShots(): { name: string; floor: number; target: THREE.Vector3; pos: THREE.Vector3 }[] {
+    const b = this.room!.bounds;
+    const cx = (b.minX + b.maxX) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    const w = b.maxX - b.minX;
+    const y3 = FLOOR_Y[2];
+    const aerial = (floor: number) => {
+      const y = FLOOR_Y[floor];
+      const center = new THREE.Vector3(cx, y, cz);
+      return { target: center, pos: center.clone().add(FRAME_DIR.clone().multiplyScalar(this.fitDistance(center, b))) };
+    };
+    return [
+      { name: "ciudad", floor: 2, target: new THREE.Vector3(cx, 4, cz), pos: new THREE.Vector3(cx + w * 0.55, 20, b.maxZ + w * 0.95) },
+      { name: "equipos", floor: 0, ...aerial(0) },
+      { name: "café", floor: 1, ...aerial(1) },
+      { name: "azotea", floor: 2, ...aerial(2) },
+      { name: "cerros", floor: 2, target: new THREE.Vector3(cx - w * 0.1, y3 + 3, b.minZ - 60), pos: new THREE.Vector3(cx + w * 0.15, y3 + 4.2, b.maxZ + 2) },
+    ];
+  }
+
+  get tourState(): { on: boolean; shot: string | null } {
+    if (!this.tour || !this.room) return { on: false, shot: null };
+    return { on: true, shot: this.tourShots()[this.tour.i]?.name ?? null };
+  }
+
+  /** Arranca el recorrido (vista aérea; un clic, una tecla o la rueda lo detienen). */
+  startTour(): boolean {
+    if (!this.room) return false;
+    if (this.game) this.exitGame();
+    if (this.ceoOn) this.exitCeo();
+    this.setMode("aerial");
+    this.tour = { i: 0, t0: this.t };
+    this.applyTourShot();
+    return true;
+  }
+
+  stopTour() {
+    if (!this.tour) return;
+    this.tour = null;
+    this.focusGoal = null;
+  }
+
+  private applyTourShot() {
+    const shot = this.tourShots()[this.tour!.i];
+    this.aerialFloor = shot.floor;
+    // Más lento que un encuadre normal: es un paseo, no un salto.
+    this.focusGoal = { target: shot.target, pos: shot.pos };
+  }
+
+  private tickTour() {
+    const tour = this.tour!;
+    if (this.mode !== "aerial") return this.stopTour();
+    if (this.t - tour.t0 < OfficeWorld.TOUR_SHOT) return;
+    tour.i = (tour.i + 1) % this.tourShots().length;
+    tour.t0 = this.t;
+    this.applyTourShot();
   }
 
   /** Vista aérea de un piso: el 1 encuadra los pods; el 2 y el 3, la planta entera a su altura. */
@@ -2003,6 +2083,12 @@ export class OfficeWorld {
       this.loadPanorama();
     }
     if (this.outdoor) this.outdoor.group.visible = on;
+    if (on && !this.particles) {
+      this.particles = new OfficeParticles();
+      if (this.room) this.particles.setWorld(this.room.bounds, FLOOR_Y);
+      this.scene.add(this.particles.group);
+    }
+    if (this.particles) this.particles.group.visible = on;
     this.outside.visible = !on;
     this.room?.setOutdoorViews(on);
     const bg = new THREE.Color(this.palette.bg);
@@ -2187,6 +2273,8 @@ export class OfficeWorld {
       cw.update(now, floor1 && this.frustum.intersectsSphere(this.sphere));
     }
     this.room?.animate(t);
+    if (this.particles && this.exteriorOn) this.particles.update(dt, t, Math.max(0, this.shownFloor), this.sky.weights.day + this.sky.weights.dusk * 0.5);
+    if (this.tour) this.tickTour();
     this.confetti.update(dt);
     if (this.audio?.on) this.feedAudio(now);
     if (this.outdoor && this.exteriorOn) this.outdoor.follow(this.camera);
@@ -2324,6 +2412,7 @@ export class OfficeWorld {
     }
     this.room?.dispose();
     this.outdoor?.dispose();
+    this.particles?.dispose();
     for (const d of this.disposables) d.dispose();
     this.confetti.dispose();
     this.renderer.dispose();
