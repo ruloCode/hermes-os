@@ -10,6 +10,10 @@ export const SKIN_TONES = ["#ffe3cc", "#ffd7b5", "#f1c27d", "#e0ac69", "#d49a6a"
 export const HAIR_COLORS = ["#2b2d42", "#3b2417", "#6f4e37", "#e9c46a", "#c1440e", "#d9d9d9", "#d62828", "#ff8fab", "#9d4edd", "#264653"];
 export const HAIR_STYLES = ["Rulos", "Corto", "Largo", "Moño", "Puntas", "Rizado", "Cola", "Calvo"] as const;
 export const SHIRT_COLORS = ["#f4f1ea", "#d97757", "#3d5a80", "#2a9d8f", "#e9c46a", "#6c757d", "#9d4edd", "#ef476f", "#1d3557"];
+/** Pantalón (el primero es el del dueño). Solo la gente del edificio usa los demás. */
+export const PANTS_COLORS = ["#3d405b", "#5c4033", "#2f4858", "#6b705c", "#8d99ae", "#3a3a3a"];
+/** Gorra o gorro de la gente del edificio (el dueño no usa: sus rulos son su sello). */
+export const HAT_STYLES = ["ninguno", "gorra", "gorro"] as const;
 
 export interface OwnerLook {
   skin: number;
@@ -22,6 +26,10 @@ export interface OwnerLook {
   glasses: boolean;
   /** Collar con dije y arete. */
   extras: boolean;
+  /** Color del pantalón (índice de PANTS_COLORS; sin dato, el del dueño). */
+  pants?: number;
+  /** Gorra o gorro (índice de HAT_STYLES; sin dato, ninguno). */
+  hat?: number;
 }
 
 export const DEFAULT_LOOK: OwnerLook = { skin: 4, hair: 1, style: 0, shirt: 0, beard: true, glasses: true, extras: true };

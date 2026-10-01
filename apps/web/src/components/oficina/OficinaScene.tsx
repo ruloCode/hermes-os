@@ -8,12 +8,13 @@
 // de la Sala).
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { OFFICE_NPCS, type OfficeBoards, type OfficeLayout, type OfficeNpcRole, type OfficeSpend, type OfficeWorker, type PlanUsage, type QueueState, type UpcomingCalendar } from "@hermes/shared";
+import { OFFICE_NPCS, type ChatContext, type OfficeBoards, type OfficeLayout, type OfficeNpcRole, type OfficeSpend, type OfficeWorker, type PlanUsage, type QueueState, type UpcomingCalendar } from "@hermes/shared";
 import { readOfficePalette } from "@/lib/oficina/palette";
 import { OfficeWorld, type ActivityHud, type OfficeHit, type OfficeMode, type OwnerStat, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
 import type { GameEvent, GameHud } from "@/lib/oficina/games";
 import type { OfficeLayers } from "./OficinaHud";
 import type { OfficeAudio } from "@/lib/oficina/audio";
+import type { PeopleVoices } from "@/lib/oficina/people-voice";
 import type * as THREE from "three";
 import type { BoardStat, FeedLine } from "@/lib/oficina/room";
 import type { OwnerLook } from "@/lib/oficina/look";
@@ -78,7 +79,14 @@ interface Props {
   onStat?: (stat: OwnerStat, detail?: string) => void;
   onPropAction?: (kind: "phone" | "focus") => void;
   chatter?: () => string;
+  /** Voces de la gente (una por persona, únicas): vive en la página, sobrevive a los cambios de tema. */
+  peopleVoices?: PeopleVoices | null;
+  /** Datos reales para las charlas entre personas (hora, clima, agentes trabajando). */
+  chatContext?: () => Omit<ChatContext, "place" | "floor" | "cat">;
 }
+
+/** Globos de charla simultáneos (charlas de a dos o tres, reacciones y avisos). */
+const TALK_POOL = 8;
 
 const NPC_ROLES = Object.keys(OFFICE_NPCS) as OfficeNpcRole[];
 
@@ -93,7 +101,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar, layers, audio, onActivity, onStat, onPropAction, chatter },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar, layers, audio, onActivity, onStat, onPropAction, chatter, peopleVoices, chatContext },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -102,8 +110,9 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   const headRef = useRef<HTMLDivElement>(null);
   const nearRef = useRef<HTMLDivElement>(null);
   const npcRefs = useRef(new Map<OfficeNpcRole, HTMLDivElement>());
-  const cb = useRef({ onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo, onActivity, onStat, onPropAction, chatter });
-  cb.current = { onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo, onActivity, onStat, onPropAction, chatter };
+  const talkRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const cb = useRef({ onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo, onActivity, onStat, onPropAction, chatter, chatContext });
+  cb.current = { onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo, onActivity, onStat, onPropAction, chatter, chatContext };
   const bubbleRef = useRef<HTMLDivElement>(null);
   const bubbleText = useRef("");
   const initial = useRef({ ownerName, look });
@@ -145,6 +154,24 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
           }
           place(el, a);
         },
+        onTalk: (bubbles) => {
+          const els = talkRefs.current;
+          for (let i = 0; i < TALK_POOL; i++) {
+            const el = els[i];
+            if (!el) continue;
+            const b = bubbles[i];
+            if (!b) {
+              el.style.opacity = "0";
+              continue;
+            }
+            if (el.dataset.text !== b.text) {
+              el.dataset.text = b.text;
+              el.textContent = b.text;
+            }
+            el.dataset.who = b.id;
+            place(el, b);
+          }
+        },
         onNpcs: (anchors) => {
           for (const role of NPC_ROLES) place(npcRefs.current.get(role) ?? null, anchors.find((a) => a.role === role) ?? null);
         },
@@ -153,6 +180,7 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
     );
     worldRef.current = world;
     world.setChatter(() => cb.current.chatter?.() ?? "¡Hola!");
+    world.setChatContext(() => cb.current.chatContext?.() ?? {});
     world.start();
     return () => {
       world.dispose();
@@ -226,6 +254,17 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   }, [audio]);
 
   useEffect(() => {
+    worldRef.current?.setPeopleVoices(peopleVoices ?? null);
+  }, [peopleVoices]);
+
+  useEffect(() => {
+    worldRef.current?.setLively(layers?.lively ?? true);
+  }, [layers?.lively]);
+
+  useEffect(() => {
+  }, [audio]);
+
+  useEffect(() => {
     if (!layers) return;
     worldRef.current?.setLayers({ data: layers.data, ceo: layers.ceo, zones: layers.zones, hd: layers.hd });
     worldRef.current?.setGamesEnabled(layers.games);
@@ -270,6 +309,17 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
         ))}
 
         {/* Lo que te responde alguien a quien saludaste (datos reales: lo arma la página). */}
+        {Array.from({ length: TALK_POOL }, (_, i) => (
+          <div
+            key={i}
+            ref={(el) => {
+              talkRefs.current[i] = el;
+            }}
+            data-talk-bubble
+            className="absolute top-0 left-0 max-w-[15rem] rounded-2xl border border-line bg-panel/90 px-2.5 py-1.5 text-xs text-text opacity-0 shadow-md"
+            style={{ willChange: "transform" }}
+          />
+        ))}
         <div
           ref={bubbleRef}
           data-bubble

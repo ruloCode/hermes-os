@@ -41,3 +41,25 @@ Todas con **GPT Image 2.5** (medium, 1k, 1:1), a **0,5 créditos** cada una. El 
 | `afiche-cafe.webp` | Café, pared del fondo (en vez del afiche tipográfico) | Original illustrated poster without any text: a big stylized steaming coffee cup with a small green mountain range rising from the steam, flat retro vector style |
 | `arte-circulos.webp` | Oficina de CEO | Original modern abstract painting: overlapping soft circles and arcs in terracotta, mustard, sage and deep teal on warm cream |
 | `arte-amanecer.webp` | Café, pared del fondo, entre el afiche y el centro | Original calm abstract painting: wide horizontal bands of soft color like a sunrise over layered hills |
+
+## Voces pregrabadas de la gente (`voces/`)
+
+Seis voces × 33 frases FIJAS de las charlas (`CHAT_LINES` en `packages/shared/src/office-chatter.ts`: saludos, el café, la gata, la vista; **ningún número ni dato**). Las frases con datos (la hora, el clima, cuántos agentes trabajan) se dicen con la voz del sistema de esa misma persona. Se usan **solo** en las charlas entre personas y en las reacciones; al saludar al dueño la respuesta lleva datos y suena con la voz del sistema.
+
+- **Modelo:** Higgsfield `text2speech_v2` con la variante `elevenlabs`, voces predefinidas, cobrado en créditos de Higgsfield (no toca la cuenta de ElevenLabs). **0,15 créditos** por frase. Se probó primero `seed_audio` (0,3), pero Whisper lo oía en inglés (p = 0,66), así que se descartó por el acento.
+- **Voces:** Marisol, Inés y Elena (femeninas) y Julián, Xavier y Gideon (masculinas), según el `gender` de `list_voices`. **André y Marcus quedaron fuera**: André sonaba tan inglés que Whisper TRADUJO la frase ("How delicious that coffee smells!").
+- **Validación de cada clip** (sin oído humano): se transcribe con `whisper-cli` local (large-v3-turbo) y se compara con el texto. Si coincide menos del 75 %, o suena a otra lengua romance sin coincidir completo, se descarta y se regenera. Alias conocidos: "Chao" suena /tʃao/ (Whisper escribe "Tchau"/"Chau"), "quiubo" es coloquial (Whisper escribe "Kiavo"/"¿Qué hubo?") y "Jaja" escrito junto lo convierten en risa, así que se pidió "¡Ja, ja!".
+- **Proceso:** se recortan los silencios de las puntas, se normaliza a −18 LUFS y queda un mp3 mono de 24 kHz a 40 kbps (≈ 10 KB por frase, 1,9 MB en total).
+- **Falta una:** "Bien, bien. ¿Y tú?" en la voz de Inés. Tres intentos salieron "Et tu" (francés). Esa frase suena con su voz del sistema.
+- `voces/manifest.json` dice qué frases tiene cada voz y su timbre. La voz premium de una persona sigue el timbre de su voz del sistema.
+
+## Créditos gastados (2026-10-01)
+
+| Qué | Piezas | Créditos |
+| --- | --- | --- |
+| Panoramas (1 Recraft + 2 GPT Image) | 3 | 10,0 |
+| Prueba descartada de Soul Location | 1 | 0,12 |
+| Texturas y arte (GPT Image 2.5) | 11 | 5,5 |
+| Pruebas de voz (seed_audio, text2speech) | 2 | 0,45 |
+| Voces de la gente (incluye reintentos que no pasaron la validación) | ~215 | ~31,9 |
+| **Total** | | **47,9 de 1.000** (saldo final: 952,08) |

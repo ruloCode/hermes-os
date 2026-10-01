@@ -538,10 +538,13 @@ export function LayersPicker({
   onChange,
   onClose,
   sound,
+  voices,
 }: {
   layers: OfficeLayers;
   onChange: (l: OfficeLayers) => void;
   onClose: () => void;
+  /** "Voces de la gente": cada persona habla con su voz (requiere el sonido prendido). */
+  voices?: { on: boolean; soundOn: boolean; onToggle: (on: boolean) => void };
   /** Volumen del sonido (va aquí y no en la barra: un control que aparece corría los botones). */
   sound?: { on: boolean; volume: number; onVolume: (v: number) => void };
 }) {
@@ -566,6 +569,15 @@ export function LayersPicker({
           </li>
         ))}
       </ul>
+      {voices ? (
+        <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-line pt-3 text-sm text-text" title="Cada persona habla con su propia voz, que no se repite. Nunca encima de una llamada.">
+          <input type="checkbox" className="mt-0.5 accent-accent" checked={voices.on} onChange={(e) => voices.onToggle(e.target.checked)} data-layer="voices" />
+          <span>
+            Voces de la gente
+            <span className="block text-xs text-text-dim">{voices.soundOn ? "Su voz al saludarlas y en sus charlas, más bajo cuanto más lejos" : "Prende el Sonido para escucharlas"}</span>
+          </span>
+        </label>
+      ) : null}
       {sound ? (
         <label className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-sm text-text">
           Volumen

@@ -43,6 +43,7 @@ import {
 } from "@hermes/shared";
 import { Outdoor } from "./outdoor";
 import { hdMegabytes, hdReady, hdState, preloadHd } from "./hd";
+import type { PeopleVoices } from "./people-voice";
 import { buildDesk, buildPodRug, type DeskView } from "./desk";
 import { Confetti } from "./confetti";
 import { Laptop } from "./laptop";
@@ -172,6 +173,8 @@ export interface OfficeWorldHooks {
   onGameEvent?: (ev: GameEvent, at: THREE.Vector3) => void;
   /** Cada frame: dónde está la cabeza de cada NPC con rol (para su etiqueta). */
   onNpcs?: (anchors: (ScreenAnchor & { role: OfficeNpcRole })[]) => void;
+  /** Cada frame: los globos de lo que dice la gente entre ella (charlas, reacciones, avisos). */
+  onTalk?: (bubbles: (ScreenAnchor & { id: string; text: string })[]) => void;
 }
 
 export interface OfficeWorldOptions {
@@ -672,6 +675,53 @@ export class OfficeWorld {
     }
   }
 
+  /** Voces de la gente (página): cada persona habla con la suya. */
+  private peopleVoices: PeopleVoices | null = null;
+  private voiceKey = "";
+  private voiceAt = 0;
+
+  setPeopleVoices(v: PeopleVoices | null) {
+    this.peopleVoices = v;
+    this.voiceKey = "";
+    this.crowd.levelOf = v ? (id) => v.levelOf(id) : null;
+    this.crowd.onSay = v
+      ? (id, text, line, at) => {
+          // Mismo piso y cerca: una charla se oye bajito y de su lado; lejos o en otro piso, solo su globo.
+          const sameFloor = floorAt(at.y + 0.05) === floorAt(this.player.pos.y);
+          const d = Math.hypot(at.x - this.player.pos.x, at.z - this.player.pos.z);
+          const staff = id.startsWith("npc:");
+          const near = Math.max(0, Math.min(1, 1 - (d - 2) / 8));
+          const volume = !sameFloor ? 0 : staff ? Math.max(0.55, near) : near * 0.8;
+          const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+          const dir = this.tmp.set(at.x - this.camera.position.x, 0, at.z - this.camera.position.z).normalize();
+          v.say(id, text, { volume, line, pan: dir.dot(right) * 0.8 });
+        }
+      : null;
+  }
+
+  /** Datos reales para las charlas (hora, clima, agentes trabajando): los arma la página. */
+  setChatContext(fn: Parameters<OfficeCrowd["setChatContext"]>[0]) {
+    this.crowd.setChatContext(fn);
+  }
+
+  /** Capa "Gente viva": charlas y reacciones. */
+  setLively(on: boolean) {
+    this.crowd.setLively(on);
+  }
+
+  /** Reparte voces cuando cambia quién está en el edificio (una vez por segundo como mucho). */
+  private syncVoices(now: number) {
+    const v = this.peopleVoices;
+    if (!v || now - this.voiceAt < 1000) return;
+    this.voiceAt = now;
+    const req = this.crowd.voiceRequests();
+    const d = v.debug();
+    const key = `${req.map((r) => r.id).join(",")}|${d.catalog}|${d.premium}`;
+    if (key === this.voiceKey) return;
+    this.voiceKey = key;
+    v.assign(req);
+  }
+
   setChatter(fn: (() => string) | null) {
     this.chatter = fn;
   }
@@ -714,6 +764,8 @@ export class OfficeWorld {
       if (!this.crowd.greet(hit.id)) return false;
       this.owner.wave();
       this.bubble = { id: hit.id, text: this.chatter?.() ?? "¡Hola!", until: t + 6 };
+      // Te contesta con SU voz (la del sistema: la frase lleva datos reales).
+      this.peopleVoices?.say(hit.id, this.bubble.text, { volume: 1 });
       this.hooks.onStat?.("greet");
       return true;
     }
@@ -806,6 +858,8 @@ export class OfficeWorld {
     else if (!this.activity) {
       this.activity = { kind: "dance", until: this.t + 5 };
       this.hooks.onStat?.("dance");
+      // Los que están cerca se apartan un paso y te miran.
+      this.crowd.react("dance", this.player.pos.clone(), floorAt(this.player.pos.y));
     }
   }
 
@@ -1002,6 +1056,7 @@ export class OfficeWorld {
       stairs: this.room?.stairs ?? [],
       fps: this.fps,
       render: this.renderInfo(),
+      voices: this.peopleVoices?.debug() ?? null,
       hd: { on: !!this.layers.hd, state: hdState(), applied: !!this.room?.key.endsWith("1"), megabytes: hdMegabytes() },
       exterior: { on: this.exteriorOn, hour: +this.sky.hour.toFixed(2), forced: this.hourOverride !== null, ...(this.outdoor?.state ?? {}), counts: this.outdoor?.counts ?? null },
       ...this.crowd.debug(),
@@ -1412,6 +1467,12 @@ export class OfficeWorld {
       if (w.status === "done" && s.status && s.status !== "done") {
         const at = s.character.root.getWorldPosition(new THREE.Vector3());
         this.confetti.burst(at.x, at.y + 1.3, at.z, 140);
+        // La gente del piso que lo ve, aplaude (capa "Gente viva").
+        this.crowd.react("done", at, 0);
+      }
+      // Recepción avisa (con su voz) cuando un agente levanta la mano: el dato sale de la solicitud real.
+      if (w.status === "needs_you" && s.status && s.status !== "needs_you" && w.approval && this.crowd.isLively) {
+        this.crowd.staffSay("reception", `${nicks?.get(w.id) ?? w.name} te necesita: ${w.approval.summary}`);
       }
       s.status = w.status;
       s.character.setState(w, voices?.get(w.id), nicks?.get(w.id));
@@ -2023,6 +2084,7 @@ export class OfficeWorld {
     this.owner.root.rotation.y = this.ceoOn && this.room?.ceo ? this.room.ceo.chair.facing : act?.kind === "sit" || act?.kind === "make" ? act.prop.facing : this.player.facing;
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
     this.crowd.update(dt, t, this.player.pos, this.shownFloor);
+    this.syncVoices(now);
 
     const explore = this.mode === "explore";
     const speaking = this.speakingProbe?.() ?? null;
@@ -2126,6 +2188,18 @@ export class OfficeWorld {
           const far = explore && h.at.distanceTo(this.camera.position) > 12;
           const a = this.project(h.at);
           return { role: h.role, ...a, visible: a.visible && h.visible && !far };
+        }),
+      );
+    }
+    if (this.hooks.onTalk) {
+      const explore = this.mode === "explore";
+      this.hooks.onTalk(
+        this.crowd.talkBubbles().map((b) => {
+          const far = b.at.distanceTo(this.camera.position) > (explore ? 16 : 40);
+          const a = this.project(b.at);
+          // El globo del saludo (onBubble) manda sobre el de la charla de la misma persona.
+          const greeted = this.bubble?.id === b.id;
+          return { id: b.id, text: b.text, ...a, visible: a.visible && !far && !greeted && b.floor <= this.shownFloor };
         }),
       );
     }

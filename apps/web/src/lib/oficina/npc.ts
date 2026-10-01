@@ -17,6 +17,13 @@ import * as THREE from "three";
 import {
   AmbientPlanner,
   NavGrid,
+  chatScript,
+  reactionLine,
+  type AmbientChat,
+  type AmbientPosition,
+  type ChatContext,
+  type ChatTurn,
+  type VoiceRequest,
   ambientPopulation,
   floorOfHeight,
   mulberry32,
@@ -30,7 +37,7 @@ import {
 import { Person, PERSON_SEAT_OFFSET, type PersonPose } from "./person";
 import { FLOOR_Y, type NpcSpot, type Room } from "./room";
 import type { Collider } from "./player";
-import { HAIR_COLORS, HAIR_STYLES, SHIRT_COLORS, SKIN_TONES, type OwnerLook } from "./look";
+import { HAIR_COLORS, HAIR_STYLES, PANTS_COLORS, SHIRT_COLORS, SKIN_TONES, type OwnerLook } from "./look";
 import { mesh, noOutline, roundedBox, toon } from "./toon";
 import { OfficeCat } from "./pet";
 
@@ -59,18 +66,40 @@ const POSE_OF: Record<AmbientActivity, PersonPose> = {
 /** Peinados de la gente: sin "Rulos" (es el del dueño) ni "Rizado" (70 esferas: caro por persona). */
 const CROWD_STYLES = ["Corto", "Largo", "Moño", "Puntas", "Cola", "Calvo"].map((s) => HAIR_STYLES.indexOf(s as (typeof HAIR_STYLES)[number]));
 
-/** Apariencia sembrada de una persona de ambiente (camiseta nunca blanca: esa es la del dueño). */
-function crowdLook(rng: () => number): OwnerLook {
-  const pick = (n: number) => Math.floor(rng() * n);
-  return {
-    skin: pick(SKIN_TONES.length),
-    hair: pick(HAIR_COLORS.length),
-    style: CROWD_STYLES[pick(CROWD_STYLES.length)],
-    shirt: 1 + pick(SHIRT_COLORS.length - 1),
+/**
+ * Apariencia sembrada de una persona de ambiente (camiseta nunca blanca: esa es
+ * la del dueño). Camiseta y pantalón salen de una bolsa barajada: no se repiten
+ * hasta agotar la paleta, así dos que conversan no parecen clones.
+ */
+function crowdLooks(rng: () => number) {
+  const bag = (n: number, from = 0) => {
+    let left: number[] = [];
+    return () => {
+      if (!left.length) {
+        left = Array.from({ length: n - from }, (_, i) => i + from);
+        for (let i = left.length - 1; i > 0; i--) {
+          const j = Math.floor(rng() * (i + 1));
+          [left[i], left[j]] = [left[j], left[i]];
+        }
+      }
+      return left.pop()!;
+    };
+  };
+  const shirt = bag(SHIRT_COLORS.length, 1);
+  const pants = bag(PANTS_COLORS.length);
+  const skin = bag(SKIN_TONES.length);
+  const style = bag(CROWD_STYLES.length);
+  return (): OwnerLook => ({
+    skin: skin(),
+    hair: Math.floor(rng() * HAIR_COLORS.length),
+    style: CROWD_STYLES[style()],
+    shirt: shirt(),
+    pants: pants(),
+    hat: rng() < 0.3 ? 1 + Math.floor(rng() * 2) : 0,
     beard: rng() < 0.18,
     glasses: rng() < 0.25,
     extras: false,
-  };
+  });
 }
 
 const STAFF_LOOK: Record<OfficeNpcRole, OwnerLook> = {
@@ -111,6 +140,14 @@ class Npc {
   /** Barista: mira a la cafetera un rato cada tanto. */
   busyUntil = 0;
   nextBusy = 0;
+  /** Reacción a algo que pasó (aplaudir el confeti, mirar al dueño que baila) hasta este momento. */
+  reactUntil = 0;
+  reactPose: PersonPose = "clap";
+  readonly reactAt = new THREE.Vector3();
+  /** Se aparta un paso (el dueño baila cerca) y después vuelve a su lugar. */
+  dodge: { from: THREE.Vector3; to: THREE.Vector3 } | null = null;
+  /** Barba = pista de voz grave. */
+  readonly low: boolean;
 
   constructor(
     readonly id: string,
@@ -118,6 +155,7 @@ class Npc {
     readonly role?: OfficeNpcRole,
   ) {
     this.person = new Person(look);
+    this.low = look.beard;
     this.root = this.person.root;
     this.root.traverse((o) => ((o as THREE.Mesh).castShadow = true));
     noOutline(this.root);
@@ -149,6 +187,11 @@ class Npc {
 }
 
 /** Mandil de la barista: se lee "trabaja aquí" desde lejos. */
+/** Cuánto dura un turno de charla en pantalla (y en voz): según el largo de la frase. */
+function turnLength(turn: ChatTurn): number {
+  return Math.max(1.8, Math.min(4.2, 0.9 + turn.text.length * 0.055));
+}
+
 function apron(): THREE.Group {
   const g = new THREE.Group();
   const cloth = toon("#6f4e37");
@@ -198,13 +241,29 @@ export class OfficeCrowd {
   private enabled = false;
   private sessions = 0;
   private seed = 1;
-  private looks: () => number = mulberry32(1);
+  private looks: () => OwnerLook = crowdLooks(mulberry32(1));
   private nextId = 0;
   private queue: string[] = [];
   private t = 0;
   private shownFloor = 0;
   /** Cuántas personas cruzaron de piso (QA: alguien usa la escalera). */
   floorChanges = 0;
+  /** Capa "Gente viva": charlas entre ellos y reacciones. Apagada, la gente se porta como antes. */
+  private lively = true;
+  /** Guion de cada charla viva y en qué turno va. */
+  private talks = new Map<string, { turns: ChatTurn[]; starts: number[]; members: string[]; idx: number; place: string }>();
+  /** Lo que dice alguien fuera de una charla (reacción o aviso de un NPC con rol): globo hasta `until`. */
+  private quips = new Map<string, { text: string; until: number }>();
+  /** Datos reales para las charlas (hora, clima, agentes): los da la página. */
+  private chatCtx: (() => Omit<ChatContext, "place" | "floor" | "cat">) | null = null;
+  /** Alguien empieza a decir algo: el mundo decide si suena (voz, distancia, llamada). */
+  onSay: ((id: string, text: string, line: string | undefined, at: THREE.Vector3) => void) | null = null;
+  /** Nivel de la voz que suena (boca y cabeza); sin voz, el globo igual mueve la boca. */
+  levelOf: ((id: string) => number) | null = null;
+  /** QA: cuántas charlas y reacciones hubo desde que se prendió el ambiente. */
+  chatsStarted = 0;
+  reactions = 0;
+  private chatSeed = 1;
 
   /** La sala o los pods cambiaron. La rejilla se rehace solo si cambia `key` (y solo con el ambiente prendido). */
   setWorld(room: Room, boxes: NavBox[], key: string) {
@@ -251,6 +310,8 @@ export class OfficeCrowd {
   }
 
   private clear() {
+    this.talks.clear();
+    this.quips.clear();
     for (const n of [...this.people.values(), ...this.staff.values()]) n.dispose();
     this.people.clear();
     this.staff.clear();
@@ -273,9 +334,12 @@ export class OfficeCrowd {
     const room = this.room;
     const nav = this.ensureNav();
     if (!room || !nav) return;
-    this.looks = mulberry32(this.seed * 7919 + 13);
+    this.looks = crowdLooks(mulberry32(this.seed * 7919 + 13));
     this.nextId = 0;
     this.floorChanges = 0;
+    this.chatsStarted = 0;
+    this.reactions = 0;
+    this.chatSeed = this.seed * 131 + 7;
 
     // Lugares: cada puesto se ajusta a la rejilla (un puesto sin piso firme se descarta).
     const pois: AmbientPoi[] = [];
@@ -328,7 +392,7 @@ export class OfficeCrowd {
     const room = this.room;
     if (!planner || !room) return;
     const id = `amb-${this.nextId++}`;
-    const n = new Npc(id, crowdLook(this.looks));
+    const n = new Npc(id, this.looks());
     this.people.set(id, n);
     this.group.add(n.root);
     planner.add(id, 0, this.t);
@@ -396,6 +460,109 @@ export class OfficeCrowd {
     return true;
   }
 
+  /** Prende o apaga la capa "Gente viva" (charlas y reacciones). */
+  setLively(on: boolean) {
+    this.lively = on;
+    if (on || !this.planner) return;
+    for (const c of this.planner.chats) this.planner.endChat(c.id, this.t);
+    this.talks.clear();
+    this.quips.clear();
+    for (const n of this.people.values()) n.reactUntil = 0;
+  }
+
+  get isLively() {
+    return this.lively;
+  }
+
+  setChatContext(fn: (() => Omit<ChatContext, "place" | "floor" | "cat">) | null) {
+    this.chatCtx = fn;
+  }
+
+  /** Quiénes necesitan voz (personas de ambiente y NPC con rol), con su pista de timbre. */
+  voiceRequests(): VoiceRequest[] {
+    if (!this.enabled) return [];
+    return [
+      ...[...this.staff.entries()].map(([role, n]) => ({ id: n.id, role, low: n.low })),
+      // Voz grave: la barba siempre, y la mitad del resto (si no, casi todo el edificio hablaría agudo).
+      ...[...this.people.values()].map((n, i) => ({ id: n.id, low: n.low || i % 2 === 1 })),
+    ];
+  }
+
+  /**
+   * Algo pasó y la gente reacciona: "done" (un agente terminó: los de ese piso
+   * cerca miran y aplauden) o "dance" (el dueño baila: los que están cerca se
+   * apartan un paso y lo miran). Uno de ellos dice algo corto (frase fija).
+   */
+  react(kind: "done" | "dance", at: THREE.Vector3, floor: number): string[] {
+    if (!this.enabled || !this.lively || !this.nav) return [];
+    const radius = kind === "done" ? 14 : 4.5;
+    const who: Npc[] = [];
+    for (const n of this.people.values()) {
+      if (floorOfHeight(n.pos.y + 0.05, FLOOR_Y) !== floor) continue;
+      if (Math.hypot(n.pos.x - at.x, n.pos.z - at.z) > radius) continue;
+      if (n.greetUntil > this.t || n.state === "seating" || n.state === "unseating") continue;
+      if (this.planner?.chatOf(n.id)) continue;
+      who.push(n);
+    }
+    for (const n of who) {
+      n.reactUntil = this.t + (kind === "done" ? 2.8 : 3.2);
+      n.reactPose = kind === "done" ? "clap" : "listen";
+      n.reactAt.copy(at);
+      // Bailando cerca: se aparta un paso (si hay piso libre) y vuelve después.
+      if (kind === "dance" && n.state === "at" && !n.slot?.seat) {
+        const dx = n.pos.x - at.x;
+        const dz = n.pos.z - at.z;
+        const d = Math.hypot(dx, dz) || 1;
+        const to = new THREE.Vector3(n.pos.x + (dx / d) * 0.7, n.pos.y, n.pos.z + (dz / d) * 0.7);
+        if (this.nav.clear({ x: n.pos.x, y: n.pos.y, z: n.pos.z }, { x: to.x, y: to.y, z: to.z })) n.dodge = { from: n.pos.clone(), to };
+      }
+    }
+    if (who.length) {
+      this.reactions++;
+      const n = who[Math.floor(this.rngQuip() * who.length)];
+      const line = reactionLine(kind, this.chatSeed++);
+      this.quips.set(n.id, { text: line.text, until: this.t + 2.6 });
+      this.onSay?.(n.id, line.text, line.line, n.pos);
+    }
+    return who.map((n) => n.id);
+  }
+
+  private quipRng = mulberry32(99);
+  private rngQuip() {
+    return this.quipRng();
+  }
+
+  /** Un NPC con rol dice algo (Recepción avisa que alguien te necesita): globo y, si toca, voz. */
+  staffSay(role: OfficeNpcRole, text: string, seconds = 6) {
+    const n = this.staff.get(role);
+    if (!n || !this.enabled) return false;
+    this.quips.set(n.id, { text, until: this.t + seconds });
+    n.person.wave();
+    this.onSay?.(n.id, text, undefined, n.pos);
+    return true;
+  }
+
+  /** Globos de lo que se está diciendo ahora (charlas, reacciones y avisos), con la cabeza de quien habla. */
+  talkBubbles(): { id: string; text: string; at: THREE.Vector3; floor: number }[] {
+    const out: { id: string; text: string; at: THREE.Vector3; floor: number }[] = [];
+    if (!this.enabled) return out;
+    const all = (id: string) => this.people.get(id) ?? [...this.staff.values()].find((n) => n.id === id);
+    for (const [id, q] of this.quips) {
+      const n = all(id);
+      if (!n || q.until < this.t) continue;
+      out.push({ id, text: q.text, at: new THREE.Vector3(n.pos.x, n.pos.y + (n.state === "at" && n.slot?.seat ? 1.95 : 2.45), n.pos.z), floor: floorOfHeight(n.pos.y + 0.05, FLOOR_Y) });
+    }
+    for (const talk of this.talks.values()) {
+      const turn = talk.turns[talk.idx];
+      if (!turn) continue;
+      const id = talk.members[turn.speaker];
+      const n = this.people.get(id);
+      if (!n || this.quips.has(id)) continue;
+      out.push({ id, text: turn.text, at: new THREE.Vector3(n.pos.x, n.pos.y + (n.state === "at" && n.slot?.seat ? 1.95 : 2.45), n.pos.z), floor: floorOfHeight(n.pos.y + 0.05, FLOOR_Y) });
+    }
+    return out;
+  }
+
   /** Dónde está la cabeza de alguien (para su globo de diálogo). */
   headOf(id: string, out: THREE.Vector3): THREE.Vector3 | null {
     const n = this.people.get(id);
@@ -437,6 +604,7 @@ export class OfficeCrowd {
       break;
     }
 
+    if (this.lively) this.updateChats(t);
     for (const n of this.people.values()) this.step(n, dt, t, owner, nav);
     if (this.cat && this.room) {
       this.cat.update(dt, t, nav, this.room.bounds, owner);
@@ -444,12 +612,83 @@ export class OfficeCrowd {
     }
     for (const [role, n] of this.staff) this.stepStaff(role, n, dt, t, owner);
 
+    const speaking = this.speakers(t);
     for (const n of [...this.people.values(), ...this.staff.values()]) {
       n.root.position.copy(n.pos);
       n.root.rotation.y = n.facing;
       n.root.visible = floorOfHeight(n.pos.y + 0.05, FLOOR_Y) <= shownFloor;
+      // Boca: la voz real si suena; si no, el globo igual la mueve (se lee "está hablando").
+      n.person.setTalking(speaking.has(n.id) ? Math.max(0.45, this.levelOf?.(n.id) ?? 0) : 0);
       n.person.update(dt, t, n.speed, false);
     }
+    for (const [id, q] of this.quips) if (q.until < t) this.quips.delete(id);
+  }
+
+  /** Quién tiene la palabra ahora (turno vigente de cada charla, reacciones y avisos). */
+  private speakers(t: number): Set<string> {
+    const out = new Set<string>();
+    for (const [id, q] of this.quips) if (q.until >= t) out.add(id);
+    for (const talk of this.talks.values()) {
+      const turn = talk.turns[talk.idx];
+      if (turn && t - talk.starts[talk.idx] < turnLength(turn)) out.add(talk.members[turn.speaker]);
+    }
+    return out;
+  }
+
+  /** Arranca charlas entre quienes coinciden y avanza los turnos de las vivas. */
+  private updateChats(t: number) {
+    const planner = this.planner!;
+    const pos = new Map<string, AmbientPosition>();
+    for (const n of this.people.values()) {
+      const busy = n.greetUntil > t || n.reactUntil > t || n.state === "seating" || n.state === "unseating" || n.state === "idle" || this.quips.has(n.id);
+      pos.set(n.id, { x: n.pos.x, z: n.pos.z, floor: floorOfHeight(n.pos.y + 0.05, FLOOR_Y), busy });
+    }
+    const started = planner.proposeChats(pos, t, (chat) => {
+      const base = this.chatCtx?.() ?? {};
+      const cat = this.cat ? Math.hypot(this.cat.pos.x - pos.get(chat.members[0])!.x, this.cat.pos.z - pos.get(chat.members[0])!.z) < 6 && chat.floor === 0 : false;
+      const turns = chatScript({ ...base, place: chat.place, floor: chat.floor, cat }, chat.members.length, this.chatSeed++);
+      const starts: number[] = [];
+      let at = t + 0.4;
+      for (const turn of turns) {
+        starts.push(at);
+        at += turnLength(turn) + 0.35;
+      }
+      this.talks.set(chat.id, { turns, starts, members: chat.members, idx: -1, place: chat.place });
+      return at - t + 0.3;
+    });
+    this.chatsStarted += started.length;
+    const live = new Set(planner.chats.map((c) => c.id));
+    for (const [id, talk] of this.talks) {
+      if (!live.has(id)) {
+        this.talks.delete(id);
+        continue;
+      }
+      let idx = talk.idx;
+      while (idx + 1 < talk.turns.length && t >= talk.starts[idx + 1]) idx++;
+      if (idx !== talk.idx) {
+        talk.idx = idx;
+        const turn = talk.turns[idx];
+        const who = this.people.get(talk.members[turn.speaker]);
+        if (who) this.onSay?.(who.id, turn.text, turn.line, who.pos);
+      }
+    }
+  }
+
+  /** La charla de alguien y el centro del grupo (para mirarse), si conversa. */
+  private chatPose(n: Npc): { chat: AmbientChat; center: THREE.Vector3; speaking: boolean } | null {
+    const chat = this.planner?.chatOf(n.id);
+    const talk = chat ? this.talks.get(chat.id) : undefined;
+    if (!chat || !talk) return null;
+    const center = new THREE.Vector3();
+    let k = 0;
+    for (const id of chat.members) {
+      const m = this.people.get(id);
+      if (m) (center.add(m.pos), k++);
+    }
+    center.divideScalar(Math.max(1, k));
+    const turn = talk.turns[talk.idx];
+    const speaking = !!turn && chat.members[turn.speaker] === n.id && this.t - talk.starts[talk.idx] < turnLength(turn);
+    return { chat, center, speaking };
   }
 
   private route(n: Npc, nav: NavGrid) {
@@ -486,6 +725,34 @@ export class OfficeCrowd {
   }
 
   private step(n: Npc, dt: number, t: number, owner: THREE.Vector3, nav: NavGrid) {
+    // Se apartó un paso porque el dueño bailaba: va y, pasada la reacción, vuelve a su lugar.
+    if (n.dodge) {
+      const back = n.reactUntil <= t;
+      const goal = back ? n.dodge.from : n.dodge.to;
+      n.pos.x += (goal.x - n.pos.x) * Math.min(1, dt * 4);
+      n.pos.z += (goal.z - n.pos.z) * Math.min(1, dt * 4);
+      if (back && Math.hypot(goal.x - n.pos.x, goal.z - n.pos.z) < 0.02) {
+        n.pos.copy(n.dodge.from);
+        n.dodge = null;
+      }
+    }
+    // Reacciona: mira hacia lo que pasó y aplaude (o mira, si es el baile). Sentada, solo voltea.
+    if (n.reactUntil > t && (n.state === "walking" || n.state === "at")) {
+      n.speed *= 0.7;
+      this.turnTo(n, Math.atan2(n.reactAt.x - n.pos.x, n.reactAt.z - n.pos.z), dt, 5);
+      if (!n.slot?.seat || n.state === "walking") n.setPose(n.reactPose);
+      return;
+    }
+    // Conversando: se detiene (si iba caminando), mira al grupo y gesticula cuando le toca.
+    const cp = this.lively && (n.state === "walking" || n.state === "at") ? this.chatPose(n) : null;
+    if (cp) {
+      n.speed *= 0.7;
+      const seated = n.state === "at" && !!n.slot?.seat;
+      if (!seated && Math.hypot(cp.center.x - n.pos.x, cp.center.z - n.pos.z) > 0.05) this.turnTo(n, Math.atan2(cp.center.x - n.pos.x, cp.center.z - n.pos.z), dt, 5);
+      const activity = n.poi?.activity;
+      n.setPose(seated ? "sit" : cp.speaking ? "talk" : activity === "coffee" || activity === "water" ? "cup" : "listen");
+      return;
+    }
     // Saludada: se detiene y mira al dueño (sentada, solo voltea un poco).
     if (n.greetUntil > t && (n.state === "walking" || (n.state === "at" && !n.slot?.seat))) {
       n.speed *= 0.7;
@@ -705,6 +972,11 @@ export class OfficeCrowd {
     seed: number;
     navNodes: number;
     pois: { kept: string[]; dropped: string[] };
+    lively: boolean;
+    chatsStarted: number;
+    reactions: number;
+    chats: { id: string; members: string[]; place: string; turn: number; text: string | null; kinds: string[] }[];
+    bubbles: { id: string; text: string }[];
   } {
     const row = (n: Npc): CrowdDebug => ({
       id: n.role ?? n.id,
@@ -723,6 +995,11 @@ export class OfficeCrowd {
       seed: this.seed,
       navNodes: this.nav?.nodes ?? 0,
       pois: this.poiIds,
+      lively: this.lively,
+      chatsStarted: this.chatsStarted,
+      reactions: this.reactions,
+      chats: [...this.talks.entries()].map(([id, talk]) => ({ id, members: talk.members, place: talk.place, turn: talk.idx, text: talk.turns[talk.idx]?.text ?? null, kinds: talk.turns.map((x) => x.kind) })),
+      bubbles: this.talkBubbles().map((b) => ({ id: b.id, text: b.text })),
     };
   }
 

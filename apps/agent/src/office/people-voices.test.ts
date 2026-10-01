@@ -33,6 +33,14 @@ describe("voces de la gente", () => {
     assert.ok([...m.values()].every((v) => v.key.endsWith("#0")));
   });
 
+  it("las voces de abuelos (caricaturescas) quedan para cuando no hay otras", () => {
+    const m = assignVoices([...ROLES, ...crowd(9)], CHROME_MAC);
+    assert.ok([...m.values()].every((v) => !/Grand/.test(v.voice)), "usó un abuelo habiendo voces libres");
+    const many = assignVoices([...ROLES, ...crowd(16)], CHROME_MAC);
+    // 20 personas y 18 voces: se usan las 18 (abuelos incluidos) antes de repetir alguna.
+    assert.equal(new Set([...many.values()].map((v) => v.voice)).size, 18);
+  });
+
   it("los roles tienen voz fija", () => {
     const m = assignVoices([...crowd(9), ...ROLES], CHROME_MAC);
     assert.equal(m.get("npc:reception")!.voice, "Paulina");

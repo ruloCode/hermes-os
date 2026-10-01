@@ -124,6 +124,11 @@ export class OfficeAudio {
     return this.volume;
   }
 
+  /** El contexto vivo (solo con el sonido prendido): las voces pregrabadas de la gente suenan por aquí. */
+  get context(): AudioContext | null {
+    return this.on ? this.ctx : null;
+  }
+
   /** Llamada activa: el ambiente baja para no tapar las voces. */
   setDucked(on: boolean) {
     if (on === this.ducked) return;

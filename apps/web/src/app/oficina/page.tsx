@@ -63,6 +63,7 @@ import {
   type OfficeSpend,
   type PlanUsage,
   type QueueState,
+  CHAT_LINES,
 } from "@hermes/shared";
 import { claudeStartRun, hermesGet, hermesPost, hermesPut, sseUrl } from "@/lib/hermes";
 import { OWNER } from "@/lib/owner";
@@ -109,6 +110,7 @@ import { DEFAULT_LOOK, loadLook, saveLook, type OwnerLook } from "@/lib/oficina/
 import { daylightAt, type FeedLine } from "@/lib/oficina/room";
 import { isTyping } from "@/lib/oficina/player";
 import { OfficeAudio } from "@/lib/oficina/audio";
+import { PeopleVoices, loadPremiumClips } from "@/lib/oficina/people-voice";
 import type { ActivityHud, OwnerStat } from "@/lib/oficina/office-world";
 import { replyVoiceEnabled, setReplyVoice, speak, stopSpeaking } from "@/lib/oficina/speech";
 import type { OfficeHit, OfficeMode } from "@/lib/oficina/office-world";
@@ -146,6 +148,10 @@ declare global {
     __hermesOficinaAudio?: () => unknown;
     /** Fuerza la hora del cielo y la luz (0..24) para capturar día, atardecer y noche; null vuelve al reloj. */
     __hermesOficinaHour?: (h: number | null) => void;
+    /** QA: catálogo de voces de mentira (headless no trae ninguna); null vuelve al del sistema. */
+    __hermesOficinaVoices?: (catalog: { name: string; lang: string }[] | null) => unknown;
+    /** QA: que una persona diga una frase fija (por su id de línea) con su voz; devuelve si sonó. */
+    __hermesOficinaSay?: (id: string, line: string) => boolean;
     /** QA del modo CEO: sentarse (true) o levantarse (false); devuelve si quedó sentado. */
     __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
@@ -385,7 +391,19 @@ export default function OficinaPage() {
   // Sonido de ambiente: arranca APAGADO y prende con el clic en "Sonido" (autoplay); el volumen se recuerda.
   const audioRef = useRef<OfficeAudio | null>(null);
   if (!audioRef.current && typeof window !== "undefined") audioRef.current = new OfficeAudio();
+  /** Voces de la gente: una por persona, sin repetirse; viven aquí para sobrevivir al cambio de tema. */
+  const peopleVoicesRef = useRef<PeopleVoices | null>(null);
+  if (!peopleVoicesRef.current && typeof window !== "undefined") peopleVoicesRef.current = new PeopleVoices();
+  const [peopleVoicesOn, setPeopleVoicesOn] = useState(true);
   const [soundOn, setSoundOn] = useState(false);
+  useEffect(() => {
+    peopleVoicesRef.current?.setSound(soundOn, soundOn ? (audioRef.current?.context ?? null) : null);
+  }, [soundOn]);
+  useEffect(() => {
+    setPeopleVoicesOn(peopleVoicesRef.current?.isEnabled ?? true);
+    // Voces pregrabadas (nivel 2) para las frases fijas de las charlas; sin manifiesto, solo las del sistema.
+    void loadPremiumClips().then((p) => peopleVoicesRef.current?.setPremium(p));
+  }, []);
   // Interacciones: lo que hace el dueño, el contador del día y el modo foco.
   const [activity, setActivity] = useState<ActivityHud | null>(null);
   const [dayStats, setDayStats] = useState<DayPlay>(() => emptyDay(todayKey()));
@@ -866,6 +884,8 @@ export default function OficinaPage() {
   // Con una llamada activa el ambiente baja: nunca tapa la voz de Hermes ni la del equipo.
   useEffect(() => {
     audioRef.current?.setDucked(inCall);
+    // La gente se calla durante una llamada con Hermes o el equipo.
+    peopleVoicesRef.current?.setBlocked(inCall);
   }, [inCall]);
   /** Y: si existe el elenco de la oficina llama al equipo; si no, a Hermes. */
   const toggleCall = useCallback(() => {
@@ -1570,6 +1590,24 @@ export default function OficinaPage() {
     return pick;
   };
 
+  /**
+   * Lo que la gente puede comentar entre ella: solo datos reales. La hora del
+   * reloj, el clima si /weather lo trae fresco y, fuera de la simulación,
+   * cuántos agentes trabajan y quién terminó. Si un dato no existe, no se dice.
+   */
+  const chatContext = () => {
+    const now = new Date();
+    const temp = snapshot?.weather && !snapshot.weather.stale ? snapshot.weather.now.tempC : undefined;
+    const working = workers.filter((w) => w.status === "working" || w.status === "thinking" || w.status === "starting").length;
+    const done = workers.find((w) => w.status === "done");
+    return {
+      time: hhmm(now),
+      tempC: typeof temp === "number" ? temp : undefined,
+      working: sim ? undefined : working,
+      doneNick: sim || !done ? undefined : (nicks.get(done.id) ?? done.name),
+    };
+  };
+
   const changeLook = (l: OwnerLook) => {
     setLook(l);
     saveLook(l);
@@ -1661,6 +1699,11 @@ export default function OficinaPage() {
     };
     window.__hermesOficinaAudio = () => audioRef.current?.state() ?? null;
     window.__hermesOficinaHour = (h) => sceneRef.current?.world()?.setHour(h);
+    window.__hermesOficinaSay = (id, line) => peopleVoicesRef.current?.say(id, CHAT_LINES[line] ?? line, { volume: 1, line }) ?? false;
+    window.__hermesOficinaVoices = (catalog) => {
+      peopleVoicesRef.current?.setOverride(catalog);
+      return peopleVoicesRef.current?.debug() ?? null;
+    };
     window.__hermesOficinaCeo = (on) => {
       const world = sceneRef.current?.world();
       if (!world) return false;
@@ -1689,6 +1732,8 @@ export default function OficinaPage() {
       delete window.__hermesOficinaCeo;
       delete window.__hermesOficinaAudio;
       delete window.__hermesOficinaHour;
+      delete window.__hermesOficinaVoices;
+      delete window.__hermesOficinaSay;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 
@@ -1745,6 +1790,8 @@ export default function OficinaPage() {
         onStat={(st, detail) => addStat(st, detail)}
         onPropAction={onPropAction}
         chatter={chatter}
+        peopleVoices={peopleVoicesRef.current}
+        chatContext={chatContext}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
@@ -1879,6 +1926,14 @@ export default function OficinaPage() {
               layers={layers}
               onChange={setLayers}
               onClose={() => setLayersOpen(false)}
+              voices={{
+                on: peopleVoicesOn,
+                soundOn,
+                onToggle: (on) => {
+                  peopleVoicesRef.current?.setEnabled(on);
+                  setPeopleVoicesOn(on);
+                },
+              }}
               sound={{
                 on: soundOn,
                 volume,

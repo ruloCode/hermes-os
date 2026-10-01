@@ -9,7 +9,7 @@
 // golf ni disfraces). Adelante es +z.
 
 import * as THREE from "three";
-import { HAIR_COLORS, HAIR_STYLES, SHIRT_COLORS, SKIN_TONES, type OwnerLook } from "./look";
+import { HAIR_COLORS, HAIR_STYLES, HAT_STYLES, PANTS_COLORS, SHIRT_COLORS, SKIN_TONES, type OwnerLook } from "./look";
 import { mesh, toon, toonUnique } from "./toon";
 
 /** Cadera sobre los pies (de pie). */
@@ -22,7 +22,7 @@ export const PERSON_SEAT_OFFSET = 0.32;
  * sentado, con una taza, con la raqueta, con las manos en un juego, señalando,
  * mirando arriba, lanzando un dardo o mirando por la ventana.
  */
-export type PersonPose = "stand" | "sit" | "cup" | "sitcup" | "paddle" | "hands" | "point" | "lookup" | "throw" | "window" | "dance" | "eat";
+export type PersonPose = "stand" | "sit" | "cup" | "sitcup" | "paddle" | "hands" | "point" | "lookup" | "throw" | "window" | "dance" | "eat" | "talk" | "listen" | "clap";
 
 export class Person {
   readonly root = new THREE.Group();
@@ -50,6 +50,10 @@ export class Person {
   private prop: THREE.Object3D | null = null;
   /** Desfase propio de las animaciones en reposo: dos personas no se mueven al unísono. */
   private phase = Math.random() * 10;
+  /** Sonrisa y boca abierta: al hablar, la boca se abre con el volumen de su voz. */
+  private smile: THREE.Mesh | null = null;
+  private mouth: THREE.Mesh | null = null;
+  private talkLevel = 0;
 
   constructor(look: OwnerLook) {
     this.look = { ...look };
@@ -59,7 +63,7 @@ export class Person {
     this.hairMat.side = THREE.DoubleSide;
     this.hairHi = toonUnique(highlightOf(HAIR_COLORS[look.hair]));
     this.collarMat = toonUnique(collarOf(SHIRT_COLORS[look.shirt]));
-    const pants = toon("#3d405b");
+    const pants = toon(PANTS_COLORS[look.pants ?? 0] ?? PANTS_COLORS[0]);
     const shoes = toon("#2b2d42");
     const ink = toon("#1d1d1d");
 
@@ -74,8 +78,11 @@ export class Person {
     head.position.y = 1.32;
     head.add(mesh(new THREE.SphereGeometry(0.34, 24, 18), skin));
     head.add(this.hair);
+    const shine = toon("#ffffff");
     for (const sx of [-1, 1]) {
       head.add(mesh(new THREE.SphereGeometry(0.055, 10, 8), ink, sx * 0.12, 0.02, 0.3, false));
+      // Brillo en el ojo: la mirada se lee viva.
+      head.add(mesh(new THREE.SphereGeometry(0.017, 6, 5), shine, sx * 0.12 + 0.018, 0.04, 0.345, false));
       head.add(mesh(new THREE.SphereGeometry(0.05, 10, 8), toon("#ff9f9f"), sx * 0.2, -0.08, 0.27, false));
       // Orejas.
       head.add(mesh(new THREE.SphereGeometry(0.07, 10, 8), skin, sx * 0.33, -0.02, 0, false));
@@ -83,6 +90,13 @@ export class Person {
     const smile = mesh(new THREE.TorusGeometry(0.06, 0.015, 6, 12, Math.PI), ink, 0, -0.08, 0.32, false);
     smile.rotation.z = Math.PI;
     head.add(smile);
+    this.smile = smile;
+    // Boca abierta (oculta en reposo): un óvalo oscuro que crece con la voz.
+    const mouth = mesh(new THREE.SphereGeometry(0.05, 12, 8), toon("#5a1f1f"), 0, -0.1, 0.305, false);
+    mouth.scale.set(1.1, 0.05, 0.4);
+    mouth.visible = false;
+    head.add(mouth);
+    this.mouth = mouth;
     // Cejas gruesas, del color del pelo.
     for (const sx of [-1, 1]) {
       const brow = mesh(new THREE.CapsuleGeometry(0.02, 0.07, 4, 6), this.hairMat, sx * 0.125, 0.11, 0.315, false);
@@ -112,7 +126,7 @@ export class Person {
 
   setLook(look: OwnerLook) {
     const restyle = look.style !== this.look.style;
-    const refeature = look.beard !== this.look.beard || look.glasses !== this.look.glasses || look.extras !== this.look.extras;
+    const refeature = look.beard !== this.look.beard || look.glasses !== this.look.glasses || look.extras !== this.look.extras || look.hat !== this.look.hat;
     this.look = { ...look };
     this.skin.color.set(SKIN_TONES[look.skin]);
     this.hairMat.color.set(HAIR_COLORS[look.hair]);
@@ -167,6 +181,26 @@ export class Person {
       this.features.add(mesh(new THREE.CapsuleGeometry(0.012, 0.05, 4, 6), frame, 0, 0.04, 0.37, false));
       this.features.children[this.features.children.length - 1].rotation.z = Math.PI / 2;
     }
+    const hat = HAT_STYLES[this.look.hat ?? 0];
+    const style = HAIR_STYLES[this.look.style];
+    // Gorra o gorro: no sobre puntas ni moño (se atraviesan).
+    if (hat !== "ninguno" && style !== "Puntas" && style !== "Moño" && style !== "Rulos" && style !== "Rizado") {
+      const color = toon(`#${new THREE.Color(SHIRT_COLORS[this.look.shirt]).lerp(new THREE.Color(hat === "gorra" ? "#ffffff" : "#000000"), 0.3).getHexString()}`);
+      const crown = mesh(new THREE.SphereGeometry(0.372, 20, 10, 0, Math.PI * 2, 0, Math.PI * (hat === "gorro" ? 0.47 : 0.4)), color, 0, 0.03, -0.01, false);
+      crown.rotation.x = -0.18;
+      this.features.add(crown);
+      if (hat === "gorra") {
+        const brim = mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.025, 16, 1, false, -Math.PI / 2, Math.PI), color, 0, 0.17, 0.3, false);
+        brim.scale.set(1.25, 1, 1.2);
+        brim.rotation.x = 0.12;
+        this.features.add(brim);
+      } else {
+        const fold = mesh(new THREE.TorusGeometry(0.345, 0.04, 6, 24), color, 0, 0.12, -0.02, false);
+        fold.rotation.x = Math.PI / 2 - 0.18;
+        this.features.add(fold);
+        this.features.add(mesh(new THREE.SphereGeometry(0.07, 8, 6), color, 0, 0.42, -0.08, false));
+      }
+    }
     if (this.look.extras) {
       // Arete en la oreja izquierda (el personaje mira a +z: su izquierda es +x).
       this.features.add(mesh(new THREE.SphereGeometry(0.022, 8, 6), toon("#d9d9d9"), 0.36, -0.09, 0.03, false));
@@ -214,6 +248,11 @@ export class Person {
       this.armR.add(g);
       this.prop = g;
     }
+  }
+
+  /** Habla: `level` 0..1 (0 = callado). La boca se abre y la cabeza acompaña. */
+  setTalking(level: number) {
+    this.talkLevel = Math.max(0, Math.min(1, level));
   }
 
   /** Saludo con la mano (al interactuar con algo). */
@@ -352,6 +391,16 @@ export class Person {
     if (!moving && this.pose === "paddle") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 5)) * 0.04;
     if (!moving && this.pose === "dance") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 7)) * 0.08;
     this.head.rotation.z = moving ? Math.sin(this.walkPhase) * 0.04 : 0;
+    // La boca sigue a la voz (con un mínimo para que se lea "está hablando" aunque la síntesis no dé volumen).
+    if (this.mouth && this.smile) {
+      const open = this.talkLevel > 0.01 ? 0.25 + this.talkLevel * (0.6 + 0.4 * Math.abs(Math.sin(t * 17 + this.phase))) : 0;
+      this.mouth.visible = open > 0;
+      this.smile.visible = open === 0;
+      if (open) {
+        this.mouth.scale.set(1.1, open, 0.4);
+        this.head.rotation.x += Math.sin(t * 9 + this.phase) * 0.04 * this.talkLevel;
+      }
+    }
   }
 
   /** Brazos, piernas y cabeza de cada pose (t ya trae el desfase propio). */
@@ -430,6 +479,30 @@ export class Person {
         const back = k < 0.6 ? 0 : k < 0.8 ? ease((k - 0.6) / 0.2) : 1 - ease((k - 0.8) / 0.2);
         armR.rotation.set(-1.5 - back * 0.9, 0, 0.1);
         armL.rotation.set(-0.3, 0, -0.1);
+        break;
+      }
+      case "talk": {
+        // Gesticula: una mano y luego la otra, a ritmo de conversación.
+        const a = Math.sin(t * 3.1);
+        const b = Math.sin(t * 2.3 + 1.7);
+        armR.rotation.set(-0.7 - Math.max(0, a) * 0.6, 0, 0.25 + a * 0.15);
+        armL.rotation.set(-0.35 - Math.max(0, b) * 0.45, 0, -0.2 - b * 0.12);
+        head.rotation.y = Math.sin(t * 0.9) * 0.12;
+        break;
+      }
+      case "listen":
+        // Escucha: asiente despacio con las manos atrás.
+        armL.rotation.set(0.3, 0, -0.06);
+        armR.rotation.set(0.3, 0, 0.06);
+        head.rotation.x = Math.max(0, Math.sin(t * 2.2)) * 0.12;
+        head.rotation.z = Math.sin(t * 0.7) * 0.06;
+        break;
+      case "clap": {
+        // Aplaude: las manos se juntan frente al pecho.
+        const k = Math.abs(Math.sin(t * 9));
+        armL.rotation.set(-1.25, 0, -0.55 + k * 0.4);
+        armR.rotation.set(-1.25, 0, 0.55 - k * 0.4);
+        this.body.position.y = Math.abs(Math.sin(t * 4.5)) * 0.03;
         break;
       }
       case "window":

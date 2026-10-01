@@ -152,7 +152,10 @@ export function assignVoices(people: readonly VoiceRequest[], voices: readonly S
     const free = slots.filter((s) => !taken.has(keyOf(s)));
     if (!free.length) continue;
     const minVariant = Math.min(...free.map((s) => s.variant));
-    const tier = free.filter((s) => s.variant === minVariant);
+    const tierAll = free.filter((s) => s.variant === minVariant);
+    // Los abuelos solo cuando ya no queda otra voz.
+    const normal = tierAll.filter((s) => !s.v || !LAST.includes(baseVoiceName(s.v.name)));
+    const tier = normal.length ? normal : tierAll;
     const fit = p.low === undefined ? tier : tier.filter((s) => !s.v || voiceTimbre(s.v.name) !== (p.low ? "high" : "low"));
     const options = fit.length ? fit : tier;
     // Determinista pero repartido: la persona elige por su hash dentro de las que le sirven.
