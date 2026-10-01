@@ -349,6 +349,104 @@ Todo procedural con WebAudio (`lib/oficina/audio.ts`): sin samples ni audio con 
 | Avisos | Dos notas cuando un agente te necesita; tres cuando alguien termina (con el confeti) |
 | Lo que haces | Molino y vapor al preparar café, agua sirviéndose, mordiscos, sorbos, ronroneo de la gata, clic de lámpara, cojín al sentarte |
 
+## Calidad visual v8: exterior, texturas y gente viva
+
+2026-10-01, para presentarla. Tres capas nuevas en **Capas** (`hermes-oficina-capas`): **Exterior**, **Texturas y arte** y **Gente viva**. Más el interruptor **Voces de la gente**, junto al volumen. Apagadas, la oficina se ve como antes.
+
+| Antes | Después |
+| --- | --- |
+| ![Azotea antes](img/oficina-v8/antes-azotea-aerea.png) | ![Azotea después, día](img/oficina-v8/despues-aerea3-dia-oscuro.jpg) |
+| ![Piso 1 antes](img/oficina-v8/antes-piso1-aerea.png) | ![Piso 1 después, atardecer](img/oficina-v8/despues-aerea1-atardecer-oscuro.jpg) |
+
+### Cero espacios negros (capa "Exterior")
+
+El negro salía de `scene.background` y `scene.fog`, que usaban `palette.bg`, el fondo de la **interfaz**: casi negro en el tema oscuro. Afuera solo había un plano de ese color. Ahora (`lib/oficina/outdoor.ts`):
+
+| Capa | Qué es |
+| --- | --- |
+| Cielo | Domo con shader de gradiente (cénit y horizonte de `skyAt`). Trae cerros procedurales por si el panorama no carga, y estrellas de noche |
+| Ciudad | **Cilindro de panorama** con tres imágenes de la misma composición (día, atardecer y noche) que se funden con la hora. Va espejado ×4 alrededor, así no hay costura. Sigue a la cámara, porque está "en el infinito" |
+| Calle | Suelo de pasto, andenes, calles con línea amarilla y árboles, postes y edificios vecinos instanciados. Los edificios llevan UV en espacio mundo (ventanas de 4 × 3,2 m sin estirarse) y de noche se prenden ventanas y charcos de luz bajo los postes. Los altos van atrás y los bajos al frente, así no tapan la cámara aérea. Son ~15 draw calls, sin contorno ni sombras |
+| Niebla | Del color del horizonte: el suelo se funde con el cielo |
+| Ventanas | Dejan ver el exterior de verdad: el cielo pintado detrás del vidrio se oculta |
+
+**La hora manda, no el tema.** `packages/shared/src/office-sky.ts` (puro, con tests) da los pesos día/atardecer/noche, los colores y la dirección del sol (sale por el este, +x, y se pone por el oeste). El cruce dura casi una hora a cada lado de la puesta, sin saltos de un minuto a otro. `daylightAt` (la luz de adentro) sale del mismo cielo. **En el tema oscuro** el exterior baja un 14 % de luminancia (`DARK_DIM`): la interfaz es oscura y el exterior no debe competir con el HUD. Pero es de día si es de día: el tema es de la interfaz, no de la noche.
+
+> **Ojo (lo encontró el QA visual):** de noche, la banda de sombra del toon (35 %) sobre un color oscuro terminaba en negro: hasta un 28 % de la pantalla a las 23:00 en el tema oscuro. La noche no se hace apagando el relleno: el hemisferio pasa a **luz de luna azulada**, solo baja el sol, y el tinte nocturno del exterior es suave. El vidrio apagado de los edificios vecinos es azul pizarra, no negro.
+
+### Texturas y arte (capa "Texturas y arte")
+
+Ladrillo, concreto pulido, deck, madera, tela y tiza a 1024 px y sin costura, más los cuadros y el afiche, todo generado con Higgsfield con prompts propios (procedencia, prompts y créditos en `apps/web/public/oficina/README.md`; proceso en `apps/web/scripts/oficina-assets.py`). Siguen siendo `MeshToonMaterial` con su rampa de tres pasos: el estilo no cambia.
+
+- `lib/oficina/hd.ts` precarga todo y la sala se rearma **una** vez cuando termina. Antes de eso se ven los canvas de siempre.
+- Cada uso es un `clone()` que comparte la `Source`, así que la imagen se sube **una** vez a la GPU y solo cambia el `repeat`. Lo mismo para el ladrillo de canvas: antes cada tramo de muro creaba su `CanvasTexture` y subía su propia copia. **La memoria de texturas bajó de ~168 a ~117 MB** aunque se sumaron las HD.
+- La tela es gris a propósito: el color del mueble la tiñe.
+
+> **Ojo (sin costura):** mezclar el borde con la imagen corrida media vuelta sirve para el concreto o la tela. En un patrón regular deja una franja borrosa (ladrillos dobles). El ladrillo y el deck se recortan a un número **entero de períodos medidos**: el mortero cada 81,8 px y las juntas de los tablones cada 128 px.
+
+### Gente viva (capa "Gente viva" + "Voces de la gente")
+
+**Voz propia que no se repite.** `assignVoices` (`packages/shared/src/office-people-voices.ts`, con tests) reparte las voces del sistema:
+
+- Chrome en macOS expone **18 voces en español**: Eddy, Flo, Grandma, Grandpa, Reed, Rocko, Sandy y Shelley en es-ES y es-MX, más Mónica y Paulina. Cargan **async** (`voiceschanged`): pedirlas en caliente devuelve una lista vacía.
+- Nunca hay dos iguales vivas. La asignación es pegajosa mientras la persona sigue en el edificio, y los NPC con rol tienen voz fija (Recepción = Paulina, Barista = Mónica, Respiro = Reed es-MX, Coordinación = Shelley es-ES).
+- La barba (y la mitad del resto) pide voz grave. Los abuelos quedan para el final.
+- Con menos voces (otro sistema operativo), las que se repiten se separan por tono (≥ 0,12) y velocidad.
+
+| Nivel | Qué | Cuándo |
+| --- | --- | --- |
+| 1 · Sistema | `speechSynthesis` con la voz, el tono y la velocidad de esa persona | Todo lo que lleva **datos**: su respuesta cuando la saludas, los avisos de Recepción y las frases con dato de las charlas |
+| 2 · Pregrabada | 197 clips (6 voces × 33 frases fijas) de Higgsfield `text2speech_v2`/`elevenlabs`, cada uno **validado con Whisper local**. Suenan por WebAudio con paneo y volumen por distancia | Las frases **fijas** de las charlas y las reacciones. La voz premium sigue el timbre de su voz del sistema |
+
+**No hay TTS por la API REST de Higgsfield** que el agente pueda llamar: las llaves `HIGGSFIELD_API_KEY_ID/_SECRET` no están en el `.env` (producción responde `/avatar/provider → openai`, y la API devuelve 401 en todas las rutas). Por eso las frases premium se pregeneraron por MCP y viven como archivos.
+
+> **Ojo (validar audio sin oírlo):** `seed_audio` sonaba con acento inglés (Whisper lo detectaba como inglés con p = 0,66), y la voz "André" sonaba tan inglés que Whisper TRADUJO la frase. Cada clip se transcribe con `whisper-cli` local y se compara con el texto. La detección de idioma en un clip de un segundo no es confiable: decide la coincidencia del texto, con alias para "chao" (/tʃao/ → "Tchau") y "quiubo".
+
+**Reglas:** una sola voz a la vez (tampoco encima de la respuesta de un agente), nunca durante una llamada con Hermes o el equipo (`setBlocked`), solo con Sonido prendido (su `AudioContext` nace con un clic: ese es el gesto del usuario) y con "Voces de la gente". Lejos o en otro piso no suena: queda el globo. La boca se abre con el volumen real del clip; con la síntesis del sistema, con cada palabra.
+
+**Charlas entre personas.** `AmbientPlanner.proposeChats` (`office-ambient.ts`, puro y sembrado, con tests) junta a quienes coinciden:
+
+- Mismo piso, a menos de 1,9 m y libres (no saludando, no reaccionando, no esperando pareja de juego).
+- Enfriamiento de 35 s por persona y de 150 s por pareja. Con suerte se suma un tercero.
+- Conversando, nadie se va: la estadía se estira. Quien iba caminando se detiene y retoma sin perder su plazo.
+- Se miran, quien habla gesticula (pose `talk`), los demás asienten (`listen`) o siguen con la taza, y se turnan globos.
+- El guion (`office-chatter.ts`) arma 3 a 5 turnos: saludo, un tema del lugar (café, sofá, ventana, juego, la gata) o **un dato real** (hora, clima de `/weather`, agentes trabajando, quién terminó; en simulación, sin datos de agentes) y despedida. Las frases fijas no llevan un solo dígito (lo revisa un test).
+
+**Reacciones a lo que pasa:**
+
+- Cuando un agente termina (el confeti), la gente de ese piso a menos de 14 m lo mira y **aplaude**.
+- **Recepción avisa con su voz** cuando un agente levanta la mano: "Lince te necesita: …", con el texto de la solicitud real.
+- Si bailas (F), los que están cerca **se apartan un paso** (si hay piso libre en la rejilla), te miran y vuelven a su lugar.
+- Uno de ellos dice algo corto ("¡Bravo!", "¡Uy, qué pasos!").
+
+**Personajes:** camisetas, pantalones, pieles y peinados salen de bolsas barajadas, así que no se repiten hasta agotar la paleta (dos que conversan ya no parecen clones). Hay gorra o gorro (nunca sobre puntas, moño o rulos), brillo en los ojos y una boca que se abre al hablar.
+
+### Pulido de presentación
+
+- **Recorrido de presentación** (Capas → «▶ Recorrido de presentación», o `__hermesOficinaTour(true)`): la cámara pasea sola, 7 s por toma, en cinco tomas (la ciudad desde lejos, los pisos 1, 2 y 3 en aérea, y la azotea mirando a los cerros). Las tomas se calculan sobre la planta real. Un clic, una tecla o arrastrar lo detienen. Combinado con `__hermesOficinaHour` sirve para mostrar día, atardecer y noche en un minuto.
+- **Partículas** (con el Exterior, `lib/oficina/particles.ts`): polvo que flota en la luz del día adentro (se apaga de noche) y hojas que caen con viento en la azotea. Es un `Points` por sistema, animado en CPU, sin contorno y solo en el piso que se ve.
+- **Sombras de contacto** (con Texturas y arte): un gradiente bajo los pies de cada persona, compartido (una textura y una geometría). Nunca proyecta: quien crea a la persona le pone `castShadow` a todo el cuerpo, y la mancha se volvía un cuadro en el shadow map.
+- **Personajes:** sin GLB. El experimento con Meshy no se hizo: las poses (sentarse, la taza, los juegos, `talk`, `listen`, `clap`) viven en el chibi procedural, y un modelo con rig habría pedido rehacerlas para presentar.
+
+### Presupuesto de render
+
+`__hermesOficinaDebug().render` trae draw calls y triángulos (promedio de 60 frames; `info.autoReset = false` porque el contorno dibuja la escena dos veces) y la memoria de texturas estimada por imagen subida. Medido con 6 agentes simulados:
+
+| | Antes de la v8 | Después | Tope (lo revisa el QA visual) |
+| --- | --- | --- | --- |
+| Draw calls, piso 1 | ~2.290 | ~2.000 | 2.400 |
+| Draw calls, aérea del piso 3 | 6.135 | ~6.180 | 6.250 |
+| Triángulos (peor vista) | 437k | ~450k | 600k |
+| Memoria de texturas | ~168 MB | ~117 MB | 170 MB |
+| fps | ≥ 55 | ≥ 55 | ≥ 55 |
+
+**QA:** `apps/web/scripts/oficina-visual-qa.py`, en los dos temas:
+
+- Lee el framebuffer (`__hermesOficinaPixels`, sin HUD) a las 6:30, 12:00, 18:00 y 23:00 en tres vistas y exige menos del 1 % de **zonas** casi negras (promedio de ~26 px) arriba y en el borde. Un poste de acero no es un hueco.
+- Control negativo: con el Exterior apagado, el cielo del tema oscuro vuelve a dar ~50 % negro, así que la prueba sí mide.
+- Además revisa voces únicas con el catálogo real inyectado, que haya una charla con su globo en 90 s, la reacción al baile, el clip premium, una sola voz a la vez, Gente viva apagada, el presupuesto, los fps y la consola.
+- `--shots <carpeta>` deja las capturas de "después".
+
 ## La sala
 
 `lib/oficina/room.ts` es un **loft de coworking** (look tipo WeWork, 2026-09-30, a partir de una imagen de referencia generada con Higgsfield): ladrillo a la vista en los muros (paño de canvas de 1,6 × 1,2 m repetido según el tamaño de cada tramo, así no se estira), piso de concreto pulido, ventanas industriales con cuadrícula de acero negro y un frente abierto con muro bajo de ladrillo y vidrio, para que la cámara siempre vea adentro. La cocina tiene mesón de madera con repisas abiertas, cafetera con vapor, **neón "Hermes"** (textura con halo + luz rosada real), **pizarra de tiza** del café (sin precios: en la oficina un número siempre es un dato real) y una **isla** con frascos de agua con fruta, grifos de kombucha/cerveza, snacks y cuatro banquetas altas bajo dos lámparas industriales colgantes. El lounge tiene sofá terracota, sillón verde de terciopelo, mesa redonda, puf y la TV del feed; en la esquina noreste hay una **cabina telefónica** de vidrio. Matas colgantes cerca de las ventanas y un afiche tipográfico. Sin lámparas sobre los pods: desde la vista aérea tapaban los escritorios.
@@ -480,12 +578,22 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaWalkTo(hit)` | Pone al dueño junto a un escritorio, un personaje o un NPC (`{kind: "npc", id: "reception" \| "barista" \| "rooftop"}`) |
 | `__hermesOficinaDictate(text)` | Deja `text` como lo dictado, listo para enviar (QA sin micrófono) |
 | `__hermesOficinaTeam.say(text)` / `.debug()` | Le habla al equipo sin micrófono / reparto de voces, runs vigilados, cola y avisos |
+| `__hermesOficinaHour(h \| null)` | Fuerza la hora del cielo y la luz (0–24; el HUD dice "hora forzada"); `null` vuelve al reloj |
+| `__hermesOficinaPixels()` | Zonas casi negras del canvas (sin HUD): arriba, en el borde y en total |
+| `__hermesOficinaVoices(catalog \| null)` | Inyecta un catálogo de voces (headless no trae); devuelve el reparto |
+| `__hermesOficinaSay(id, línea)` | Una persona dice una frase fija con su voz (QA del clip y de "una sola voz a la vez") |
+| `__hermesOficinaDebug()` (v8) | `render` (draw calls, triángulos, MB de texturas), `exterior` (pesos, etiqueta, colores, panorama), `hd`, `voices` (reparto, log de lo dicho y por qué no), `chats`, `chatsStarted`, `reactions`, `bubbles` |
 
 QA de los extras: `apps/web/scripts/oficina-extras-qa.py` compara el tablero y el panel con `GET /office/spend` y `GET /office/plan-usage` (los pide aparte), revisa monitores y sala de control con la simulación y **juega** cada minijuego con entradas sintéticas hasta sumar puntaje: sigue la pelota, alinea las varillas y atrapa tokens. También revisa la placa y el modo CEO, el sonido (apagado al cargar y prendido con un clic real), las capas y los fps, en los dos temas: 70 comprobaciones, sin tokens. `--agent` cambia la URL del agente.
 
 QA del control sin control físico: `apps/web/scripts/oficina-pad-qa.py` inyecta un Xbox simulado en `navigator.getGamepads()`, con el mismo id y mapeo que entrega Chrome, y recorre la ruta real con 26 comprobaciones.
 
 ## Pendiente (stretch)
+
+- v8: **TTS en vivo de calidad** para las frases con dato. Hoy las dice la voz del sistema y las fijas suenan pregrabadas, así que una persona con voz premium cambia de timbre entre una charla y su respuesta al saludo (se eligió el mismo timbre para que se note poco). Con las llaves REST de Higgsfield en el `.env` se podría montar `POST /office/tts` con caché por hash.
+- v8: la frase "Bien, bien. ¿Y tú?" de Inés (sale "Et tu" en francés): suena con su voz del sistema.
+- v8: personajes GLB con rig (Meshy): no se probaron. Rehacer las poses no cabía antes de presentar.
+- v8: comprimir las texturas a KTX2 bajaría la memoria en GPU, pero exige un transcodificador (basis) que es una dependencia nueva.
 
 - Agenda de la sala de juntas: muestra el próximo evento del calendario aunque no sea una junta. La última junta del vault (`meetings`) sería más precisa.
 - Tableros de gasto por modelo antes del 2026-09-30: el registro por run nació ese día y lo viejo no se puede reconstruir.
