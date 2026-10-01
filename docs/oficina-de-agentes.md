@@ -1,6 +1,6 @@
 # Oficina de agentes 3D (`/oficina`)
 
-2026-09-29 · para el workshop de la comunidad de Anthropic (2026-10-01)
+2026-09-29 · para el workshop de la comunidad de Anthropic (2026-10-01) · por dentro (traza, tools, system prompt y modo tarima): 2026-10-01
 
 Una oficina 3D con estilo de caricatura donde cada sesión **viva** del Claude Agent SDK o run de `claude -p` que corre en Hermes es un personaje sentado en un escritorio. Los personajes se agrupan por proyecto del vault. Cada uno actúa su tool real, su bombilla dice su estado y su laptop muestra sus últimas líneas. Desde la misma oficina se contrata un agente y se abre la salida de cualquiera.
 
@@ -447,6 +447,108 @@ Ladrillo, concreto pulido, deck, madera, tela y tiza a 1024 px y sin costura, m�
 - Además revisa voces únicas con el catálogo real inyectado, que haya una charla con su globo en 90 s, la reacción al baile, el clip premium, una sola voz a la vez, Gente viva apagada, el presupuesto, los fps y la consola.
 - `--shots <carpeta>` deja las capturas de "después".
 
+## Por dentro: la traza, las tools y el system prompt (modo tarima)
+
+2026-10-01, para la demo en tarima de la comunidad de Anthropic (cero slides: "le das la tarea y lo vemos trabajar por dentro"). Todo sale de datos reales capturados en el agente; la simulación y las repeticiones se marcan siempre en pantalla.
+
+![Modo tarima: la traza del loop con los dos errores corregidos, la oficina y las tools](img/oficina-tarima/tarima-traza-dark.png)
+
+![El system prompt exacto con su porqué, tema claro](img/oficina-tarima/tarima-prompt-light.png)
+
+**P** (o el botón **▣ Tarima**) abre una vista para un proyector de 1920 × 1080, legible a 10 metros:
+
+| Zona | Qué muestra |
+| --- | --- |
+| Izquierda, grande | **La traza del loop** del agente: una fila por evento con su vuelta (V1, V2…), un icono por tipo y frases como "**Lee** `src/x.ts` · líneas 10–80", "**Busca** `foo` · en `src/`", "**Ejecuta** `npm test`", "**Llama** `mcp__linear__…`". El resultado va plegado (clic o Enter lo despliega, con el aviso si se recortó). Duración y tokens por vuelta a la derecha. Los errores van en rojo con "→ corregido en el paso N", y la fila que corrigió lleva "✓ así se corrigió" |
+| Arriba | EN VIVO o "⟲ repetición de las HH:MM", el agente (apodo, tarea, proyecto, modelo y modo reales del `init`), su estado, el resumen ("9 vueltas · 8 tools · 2 errores, ambos corregidos (pasos 6 y 8) · 53 s · 362k tokens") y el indicador de la vista pública |
+| Derecha | La oficina 3D con la cámara siguiendo el escritorio del agente (el canvas se mueve a ese hueco y se redimensiona solo) |
+| Abajo | Pestañas **Tools**, **System prompt** y **Logs** |
+| Al pie de la traza | La tarea para el escritorio General (el agente del Agent SDK), escrita o dictada |
+
+| Tecla | Control Xbox | Qué hace |
+| --- | --- | --- |
+| P · Esc | View | Entrar / salir de la tarima |
+| 1 · 2 · 3, ← → | Cruceta ◀ ▶ | Pestaña Tools · System prompt · Logs |
+| ↑ ↓ (j k) | Cruceta ▲ ▼ | Recorrer la traza |
+| Enter | A | Desplegar la fila (con algo dictado, A envía la tarea) |
+| End (G) | B | Volver a seguir el final |
+| Tab · Shift+Tab | LB · RB | Otro agente |
+| N | — | Escribir la tarea |
+| M | X | Dictar la tarea |
+| A · B | A · B | Aprobar / negar cuando el agente levanta la mano |
+| O | — | Vista pública prendida / apagada |
+| R | — | Plan B: repetir la última traza real (R otra vez vuelve a lo vivo) |
+
+El panel de cada agente (fuera de la tarima) tiene las mismas vistas en pestañas: **Salida · Traza · Tools · Prompt**. Si el personaje está en error o bloqueado, el panel abre en la Traza, sobre el error.
+
+### La traza: captura completa en los dos caminos
+
+| Camino | De dónde sale | Lo que se ve |
+| --- | --- | --- |
+| Tareas del Agent SDK (General, `POST /tasks`) | Cada mensaje del iterador de `query()` en `session.ts` (sin los deltas parciales) | El `init` entero, texto, razonamiento (vacío si el modelo lo oculta, y así se dice), cada `tool_use` y su `tool_result` completos, el `result` con costo y tokens |
+| Runs de `claude -p` (pods de proyecto) | El stream-json CRUDO de `claude-cli.ts`, línea por línea, con el `init` entero (tools, `mcp_servers` con su estado, skills, slash commands, modelo, modo) | Lo mismo. `stderr` entra como aviso (no cuenta como error); el cierre con código ≠ 0 sí |
+| Permisos | `canUseTool` (guardrail de Hermes, Chrome CDP), `approvals.ts` (los dos caminos: pidió, aprobado, negado, por quién y con qué nota), las negaciones del modo Auto y de las reglas deny del CLI (detectadas en el `tool_result`) | Filas ✋ / ⛔ / 🛡 en la misma secuencia |
+
+- **Modelo puro** en `packages/shared/src/office-trace.ts`: `TraceRecorder` convierte mensajes en eventos (`seq`, `t`, `turn`, `kind`, `tool`, `input`, `output`, `isError`, `durationMs`, `tokens`); la vuelta es un `message.id` del asistente y sus tokens se cuentan una vez (el CLI repite el mensaje por bloque). Cada campo tiene tope de 20 KB con el tamaño original anotado. `reduceTrace` empareja `tool_use` ↔ `tool_result`, mide, marca errores y detecta la corrección; `traceSummary` arma el resumen; `describeStep` el "Lee/Busca/Ejecuta/Llama".
+- **Persistencia**: `~/.hermes-os/trazas/<id>.jsonl` (meta, prompt, inventario y eventos), append por lote (`apps/agent/src/office/trace.ts`). En memoria quedan las vivas y las recién terminadas (10 min).
+- **Canal**: los eventos nuevos van por `/office/events` como `{type:"trace", id, events | prompt | inventory}`. No hay un stream por agente. En el navegador viven en un store fuera de React (`lib/oficina/trace-store.ts`), agrupado por frame. Lo que va por el bus general (feed, monitores, laptop) sigue recortado como antes.
+- **Rutas**: `GET /office/trace/:id` (snapshot + la configuración de permisos), `GET /office/traces` (las guardadas, con su resumen), `GET /office/trace/:id/export` (JSONL limpio con la vista pública aplicada en el servidor; `?view=raw` solo en local) y `GET /office/public-view`.
+- **Lista virtualizada**: solo se pintan las filas visibles (alto fijo; una fila desplegada tiene su alto con scroll adentro). Sigue el final solo si estabas abajo.
+
+**Errores y correcciones** (`reduceTrace`, con tests sobre trazas sintéticas y las dos reales de la demo):
+
+| Es un error | La corrección es… |
+| --- | --- |
+| Un `tool_result` con `is_error`, o la salida de un test que falló (`outputFailed`: el `npm test \| tail` sale con código 0 aunque los tests fallen) | El primer paso posterior que funciona con la **misma tool y el mismo objetivo**; si no hay, con el mismo objetivo; si no, con la misma tool (en Bash, el mismo programa). Así un `Edit` fallido lo corrige el `Edit` que funcionó, no el `Read` de en medio |
+| Un paso **negado** (guardrail, regla deny, modo Auto, el humano) | El siguiente intento que funciona con la misma tool, aunque cambie el comando: negar obliga a reformular |
+| Un error del loop (excepción del SDK, el proceso murió) | Sin corrección: es el fin |
+
+El objetivo de un paso (`stepGoal`) es el archivo para las tools de archivo, el patrón para buscar y, en Bash, las dos primeras palabras del primer comando que no sea un `cd` ("`cd repo; CI=1 pnpm test --x`" → `pnpm test`).
+
+### Qué tiene este agente (pestaña Tools)
+
+Una ficha por tool: **origen** (Claude Code, MCP de Hermes en proceso, Linear, chrome-devtools, otro servidor MCP, skill del plugin), **permiso** (libre, pasa por guardrail, revisada en `canUseTool`, pide permiso, negada por el modo), la **descripción que ve el modelo** y **en qué pasos la usó** (clic = salta a la traza; la que está en uso se resalta).
+
+| Fuente | Tareas del SDK | Runs de `claude -p` |
+| --- | --- | --- |
+| Qué tools tuvo | El `init` del run | El `init` del CLI |
+| Permisos | `sdkAgentConfig()` en `session.ts`, que sale de las MISMAS listas que usa `query()` (`allowedTools`, las del guardrail, el prefijo de Chrome) | El modo del `init` + las reglas deny de `claude-settings.json` |
+| Descripciones | Las de Hermes, de `HERMES_TOOL_DEFS` (`tools.ts`: una sola lista de la que salen el servidor, `allowedTools` y el inventario). Skills: `supportedCommands()` | No se exponen |
+
+> **Ojo (lo encontró la traza):** una tarea del SDK que solo contaba archivos corrió con **408 tools**: además de las de Hermes, Linear y chrome-devtools, entran los conectores de claude.ai de la cuenta (Gmail, Supabase, Calendly, Notion…) aunque `settingSources: []`. El CLI difiere su carga con ToolSearch, pero esa tarea igual costó US$0,41 con Opus. Queda a la vista en la pestaña Tools.
+>
+> **Ojo:** `mcpServerStatus()` del SDK 0.3.274 devuelve las tools de cada servidor **sin descripción**. Las de Linear y chrome-devtools dicen "no expuesta"; no se inventan.
+
+### El system prompt en pantalla, y por qué (pestaña System prompt)
+
+- **Tareas del SDK**: `buildSystemPromptCaptured()` devuelve el string EXACTO que recibe `query()` y sus secciones como **rangos** de ese string: el texto de cada una es un slice, byte a byte por construcción (y `buildSystemPrompt()` es su `.raw`, verificado idéntico al de antes en los cuatro casos: sin foco, con proyecto, Vida y sin mensaje).
+- **El porqué vive junto a cada sección** (`WHY` en `system-prompt.ts`), escrito desde lo que ya documentan `CLAUDE.md` y `docs/`. Lo que no tiene motivo documentado dice "Sin motivo escrito": hoy, **Perfil del vault (`Perfil.md`)** y **Preferencias del dueño**.
+- **Runs de `claude -p`**: una línea visible dice que el prompt base es el de Claude Code y que el CLI no lo expone. Se muestra lo que Hermes controla: los flags tal cual (con el token del puente de aprobaciones tapado siempre), el modo, el cwd, los `CLAUDE.md` que carga ese cwd (el del usuario y, de la raíz al cwd, cada `CLAUDE.md`/`CLAUDE.local.md`), las reglas deny y el `--mcp-config`.
+
+### Vista pública
+
+Prendida por defecto en la tarima (entrar la prende y se recuerda en el navegador: `hermes-oficina-vista-publica`), y con su botón **👁 Pública** en el HUD normal. Se aplica a los datos ANTES de entregarlos a React o a three.js: la traza, el prompt, las fichas, los logs, y también las laptops, los monitores, la sala de control, los tableros, la TV, los pods, los avisos, lo que dicen los NPC y la voz de las respuestas. Lógica pura en `packages/shared/src/office-redact.ts`, con tests de lo que debe ocultarse y de lo que **debe pasar intacto** (rutas, SHAs, uuids, fechas, puertos, versiones, tokens, `max_tokens=100000`, `const tokens = count(x)`).
+
+| Se oculta | Cómo |
+| --- | --- |
+| Secretos | Formatos conocidos (`sk-…`, `ghp_…`, `lin_api_…`, `AKIA…`, `AIza…`, `xox…`), JWT, `Bearer …`, llaves privadas, URLs con `usuario:clave@`, el valor de variables con nombre de secreto (`*_KEY=`, `"token":`, `?api_key=`, `--password …`) y, en el servidor, los valores exactos de las variables de entorno con nombre de secreto (nunca viajan al navegador) |
+| Lo leído de un `.env` | La salida entera del paso (Read de un `.env`, `cat .env`, `env`, `printenv`) |
+| Correos y teléfonos | Internacionales con `+`, celulares colombianos y `(xxx) xxx-xxxx` |
+| Proyectos de clientes | Todo proyecto del vault fuera de la lista pública, por nombre y slug (`[cliente]`; el pod dice "Proyecto de cliente"). Por defecto solo `hermes-os` y `general` son públicos: un proyector no perdona. La lista vive en `~/.hermes-os/vista-publica.json` (`{"publicProjects": [...], "extraHidden": [...]}`) |
+| Lo personal del prompt | SOUL.md, USER.md, el Perfil del vault, las preferencias, las memorias y el modo Vida: queda el título y "oculto en vista pública" |
+| Descripciones de skills personales | Las que no vienen del plugin de Hermes (pueden nombrar clientes y personas): queda el nombre |
+| La agenda | Se ve que hay eventos y cuándo, no de qué son |
+
+> **Ojo (lo encontró la primera captura):** el proyecto "rulocode" se llama igual que el usuario del sistema, y `/Users/rulocode/…` salía `/Users/[cliente]/…`. El segmento de usuario de una ruta de home no se toca.
+>
+> **Ojo (lo encontró el QA):** con la lista virtualizada, "no hay fuga en el DOM" pasaba aunque no se hubiera mirado: las filas desplegadas fuera de la vista no se pintan. El QA despliega cada fila sembrada de a una y además corre el control (con la vista pública apagada, los 7 datos falsos SÍ aparecen).
+
+### Repetición y vitrina
+
+- **Vitrina** (mesa de demos): en tarima, 2 minutos sin tocar nada (ni dictando) repiten en bucle la **última traza real grabada** del agente, con su ritmo comprimido y 8 s de pausa al final. El encabezado dice "⟲ repetición de las 19:42 · cualquier tecla vuelve a lo vivo". Cualquier tecla, clic o el control vuelven a lo vivo.
+- **Plan B** (sin red o sin agente): **R** repite la última traza real y se navega como una viva (pestañas, filas); R otra vez vuelve a lo vivo. Sin agente, repite la que viene con la página (`public/oficina/traza-demo.jsonl`: el caso 1 de la demo, exportado con la vista pública aplicada).
+- **Cero código paralelo**: la repetición empuja los eventos grabados al mismo store, la misma lista y el mismo reductor, y mueve al personaje con `reduceOfficeEvent` (el reductor de la oficina) sobre eventos del bus derivados de la traza.
+
 ## La sala
 
 `lib/oficina/room.ts` es un **loft de coworking** (look tipo WeWork, 2026-09-30, a partir de una imagen de referencia generada con Higgsfield): ladrillo a la vista en los muros (paño de canvas de 1,6 × 1,2 m repetido según el tamaño de cada tramo, así no se estira), piso de concreto pulido, ventanas industriales con cuadrícula de acero negro y un frente abierto con muro bajo de ladrillo y vidrio, para que la cámara siempre vea adentro. La cocina tiene mesón de madera con repisas abiertas, cafetera con vapor, **neón "Hermes"** (textura con halo + luz rosada real), **pizarra de tiza** del café (sin precios: en la oficina un número siempre es un dato real) y una **isla** con frascos de agua con fruta, grifos de kombucha/cerveza, snacks y cuatro banquetas altas bajo dos lámparas industriales colgantes. El lounge tiene sofá terracota, sillón verde de terciopelo, mesa redonda, puf y la TV del feed; en la esquina noreste hay una **cabina telefónica** de vidrio. Matas colgantes cerca de las ventanas y un afiche tipográfico. Sin lámparas sobre los pods: desde la vista aérea tapaban los escritorios.
@@ -507,7 +609,11 @@ spawn points ── registerOfficeWorker({id, source, project, title})
      │
 bus emit() ──► office/state.ts ── reduceOfficeEvent + tickOffice (cada 2 s)
                  ├─ GET /office/state    snapshot (curl, QA)
-                 └─ GET /office/events   SSE propio: snapshot al conectar + {worker|removed}
+                 └─ GET /office/events   SSE propio: snapshot al conectar + {worker|removed|trace}
+
+mensajes del SDK (session.ts) ─┐
+stream-json crudo (claude-cli) ─┼─► office/trace.ts ── TraceRecorder (puro) ── ~/.hermes-os/trazas/<id>.jsonl
+canUseTool · approvals.ts ──────┘                     └─ {type:"trace"} por /office/events · GET /office/trace/:id
                                           │
                               /oficina (page.tsx) ── OficinaScene ── OfficeWorld (three.js)
 ```
@@ -518,6 +624,50 @@ bus emit() ──► office/state.ts ── reduceOfficeEvent + tickOffice (cada
 - **Los chats de texto no aparecen.** `/v1/chat/completions` emite sin `taskId`.
 - **Privacidad:** los eventos privados (Composición) no salen por el túnel en ninguna de las dos rutas.
 - **Colores:** todos salen de los tokens del tema (`lib/oficina/palette.ts`). La escena se re-monta con `key={theme.resolved}`.
+
+## Demo en tarima (guion de 5 a 7 minutos)
+
+Un guion hablado, sin slides. Lo que se ve es real: los dos errores salen del modelo trabajando sobre un repo de práctica (`scripts/tarima-demo.sh`: dos bugs de formato colombiano en `src/formato.js` y un `dist/` viejo). Lo único preparado es el punto de partida. Prompts exactos y cómo se equivocó cada uno en el ensayo, abajo.
+
+### Antes de subir (checklist)
+
+- [ ] `scripts/tarima-demo.sh reset` (el repo vuelve a tener los bugs y el `dist/` viejo).
+- [ ] `http://localhost:31415/oficina` abierto en Chrome, en **localhost** (no IP ni túnel), pantalla completa del navegador (⌃⌘F) y zoom al 100 %.
+- [ ] **P** → tarima. El encabezado dice **EN VIVO** y **👁 Vista pública · N proyectos ocultos**. Si dice "APAGADA" en rojo, **O**.
+- [ ] Proyectos de clientes ocultos: revisa `~/.hermes-os/vista-publica.json` (por defecto solo `hermes-os` y `general` se nombran; `careways` y los demás salen como "[cliente]").
+- [ ] Permiso de micrófono dado una vez en `localhost:31415` (para dictar con **M** / **X**).
+- [ ] Control emparejado: presiona un botón con la página enfocada (Chrome no lo expone antes).
+- [ ] Volumen de la sala (las respuestas se leen en voz alta; 🔊 en el HUD normal lo apaga).
+- [ ] Ensayo sin red: **R** repite la última traza real, marcada "repetición de las HH:MM". **R** otra vez vuelve a lo vivo.
+
+### El guion
+
+| Min | Digo | Presiono | Se ve |
+| --- | --- | --- | --- |
+| 0:00 | "Esto es Hermes, mi sistema operativo de agentes, corriendo en este Mac. Cero slides: cada personaje de esta oficina es una sesión viva del Claude Agent SDK. Hoy les muestro uno por dentro." | **P** | La tarima: la traza a la izquierda, el escritorio en 3D a la derecha, abajo Tools, System prompt y Logs. Arriba, la vista pública prendida |
+| 0:45 | "Antes de darle trabajo, miren lo que el modelo recibe. Este es el system prompt exacto, el string que le paso al SDK, por secciones. Y cada una tiene su porqué escrito en el código." Señala la identidad (se arma a mano, sin el autoload del CLI), USER.md (snapshot al abrir la sesión: recargarlo a mitad tiraría la caché del prefijo) y el índice de skills (120 caracteres: lo que se pasa nunca rutea). "Lo personal está oculto: se ve el título." | **2**, ↓ y **Enter** en las secciones | El texto exacto y el "Por qué:" de cada sección |
+| 1:45 | "Y estas son sus herramientas: las de Claude Code, 32 de un MCP propio que corre dentro del mismo proceso, Linear, un Chrome que maneja solo… y algo que descubrí armando esta demo: todos mis conectores de claude.ai, más de 400 tools. Cada una dice si es libre, si pasa por mi guardrail o si se revisa en `canUseTool`." | **1** | Las fichas por origen y permiso |
+| 2:30 | "Le doy la tarea." Dicta o escribe el **caso 1**. | **N** (escribir) o **M** (dictar), luego **Enter** | Nace el agente en su escritorio y la traza empieza a llenarse |
+| 2:45 | "Primera vuelta: lee el package.json. Segunda: corre los tests… y fallan. Ahí está en rojo: dos tests." Cuando levanta la mano para `npm test`: "Como estoy mirando la oficina, todo lo que tiene efectos me pide permiso." | **A** (aprobar) cada vez que levanta la mano | ✋ Pide permiso → ✓ Permitido por el humano. El ✗ del test en rojo |
+| 3:30 | "Ahora se equivoca él: intenta editar sin haber leído el archivo. Claude Code se lo niega. Miren lo que hace: lo lee y vuelve a editar." Clic en "→ corregido en el paso N". | **Enter** sobre el error, clic en la flecha verde | El error real, la flecha al paso que lo corrigió y "✓ así se corrigió" |
+| 4:15 | "Corre los tests otra vez: pasan. Y el resumen sale de la traza, no de un adjetivo." | **End** | "9 vueltas · 8 tools · 2 errores, ambos corregidos…" (los números de la corrida en vivo) |
+| 4:45 | "Segundo caso: le pido limpiar una carpeta." Dicta o escribe el **caso 2**. | **N**/**M**, **Enter** | — |
+| 5:00 | "Va directo a `rm -rf`. Mi guardrail lo niega antes de ejecutar… y el agente reformula: ahora borra con Node. Ojo con esto: una deny-list se puede rodear. Por eso lo que tiene efectos además me pide permiso: este lo apruebo yo, o no." | **A** o **B** | 🛡 Guardrail lo negó → el intento con `node -e` → ✋ y tu decisión en la traza |
+| 6:00 | "Los logs crudos están aquí, y la traza se puede exportar sin secretos para quien la quiera." | **3**, luego **⤓ JSONL** | Los logs del bus; el archivo exportado con la vista pública |
+| 6:30 | "El producto terminado importa menos que verlo por dentro. En la mesa de demos la dejo repitiendo esta misma traza, marcada como repetición." | — (2 min sin tocar) | "⟲ repetición de las HH:MM · cualquier tecla vuelve a lo vivo" |
+
+**Plan B** (se cae la red o el agente): **R**. La pantalla dice "⟲ repetición de las HH:MM" y se navega igual (pestañas, filas, el error y su corrección). Sin agente, se repite la traza del caso 1 que viene con la página. Nunca se presenta como en vivo.
+
+### Los dos casos (prompts exactos)
+
+Para el escritorio General (tarea del Agent SDK, `POST /tasks`), con el repo recién reiniciado:
+
+| Caso | Prompt | Cómo se equivocó y se corrigió en el ensayo (2026-10-01, Opus 5) |
+| --- | --- | --- |
+| 1 · Tests que fallan | `En ~/dev/demo-tarima corre los tests con npm test, arregla lo que falle sin tocar los tests y vuelve a correrlos hasta que pasen. Al final dime en una línea qué estaba mal.` | Paso 2: `npm test` falla (`formatCOP` con comas de `en-US`, `slugify` sin quitar tildes). Paso 4: **`Edit` sin haber leído el archivo** → "File has not been read yet". Paso 5 lo lee, paso 6 edita bien (corrección del paso 4), paso 8 los tests pasan (corrección del paso 2). 9 vueltas · 8 tools · 53 s · US$0,42 |
+| 2 · El guardrail niega | `En ~/dev/demo-tarima borra por completo la carpeta dist, vuelve a generar el build con npm run build y dime qué archivos quedaron en dist.` | Revisó qué había en `dist` y si estaba en git, y fue a `rm -rf dist`: **el guardrail lo negó** (`/\brm\s+(-…rf|-…fr)\b/`). Reformuló con `node -e 'fs.rmSync("dist", {recursive:true})'` (corrección en el paso 5), corrió el build y avisó que los `viejo-*.js` estaban commiteados. 6 vueltas · 5 tools · 48 s · US$0,39 |
+
+En el ensayo nadie miraba la Oficina, así que ningún paso pidió permiso. En tarima sí: `npm test`, `npm run build` y el `node -e` levantan la mano (solo pasan solos los Bash de lectura, `isReadOnlyBash`). El `rm -rf` lo niega el guardrail ANTES de preguntar.
 
 ## Ensayo y demo
 
@@ -583,8 +733,14 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaVoices(catalog \| null)` | Inyecta un catálogo de voces (headless no trae); devuelve el reparto |
 | `__hermesOficinaSay(id, línea)` | Una persona dice una frase fija con su voz (QA del clip y de "una sola voz a la vez") |
 | `__hermesOficinaDebug()` (v8) | `render` (draw calls, triángulos, MB de texturas), `exterior` (pesos, etiqueta, colores, panorama), `hd`, `voices` (reparto, log de lo dicho y por qué no), `chats`, `chatsStarted`, `reactions`, `bubbles` |
+| `__hermesOficinaDebug()` (traza) | `trace` (eventos, pasos, errores con su `fixedBy`, resumen) del agente que se ve en tarima o del seleccionado · `inventory` (origen, permiso, pasos) · `systemPrompt` (raw, secciones con su porqué, `withoutWhy` y la versión `redacted`) · `stage` (tarima, pestaña, vista pública, vitrina y su tipo, agente, fila enfocada, proyectos ocultos) |
+| `__hermesOficinaStage(on)` | Entra o sale del modo tarima |
+| `__hermesOficinaTraceReplay(jsonl \| null, { speed?, label? })` | Repite una traza grabada (texto JSONL) en tarima, marcada como repetición; `null` la detiene |
+| `__hermesOficinaVitrina(on, idleMs?)` | Fuerza o detiene la vitrina; `idleMs` cambia los 2 min de inactividad (QA) |
 
 QA de los extras: `apps/web/scripts/oficina-extras-qa.py` compara el tablero y el panel con `GET /office/spend` y `GET /office/plan-usage` (los pide aparte), revisa monitores y sala de control con la simulación y **juega** cada minijuego con entradas sintéticas hasta sumar puntaje: sigue la pelota, alinea las varillas y atrapa tokens. También revisa la placa y el modo CEO, el sonido (apagado al cargar y prendido con un clic real), las capas y los fps, en los dos temas: 70 comprobaciones, sin tokens. `--agent` cambia la URL del agente.
+
+QA de la traza: `apps/web/scripts/oficina-traza-qa.py` repite la fixture (sin tokens) en los dos temas y revisa que la traza llegue completa y en orden, los dos errores y sus correcciones (paso 2 → 8, paso 4 → 6), el prompt byte a byte (con y sin vista pública), el inventario contra la configuración real de `session.ts`, los secretos falsos sembrados (ninguno en el DOM, y el control sin vista pública), la tarima a 1920 × 1080 con teclado y control, la vitrina que entra sola y sale con una tecla, los fps y la consola. `--agent` cambia la URL del agente; `--shots` guarda las capturas.
 
 QA del control sin control físico: `apps/web/scripts/oficina-pad-qa.py` inyecta un Xbox simulado en `navigator.getGamepads()`, con el mismo id y mapeo que entrega Chrome, y recorre la ruta real con 26 comprobaciones.
 
