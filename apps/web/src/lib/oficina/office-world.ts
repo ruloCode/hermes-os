@@ -16,15 +16,16 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { OutlineEffect } from "three/addons/effects/OutlineEffect.js";
-import { DESK_SIZE, SEAT_ANCHOR, deskToWorld, type OfficeLayout, type OfficeWorker } from "@hermes/shared";
+import { DESK_SIZE, SEAT_ANCHOR, deskToWorld, isOfficeNpcRole, type NavBox, type OfficeLayout, type OfficeNpcRole, type OfficeWorker } from "@hermes/shared";
 import { buildDesk, buildPodRug, type DeskView } from "./desk";
 import { Confetti } from "./confetti";
 import { Laptop } from "./laptop";
 import { OfficeCharacter } from "./worker";
 import { Person } from "./person";
+import { OfficeCrowd } from "./npc";
 import { PlayerController, isTyping, type Collider } from "./player";
 import { buildRoom, type BoardStat, type FeedLine, type Room, FLOOR_Y, floorAt } from "./room";
-import { setToonFont, toon } from "./toon";
+import { noOutline, setToonFont, toon } from "./toon";
 import type { OwnerLook } from "./look";
 import type { OfficePalette } from "./palette";
 
@@ -33,7 +34,8 @@ const FRAME_DIR = new THREE.Vector3(0, 0.62, 0.78).normalize();
 /** Distancia a la que "E" alcanza un escritorio (desde su silla). */
 const REACH = 1.7;
 
-export type OfficeHit = { kind: "worker"; id: string } | { kind: "desk"; id: string };
+/** Lo que se clickea o alcanza con "E": un agente, un escritorio libre o un NPC con rol (`id` = su rol). */
+export type OfficeHit = { kind: "worker"; id: string } | { kind: "desk"; id: string } | { kind: "npc"; id: OfficeNpcRole };
 export type OfficeMode = "explore" | "aerial";
 
 export interface ScreenAnchor {
@@ -56,6 +58,8 @@ export interface OfficeWorldHooks {
   onMode?: (mode: OfficeMode) => void;
   /** El piso que se ve cambió (explorar: donde está el dueño; aérea: el elegido). */
   onFloor?: (floor: number) => void;
+  /** Cada frame: dónde está la cabeza de cada NPC con rol (para su etiqueta). */
+  onNpcs?: (anchors: (ScreenAnchor & { role: OfficeNpcRole })[]) => void;
 }
 
 export interface OfficeWorldOptions {
@@ -69,18 +73,6 @@ interface Seated {
   laptop: Laptop;
   deskId: string | null;
   leaving: boolean;
-}
-
-/** Planos y materiales básicos no llevan contorno (se verían como marcos gruesos). */
-function noOutline(obj: THREE.Object3D) {
-  obj.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh) return;
-    const geo = m.geometry;
-    const flat = geo instanceof THREE.PlaneGeometry || geo instanceof THREE.CircleGeometry || geo instanceof THREE.ShapeGeometry;
-    const mats = Array.isArray(m.material) ? m.material : [m.material];
-    for (const mat of mats) if (flat || mat instanceof THREE.MeshBasicMaterial || mat.transparent) mat.userData.outlineParameters = { visible: false };
-  });
 }
 
 function hexToRgbArray(hex: string): [number, number, number] {
@@ -140,6 +132,9 @@ export class OfficeWorld {
   /** Intensidad de las lámparas según la hora; se reparte solo a las del piso que se ve. */
   private lampBase = 1;
   private padInput = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, run: false, zoom: 0 };
+  /** Gente del edificio (interruptor "Ambiente"): personas de ambiente y NPC con rol. */
+  private readonly crowd = new OfficeCrowd();
+  private readonly peopleBuf: Collider[] = [];
   mode: OfficeMode = "explore";
   fps = 0;
 
@@ -213,6 +208,7 @@ export class OfficeWorld {
     this.owner = new Person(opts.look);
     this.owner.root.traverse((o) => ((o as THREE.Mesh).castShadow = true));
     this.scene.add(this.owner.root);
+    this.scene.add(this.crowd.group);
     this.player = new PlayerController(this.camera);
     noOutline(this.scene);
 
@@ -270,6 +266,21 @@ export class OfficeWorld {
     this.room?.setBoard(stats);
   }
 
+  /** Interruptor "Ambiente": gente de ambiente + NPC con rol. Apagado, la oficina queda como sin él. */
+  setAmbient(on: boolean, liveSessions: number, seed?: number) {
+    this.crowd.setEnabled(on, liveSessions, seed);
+    this.refreshColliders();
+  }
+
+  /** El NPC con rol mira al dueño mientras su diálogo está abierto. */
+  setNpcTalking(role: OfficeNpcRole | null) {
+    this.crowd.setTalking(role);
+  }
+
+  private refreshColliders() {
+    this.player.colliders = [...(this.room?.colliders ?? []), ...this.deskColliders, ...this.crowd.staticColliders()];
+  }
+
   // ── Control de juego (lo alimenta la página cada frame) ────────────────
 
   /** Sticks y gatillos: mover, cámara, correr y zoom continuo (cruceta ↑↓). */
@@ -306,11 +317,23 @@ export class OfficeWorld {
       floor: { mine: floorAt(p.y), shown: this.shownFloor },
       stairs: this.room?.stairs ?? [],
       fps: this.fps,
+      ...this.crowd.debug(),
+      ambient: this.crowd.on,
     };
   }
 
   /** Lleva al dueño junto a un escritorio o personaje (lista del equipo en vista explorar). */
   walkTo(hit: OfficeHit) {
+    if (hit.kind === "npc") {
+      // Frente al NPC, en su punto de atención (a la barista, del otro lado de la isla).
+      const s = this.crowd.staffAt(hit.id);
+      if (!s) return;
+      if (this.mode !== "explore") this.setMode("explore");
+      const { talk, floor } = s.spot;
+      this.player.spawn(talk.x, talk.z, Math.atan2(s.pos.x - talk.x, s.pos.z - talk.z), FLOOR_Y[floor]);
+      this.player.camYaw += 0.4;
+      return;
+    }
     const deskId = hit.kind === "desk" ? hit.id : this.seated.get(hit.id)?.deskId;
     const view = deskId ? this.desks.get(deskId) : undefined;
     if (!view) return;
@@ -415,8 +438,22 @@ export class OfficeWorld {
       maxZ: d.z + DESK_SIZE.depth / 2,
       top: DESK_SIZE.height,
     }));
-    this.player.colliders = [...(this.room?.colliders ?? []), ...this.deskColliders];
+    if (this.room) this.crowd.setWorld(this.room, this.navBoxes(layout, this.room), `${this.room.key}|${layout.desks.map((d) => d.id).join(",")}`);
+    this.refreshColliders();
     this.refreshVacancies();
+  }
+
+  /**
+   * Lo que estorba a la gente de ambiente: la sala, los escritorios y, además,
+   * cada pod con sus sillas (nadie de ambiente camina entre los agentes) y los NPC con rol.
+   */
+  private navBoxes(layout: OfficeLayout, room: Room): NavBox[] {
+    const pods = layout.desks.map((d) => {
+      const a = deskToWorld(d, { x: -DESK_SIZE.width / 2 - 0.25, z: -DESK_SIZE.depth / 2 - 0.25 });
+      const b = deskToWorld(d, { x: DESK_SIZE.width / 2 + 0.25, z: SEAT_ANCHOR.z + 0.55 });
+      return { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z), top: 2 };
+    });
+    return [...room.colliders, ...this.deskColliders, ...pods, ...this.crowd.staticNavBoxes(room)];
   }
 
   /** Encuadra (vista aérea) los pods donde hay alguien trabajando; si no hay nadie, toda la planta. */
@@ -466,6 +503,14 @@ export class OfficeWorld {
   /** Acerca la cámara a un escritorio o personaje (vista aérea). */
   focus(hit: OfficeHit) {
     if (this.mode !== "aerial") return;
+    if (hit.kind === "npc") {
+      const s = this.crowd.staffAt(hit.id);
+      if (!s) return;
+      this.aerialFloor = s.spot.floor;
+      const target = new THREE.Vector3(s.pos.x, s.pos.y + 0.8, s.pos.z);
+      this.focusGoal = { target, pos: target.clone().add(FRAME_DIR.clone().multiplyScalar(7.5)) };
+      return;
+    }
     const deskId = hit.kind === "desk" ? hit.id : this.seated.get(hit.id)?.deskId;
     const view = deskId ? this.desks.get(deskId) : undefined;
     if (!view) return;
@@ -542,6 +587,10 @@ export class OfficeWorld {
   }
 
   screenOf(hit: OfficeHit): { x: number; y: number } | null {
+    if (hit.kind === "npc") {
+      const s = this.crowd.staffAt(hit.id);
+      return s ? this.project(this.tmp.set(s.pos.x, s.pos.y + 1.1, s.pos.z)) : null;
+    }
     const deskId = hit.kind === "desk" ? hit.id : this.seated.get(hit.id)?.deskId;
     const view = deskId ? this.desks.get(deskId) : undefined;
     if (!view) return null;
@@ -567,8 +616,13 @@ export class OfficeWorld {
         if (d > REACH || (best && d >= best.d)) continue;
         let hit: OfficeHit = { kind: "desk", id: view.desk.id };
         for (const [id, s] of this.seated) if (s.deskId === view.desk.id && !s.leaving) hit = { kind: "worker", id };
-        best = { hit, d, at: new THREE.Vector3(view.desk.x, 1.5, view.desk.z) };
+        best = { hit, d, at: new THREE.Vector3(view.desk.x, DESK_SIZE.height + 0.15, view.desk.z) };
       }
+    }
+    // Un NPC con rol solo si no hay escritorio al alcance: "Contratar aquí" y "Hablar con X" mandan.
+    if (!best && this.mode === "explore") {
+      const s = this.crowd.nearStaff(this.player.pos, floorAt(this.player.pos.y));
+      if (s) best = { hit: { kind: "npc", id: s.role }, d: s.d, at: new THREE.Vector3(s.at.x, s.at.y + 2.35, s.at.z) };
     }
     const next = best?.hit ?? null;
     const same = next?.kind === this.near?.kind && next?.id === this.near?.id;
@@ -594,11 +648,25 @@ export class OfficeWorld {
   };
 
   private hitAt(clientX: number, clientY: number): OfficeHit | null {
-    // Viendo el piso 2 o 3, la losa tapa a los agentes: nada del piso 1 se clickea a través de ella.
-    if (this.shownFloor > 0) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
+    // Viendo el piso 2 o 3, la losa tapa a los agentes: nada del piso 1 se clickea a través de ella.
+    if (this.shownFloor > 0) return this.npcHit();
+    const fromPods = this.podHit();
+    return fromPods ?? this.npcHit();
+  }
+
+  /** NPC con rol del piso que se ve, bajo el puntero (después de agentes y escritorios). */
+  private npcHit(): OfficeHit | null {
+    const targets = this.crowd.hitTargets(Math.max(0, this.shownFloor));
+    if (!targets.length) return null;
+    const hit = this.raycaster.intersectObjects(targets, false)[0];
+    const role = hit?.object.userData.npcId;
+    return isOfficeNpcRole(role) ? { kind: "npc", id: role } : null;
+  }
+
+  private podHit(): OfficeHit | null {
     const workerBoxes: THREE.Object3D[] = [];
     for (const s of this.seated.values()) if (!s.leaving && s.deskId) workerBoxes.push(s.character.hitbox);
     const w = this.raycaster.intersectObjects(workerBoxes, false)[0];
@@ -764,6 +832,7 @@ export class OfficeWorld {
       this.player.setPad(pad.move.x, pad.move.y, pad.run);
       if (pad.look.x || pad.look.y) this.player.padLook(pad.look.x, pad.look.y, dt);
       if (pad.zoom) this.player.zoom(pad.zoom * 900 * dt);
+      this.player.people = this.crowd.peopleColliders(this.peopleBuf);
       if (this.player.enabled) this.player.update(dt);
       else this.player.update(0);
     } else {
@@ -793,6 +862,7 @@ export class OfficeWorld {
     this.updateFloors();
     this.owner.root.rotation.y = this.player.facing;
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
+    this.crowd.update(dt, t, this.player.pos, this.shownFloor);
 
     const explore = this.mode === "explore";
     const speaking = this.speakingProbe?.() ?? null;
@@ -852,9 +922,19 @@ export class OfficeWorld {
       });
       this.hooks.onPods(anchors);
     }
+    if (this.hooks.onNpcs) {
+      const explore = this.mode === "explore";
+      this.hooks.onNpcs(
+        this.crowd.staffHeads().map((h) => {
+          const far = explore && h.at.distanceTo(this.camera.position) > 12;
+          const a = this.project(h.at);
+          return { role: h.role, ...a, visible: a.visible && h.visible && !far };
+        }),
+      );
+    }
     if (this.hooks.onPlayer) {
       const head = this.project(this.tmp.set(this.player.pos.x, this.player.pos.y + 2.05, this.player.pos.z));
-      const near = this.near ? this.project(this.tmp.copy(this.nearAt).setY(DESK_SIZE.height + 0.15)) : null;
+      const near = this.near ? this.project(this.tmp.copy(this.nearAt)) : null;
       this.hooks.onPlayer(head, near);
     }
   }
@@ -877,6 +957,7 @@ export class OfficeWorld {
     this.controls.dispose();
     this.player.dispose();
     this.owner.dispose();
+    this.crowd.dispose();
     for (const s of this.seated.values()) {
       s.character.dispose();
       s.laptop.dispose();

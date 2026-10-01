@@ -13,7 +13,7 @@
 // plantas, lámparas), con otra planta y colores del tema.
 
 import * as THREE from "three";
-import type { OfficeLayout } from "@hermes/shared";
+import type { AmbientPoi, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
 import { mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
@@ -53,6 +53,16 @@ export interface BoardStat {
   color: string;
 }
 
+/** Dónde está un NPC con rol: su lugar fijo, hacia dónde mira y desde dónde se le habla. */
+export interface NpcSpot {
+  floor: number;
+  x: number;
+  z: number;
+  facing: number;
+  /** Punto desde donde "E" lo alcanza (la barista se atiende del otro lado de la isla). */
+  talk: { x: number; z: number };
+}
+
 export interface Room {
   group: THREE.Group;
   colliders: Collider[];
@@ -68,6 +78,15 @@ export interface Room {
   showFloors(upTo: number): void;
   /** Clave de tamaño: si cambia, la sala se reconstruye. */
   key: string;
+  /**
+   * Lugares con intención para la gente de ambiente (office-ambient.ts): café,
+   * sofá, ventanas, juegos. Solo datos: no agregan nada a la escena.
+   */
+  pois: AmbientPoi[];
+  /** El lugar de cada NPC con rol (recepción, barista, azotea). */
+  npcSpots: Record<OfficeNpcRole, NpcSpot>;
+  /** Por donde entra al edificio quien llega (la puerta del frente, piso 1). */
+  door: { x: number; z: number };
   setFeed(lines: FeedLine[]): void;
   /** Pizarra con los conteos del momento (datos reales de la oficina). */
   setBoard(stats: BoardStat[]): void;
@@ -771,6 +790,11 @@ function deckTexture(dark: boolean, w: number, d: number): THREE.CanvasTexture {
   return t;
 }
 
+/** Rincón de la azotea con sombrilla y dos sillas de playa (noreste). */
+function rooftopNook(maxX: number, minZ: number) {
+  return { x: maxX - 6, z: minZ + 4 };
+}
+
 interface FloorsCtx {
   minX: number;
   maxX: number;
@@ -961,7 +985,7 @@ function buildFloorsAndStairs(ctx: FloorsCtx): { x: number; z: number; y: number
       light(2, l);
     }
     // Rincón con sombrilla y dos sillas de playa (noreste).
-    const nook = { x: maxX - 6, z: minZ + 4 };
+    const nook = rooftopNook(maxX, minZ);
     g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.4, 8), black, nook.x, 1.2, nook.z));
     const shade = mesh(new THREE.ConeGeometry(1.6, 0.6, 16, 1, true), toon(p.accent), nook.x, 2.4, nook.z, false);
     g.add(shade);
@@ -1736,6 +1760,87 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const stairs = buildFloorsAndStairs({ minX, maxX, minZ, maxZ, cx, p, brick, disposables, floors, col: (n, c) => { on(n); col(c); }, light: (n, l) => { on(n); light(l); } });
   on(0);
 
+  // ── Gente de ambiente: lugares con intención y puestos de los NPC ─────
+  // Mismas medidas que los muebles de arriba. Facing: 0 mira a +z, π/2 a +x.
+  const W_ = -Math.PI / 2; // mira al oeste (-x)
+  const E_ = Math.PI / 2; // mira al este (+x)
+  const N_ = Math.PI; // mira al fondo (-z)
+  const mid = (minZ + maxZ) / 2;
+  const nook = rooftopNook(maxX, minZ);
+  const toward = (x: number, z: number, tx: number, tz: number) => Math.atan2(tx - x, tz - z);
+  const one = (id: string, floor: number, activity: AmbientPoi["activity"], x: number, z: number, facing: number): AmbientPoi => ({
+    id,
+    floor,
+    activity,
+    slots: [{ x, z, facing }],
+  });
+  /** Un asiento: se llega al punto de pie y se sube al asiento (y = alto del cojín). */
+  const seat = (x: number, z: number, facing: number, sx: number, sy: number, sz: number) => ({ x, z, facing, seat: { x: sx, y: sy, z: sz } });
+  const stoolZ = (i: number) => tableAt.z - 1.3 + i * 0.86;
+  const pois: AmbientPoi[] = [
+    // Piso 1 · Equipos: ventanas del fondo, la pizarra, el cuadro y la ventana del este.
+    one("ventana-fondo-oeste", 0, "window", cx - 7.5, minZ + 1.1, N_),
+    one("ventana-fondo-este", 0, "window", cx + 8, minZ + 1.1, N_),
+    one("pizarra", 0, "board", cx - 4.6, minZ + 1.25, N_),
+    one("cuadro", 0, "window", cx - 10.25, minZ + 1.5, N_),
+    one("ventana-este", 0, "window", maxX - 1.1, minZ + 3.5, E_),
+    // Piso 2 · Café: barra, agua, snacks, banquetas, sofá, sillón, pufs, libros y ventanas.
+    one("cafe-barra", 1, "coffee", kx + 1.0, minZ + 1.7, W_),
+    one("agua", 1, "water", kx + 0.85, minZ + 8.2, W_),
+    one("snacks", 1, "snack", minX + 1.6, minZ + 9.9, W_),
+    { id: "banqueta-1", floor: 1, activity: "coffee", slots: [seat(tableAt.x + 1.6, stoolZ(1), W_, tableAt.x + 0.95, 0.81, stoolZ(1))] },
+    { id: "banqueta-2", floor: 1, activity: "coffee", slots: [seat(tableAt.x + 1.6, stoolZ(3), W_, tableAt.x + 0.95, 0.81, stoolZ(3))] },
+    {
+      id: "sofa",
+      floor: 1,
+      activity: "tv",
+      slots: [seat(maxX - 5.7, lz - 1.45, E_, maxX - 6.5, 0.63, lz - 0.8), seat(maxX - 5.7, lz + 1.45, E_, maxX - 6.5, 0.63, lz + 0.8)],
+    },
+    { id: "sillon", floor: 1, activity: "sit", slots: [seat(maxX - 4.0, lz + 2.15, -1.07, maxX - 3.25, 0.63, lz + 1.72)] },
+    { id: "puf-oeste", floor: 1, activity: "sit", slots: [seat(cx - 0.75, mid, E_, cx - 1.6, 0.55, mid)] },
+    { id: "puf-este", floor: 1, activity: "sit", slots: [seat(cx + 0.75, mid + 0.8, W_, cx + 1.6, 0.55, mid + 0.8)] },
+    one("libros", 1, "books", maxX - 3.5, minZ + 1.3, N_),
+    one("ventana-cafe-oeste", 1, "window", cx - 7.5, minZ + 1.1, N_),
+    one("ventana-cafe-este", 1, "window", cx + 7.5, minZ + 1.1, N_),
+    // Piso 3 · Azotea: ping-pong y futbolín (de a dos), dardos, arcade, guirnaldas, sillas de playa y vistas.
+    {
+      id: "pingpong",
+      floor: 2,
+      activity: "pingpong",
+      together: true,
+      slots: [
+        { x: gameAt.x - 1.75, z: gameAt.z, facing: E_ },
+        { x: gameAt.x + 1.75, z: gameAt.z, facing: W_ },
+      ],
+    },
+    {
+      id: "futbolin",
+      floor: 2,
+      activity: "foosball",
+      together: true,
+      slots: [
+        { x: foosAt.x, z: foosAt.z - 1.05, facing: 0 },
+        { x: foosAt.x, z: foosAt.z + 1.05, facing: N_ },
+      ],
+    },
+    one("dardos", 2, "darts", dartX + 2.0, gameAt.z - 1.5, toward(dartX + 2.0, gameAt.z - 1.5, dartX, gameAt.z)),
+    one("arcade", 2, "arcade", maxX - 1.5, minZ + 15.2, E_),
+    one("guirnaldas-centro", 2, "lights", cx - 2, minZ + 11, 0.4),
+    one("guirnaldas-este", 2, "lights", cx + 4, minZ + 8, -0.6),
+    { id: "silla-playa-1", floor: 2, activity: "sit", slots: [seat(nook.x - 1.1, nook.z + 1.55, 0, nook.x - 1.1, 0.42, nook.z + 0.45)] },
+    { id: "silla-playa-2", floor: 2, activity: "sit", slots: [seat(nook.x + 1.1, nook.z + 1.55, 0, nook.x + 1.1, 0.42, nook.z + 0.45)] },
+    one("vista-norte", 2, "view", cx - 4, minZ + 1.0, N_),
+    one("vista-este", 2, "view", maxX - 1.0, minZ + 10, E_),
+  ];
+  const npcSpots: Record<OfficeNpcRole, NpcSpot> = {
+    // Recepción, a la derecha de la entrada, con su atril entre ella y el pasillo.
+    reception: { floor: 0, x: cx + 3.6, z: maxZ - 2.4, facing: W_, talk: { x: cx + 2.0, z: maxZ - 2.4 } },
+    // Barista detrás de la isla (entre la barra y la isla); se le habla desde las banquetas.
+    barista: { floor: 1, x: minX + 2.5, z: tableAt.z, facing: E_, talk: { x: tableAt.x + 1.75, z: tableAt.z } },
+    // En la azotea, junto a las sillas de playa, mirando hacia donde llega la escalera.
+    rooftop: { floor: 2, x: nook.x - 2.6, z: nook.z + 0.8, facing: -Math.PI / 4, talk: { x: nook.x - 3.66, z: nook.z + 1.86 } },
+  };
+
   let lastSky = "";
   return {
     group,
@@ -1750,6 +1855,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     spawn: { x: cx, z: maxZ - 2.2, facing: Math.PI },
     lamps,
     key,
+    pois,
+    npcSpots,
+    door: { x: cx, z: maxZ - 0.7 },
     setBoard: paintBoard,
     setFeed(lines) {
       const same = lines.length === feed.length && lines.every((l, i) => l.text === feed[i].text && l.time === feed[i].time);

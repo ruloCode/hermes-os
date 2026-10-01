@@ -28,4 +28,7 @@ export * from "./office.js";
 export * from "./office-approvals.js";
 export * from "./office-layout.js";
 export * from "./office-voices.js";
+export * from "./office-nav.js";
+export * from "./office-ambient.js";
+export * from "./office-npc.js";
 export * from "./gamepad.js";

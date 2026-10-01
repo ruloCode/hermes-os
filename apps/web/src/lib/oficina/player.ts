@@ -62,6 +62,11 @@ export class PlayerController {
   camDist = 7;
   enabled = true;
   colliders: Collider[] = [];
+  /**
+   * La gente del edificio (se mueve): estorba como un mueble, salvo si ya está
+   * encima del dueño — ahí no lo encierra, solo no deja que se le meta más.
+   */
+  people: Collider[] = [];
   /** Donde la cámara no debe salir (la sala; el frente queda abierto). */
   bounds = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
   private keys = new Set<string>();
@@ -137,6 +142,10 @@ export class PlayerController {
 
   private blocked(x: number, z: number): boolean {
     for (const c of this.colliders) if (c.top > this.pos.y + STEP && (c.bottom ?? 0) < this.pos.y + BODY_H && overlaps(c, x, z, RADIUS)) return true;
+    for (const c of this.people) {
+      if (c.top <= this.pos.y + STEP || (c.bottom ?? 0) >= this.pos.y + BODY_H) continue;
+      if (overlaps(c, x, z, RADIUS) && !overlaps(c, this.pos.x, this.pos.z, RADIUS)) return true;
+    }
     return false;
   }
 

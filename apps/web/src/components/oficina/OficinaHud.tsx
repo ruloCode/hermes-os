@@ -132,6 +132,8 @@ export function Toolbar({
   hermesCall,
   callLabel = "Hermes",
   onHermesCall,
+  ambient,
+  onAmbient,
 }: {
   mode: OfficeMode;
   onMode: (m: OfficeMode) => void;
@@ -149,6 +151,9 @@ export function Toolbar({
   /** A quién llama el botón: "Hermes" o "Equipo" (el elenco de la oficina). */
   callLabel?: string;
   onHermesCall: () => void;
+  /** Gente del edificio (ambiente + Recepción, Barista y Respiro). */
+  ambient: boolean;
+  onAmbient: () => void;
 }) {
   return (
     <nav className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
@@ -177,6 +182,13 @@ export function Toolbar({
       </div>
       <div className={`flex items-center gap-0.5 rounded-xl p-1 ${glass}`}>
         {mode === "aerial" ? <ToolButton onClick={onFrame}>Encuadrar</ToolButton> : null}
+        <ToolButton
+          active={ambient}
+          onClick={onAmbient}
+          title="Gente del edificio: personas de ambiente en los tres pisos y Recepción, Barista y Respiro para hablar (no son agentes)"
+        >
+          Ambiente
+        </ToolButton>
         <ToolButton active={showAll} onClick={onShowAll} title="Mostrar también los proyectos activos donde no hay nadie">
           Todos los proyectos
         </ToolButton>
@@ -446,6 +458,20 @@ export function FloorPicker({ floor, mode, onPick }: { floor: number; mode: Offi
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Pausa de la azotea en curso: cuenta regresiva real y botón para terminarla. */
+export function PauseTimer({ left, onStop }: { left: string; onStop: () => void }) {
+  return (
+    <div className={`pointer-events-auto flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm ${glass}`} role="timer" aria-label="Pausa">
+      <span aria-hidden>☕</span>
+      <span className="text-text-dim">Pausa</span>
+      <span className="font-medium tabular-nums text-text">{left}</span>
+      <button type="button" onClick={onStop} className="rounded-md px-1.5 text-xs text-text-dim hover:text-text">
+        terminar
+      </button>
     </div>
   );
 }

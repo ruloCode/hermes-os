@@ -8,7 +8,7 @@
 // de la Sala).
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import type { OfficeLayout, OfficeWorker } from "@hermes/shared";
+import { OFFICE_NPCS, type OfficeLayout, type OfficeNpcRole, type OfficeWorker } from "@hermes/shared";
 import { readOfficePalette } from "@/lib/oficina/palette";
 import { OfficeWorld, type OfficeHit, type OfficeMode, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
 import type { BoardStat, FeedLine } from "@/lib/oficina/room";
@@ -42,7 +42,11 @@ interface Props {
   voices?: ReadonlyMap<string, string>;
   /** Quién suena ahora en esa llamada (lo lee el mundo cada frame). */
   speakingProbe?: () => { id: string; level: number } | null;
+  /** Interruptor "Ambiente": gente del edificio; `sessions` (vivas) decide cuánta; `seed` la coreografía. */
+  ambient: { on: boolean; sessions: number; seed?: number };
 }
+
+const NPC_ROLES = Object.keys(OFFICE_NPCS) as OfficeNpcRole[];
 
 function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "translate(-50%, -100%)") {
   if (!el) return;
@@ -55,7 +59,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -63,6 +67,7 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   const labelRefs = useRef(new Map<string, HTMLDivElement>());
   const headRef = useRef<HTMLDivElement>(null);
   const nearRef = useRef<HTMLDivElement>(null);
+  const npcRefs = useRef(new Map<OfficeNpcRole, HTMLDivElement>());
   const cb = useRef({ onClick, onNear, onMode, onFloor });
   cb.current = { onClick, onNear, onMode, onFloor };
   const initial = useRef({ ownerName, look });
@@ -88,6 +93,9 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
         onClick: (hit) => cb.current.onClick(hit),
         onMode: (mode) => cb.current.onMode(mode),
         onFloor: (floor) => cb.current.onFloor?.(floor),
+        onNpcs: (anchors) => {
+          for (const role of NPC_ROLES) place(npcRefs.current.get(role) ?? null, anchors.find((a) => a.role === role) ?? null);
+        },
       },
       initial.current,
     );
@@ -128,6 +136,10 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
     worldRef.current?.setInputEnabled(inputEnabled);
   }, [inputEnabled]);
 
+  useEffect(() => {
+    worldRef.current?.setAmbient(ambient.on, ambient.sessions, ambient.seed);
+  }, [ambient.on, ambient.sessions, ambient.seed]);
+
   return (
     <div ref={wrapRef} className="absolute inset-0 overflow-hidden">
       <div className="pointer-events-none absolute inset-0 z-10">
@@ -148,6 +160,21 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
             </div>
           );
         })}
+
+        {/* El rol de cada NPC sobre su cabeza (solo con el ambiente prendido y de cerca). */}
+        {NPC_ROLES.map((role) => (
+          <div
+            key={role}
+            ref={(el) => {
+              if (el) npcRefs.current.set(role, el);
+              else npcRefs.current.delete(role);
+            }}
+            className="absolute top-0 left-0 rounded-full border border-line bg-panel/90 px-2 py-0.5 text-xs whitespace-nowrap text-text-dim opacity-0 shadow-sm"
+            style={{ willChange: "transform" }}
+          >
+            {OFFICE_NPCS[role].name}
+          </div>
+        ))}
 
         {/* Nombre del dueño sobre su cabeza. */}
         <div

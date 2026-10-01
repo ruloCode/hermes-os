@@ -301,3 +301,15 @@ export function mergeByMaterial(root: THREE.Object3D): THREE.Group {
   }
   return out;
 }
+
+/** Planos y materiales básicos no llevan contorno (se verían como marcos gruesos). */
+export function noOutline(obj: THREE.Object3D) {
+  obj.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const geo = m.geometry;
+    const flat = geo instanceof THREE.PlaneGeometry || geo instanceof THREE.CircleGeometry || geo instanceof THREE.ShapeGeometry;
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    for (const mat of mats) if (flat || mat instanceof THREE.MeshBasicMaterial || mat.transparent) mat.userData.outlineParameters = { visible: false };
+  });
+}

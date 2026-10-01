@@ -14,6 +14,15 @@ import { mesh, toon, toonUnique } from "./toon";
 
 /** Cadera sobre los pies (de pie). */
 const HIPS = 0.42;
+/** Base del torso sobre los pies: sentado, esto es lo que apoya en el asiento. */
+export const PERSON_SEAT_OFFSET = 0.32;
+
+/**
+ * Pose en reposo (la gente de ambiente; el dueño siempre está de pie):
+ * sentado, con una taza, con la raqueta, con las manos en un juego, señalando,
+ * mirando arriba, lanzando un dardo o mirando por la ventana.
+ */
+export type PersonPose = "stand" | "sit" | "cup" | "paddle" | "hands" | "point" | "lookup" | "throw" | "window";
 
 export class Person {
   readonly root = new THREE.Group();
@@ -36,6 +45,11 @@ export class Person {
   private walkPhase = 0;
   private waveT = -1;
   private look: OwnerLook;
+  private pose: PersonPose = "stand";
+  /** Taza o raqueta en la mano derecha (solo en esas poses). */
+  private prop: THREE.Object3D | null = null;
+  /** Desfase propio de las animaciones en reposo: dos personas no se mueven al unísono. */
+  private phase = Math.random() * 10;
 
   constructor(look: OwnerLook) {
     this.look = { ...look };
@@ -173,6 +187,35 @@ export class Person {
     }
   }
 
+  /** Pose en reposo; se aplica mientras no camina. Cambia la utilería de la mano. */
+  setPose(pose: PersonPose) {
+    if (pose === this.pose) return;
+    this.pose = pose;
+    if (this.prop) {
+      this.armR.remove(this.prop);
+      this.prop.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.geometry.dispose();
+      });
+      this.prop = null;
+    }
+    if (pose === "cup" || pose === "paddle") {
+      const g = new THREE.Group();
+      if (pose === "cup") {
+        g.add(mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.11, 10), toon("#f4f1ea"), 0, -0.43, 0.07, false));
+        g.add(mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.01, 10), toon("#6f4e37"), 0, -0.375, 0.07, false));
+      } else {
+        g.add(mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 6), toon("#8a5a3b"), 0, -0.48, 0, false));
+        const face = mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.025, 14), toon("#d62828"), 0, -0.6, 0, false);
+        face.rotation.x = Math.PI / 2;
+        g.add(face);
+      }
+      g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+      this.armR.add(g);
+      this.prop = g;
+    }
+  }
+
   /** Saludo con la mano (al interactuar con algo). */
   wave() {
     this.waveT = 0;
@@ -295,6 +338,9 @@ export class Person {
       this.armL.rotation.z = THREE.MathUtils.lerp(this.armL.rotation.z, -0.1, 0.3);
       this.armR.rotation.z = THREE.MathUtils.lerp(this.armR.rotation.z, 0.1, 0.3);
     }
+    this.head.rotation.x = 0;
+    this.head.rotation.y = 0;
+    if (!moving && !airborne && this.pose !== "stand") this.applyPose(t + this.phase);
     if (this.waveT >= 0) {
       this.waveT += dt;
       const w = Math.min(1, this.waveT / 0.2) * Math.min(1, Math.max(0, (1.2 - this.waveT) / 0.2));
@@ -303,10 +349,69 @@ export class Person {
     }
     // Rebote al caminar y respiración en reposo.
     this.body.position.y = moving && !airborne ? Math.abs(Math.sin(this.walkPhase)) * 0.06 : Math.sin(t * 2) * 0.008;
+    if (!moving && this.pose === "paddle") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 5)) * 0.04;
     this.head.rotation.z = moving ? Math.sin(this.walkPhase) * 0.04 : 0;
   }
 
+  /** Brazos, piernas y cabeza de cada pose (t ya trae el desfase propio). */
+  private applyPose(t: number) {
+    const { armL, armR, legL, legR, head } = this;
+    const ease = (x: number) => x * x * (3 - 2 * x);
+    switch (this.pose) {
+      case "sit":
+        legL.rotation.x = legR.rotation.x = -1.35;
+        armL.rotation.set(-0.55, 0, -0.12);
+        armR.rotation.set(-0.55, 0, 0.12);
+        head.rotation.y = Math.sin(t * 0.4) * 0.25;
+        break;
+      case "cup": {
+        // Taza a la altura del pecho y, cada tanto, un sorbo.
+        const k = t % 7;
+        const sip = k < 1.4 ? ease(Math.sin((k / 1.4) * Math.PI)) : 0;
+        armR.rotation.set(-1.0 - sip * 1.2, 0, 0.18 - sip * 0.1);
+        armL.rotation.set(0, 0, -0.1);
+        head.rotation.x = sip * 0.2;
+        break;
+      }
+      case "paddle":
+        armR.rotation.set(-0.9 + Math.sin(t * 5) * 0.55, 0, 0.35);
+        armL.rotation.set(-0.4, 0, -0.25);
+        legL.rotation.x = Math.sin(t * 5) * 0.15;
+        legR.rotation.x = -Math.sin(t * 5) * 0.15;
+        break;
+      case "hands":
+        armL.rotation.set(-1.2 + Math.sin(t * 8) * 0.12, 0, -0.05);
+        armR.rotation.set(-1.2 + Math.cos(t * 7) * 0.12, 0, 0.05);
+        break;
+      case "point":
+        armR.rotation.set(-1.45, 0, 0.15 + Math.sin(t * 1.3) * 0.12);
+        armL.rotation.set(0, 0, -0.1);
+        head.rotation.y = Math.sin(t * 0.7) * 0.15;
+        break;
+      case "lookup":
+        head.rotation.x = -0.32;
+        head.rotation.y = Math.sin(t * 0.35) * 0.4;
+        armL.rotation.set(0.25, 0, -0.08);
+        armR.rotation.set(0.25, 0, 0.08);
+        break;
+      case "throw": {
+        // Apunta, echa el brazo atrás y lanza, cada 3,5 s.
+        const k = (t % 3.5) / 3.5;
+        const back = k < 0.6 ? 0 : k < 0.8 ? ease((k - 0.6) / 0.2) : 1 - ease((k - 0.8) / 0.2);
+        armR.rotation.set(-1.5 - back * 0.9, 0, 0.1);
+        armL.rotation.set(-0.3, 0, -0.1);
+        break;
+      }
+      case "window":
+        armL.rotation.set(0.35, 0, -0.06);
+        armR.rotation.set(0.35, 0, 0.06);
+        head.rotation.y = Math.sin(t * 0.3) * 0.35;
+        break;
+    }
+  }
+
   dispose() {
+    this.prop = null;
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) m.geometry.dispose();

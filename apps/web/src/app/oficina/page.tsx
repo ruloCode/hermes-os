@@ -19,7 +19,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_OFFICE_MODE,
   GENERAL_PROJECT,
+  OFFICE_NPCS,
   PLAN_TOOL,
+  ROOFTOP_PAUSE_MS,
+  baristaDay,
+  baristaScheduled,
+  baristaWeather,
+  formatCountdown,
+  receptionList,
+  receptionSummary,
   assignSeats,
   isOfficeMode,
   nextOfficeMode,
@@ -28,18 +36,22 @@ import {
   officeCounts,
   TRIGGER_ON,
   type AgentActivityEvent,
+  type NpcLine,
   type OfficeMode as AgentMode,
+  type OfficeNpcRole,
   type OfficeProject,
   type OfficeState,
   type OfficeUpdate,
   type OfficeWorker,
   type PadButton,
   type PadState,
+  type ScheduledLite,
 } from "@hermes/shared";
-import { claudeStartRun, hermesPost, sseUrl } from "@/lib/hermes";
+import { claudeStartRun, hermesGet, hermesPost, sseUrl } from "@/lib/hermes";
 import { OWNER } from "@/lib/owner";
 import { useTheme } from "@/state/ThemeProvider";
 import { useWorkspace } from "@/state/WorkspaceContext";
+import { useDashboard } from "@/state/DashboardProvider";
 import { useAgentEvents } from "@/hooks/useAgentEvents";
 import { useHermesData } from "@/hooks/useHermesData";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
@@ -51,11 +63,13 @@ import { VoiceEventsBridge } from "@/components/VoiceEventsBridge";
 import { OficinaScene, type OficinaSceneHandle } from "@/components/oficina/OficinaScene";
 import { WorkerDrawer } from "@/components/oficina/WorkerDrawer";
 import { HireDialog, type HireDialogHandle } from "@/components/oficina/HireDialog";
+import { NpcDialog } from "@/components/oficina/NpcDialog";
 import {
   ControllerHelp,
   ControlsHint,
   FloorPicker,
   LookPicker,
+  PauseTimer,
   StatusCard,
   TeamRoster,
   Toasts,
@@ -89,6 +103,8 @@ declare global {
     /** QA sin micrófono: deja `text` como lo dictado (listo para enviar). */
     __hermesOficinaDictate?: (text: string) => void;
     __hermesOficinaTeam?: { say: (text: string) => boolean; debug: () => unknown };
+    /** QA: prende/apaga la gente del edificio y siembra su coreografía. */
+    __hermesOficinaAmbient?: (opts: { on?: boolean; seed?: number }) => void;
   }
 }
 
@@ -168,6 +184,19 @@ const HERMES_SCOPE =
 
 /** Modo de los agentes que contratas (localStorage: es una preferencia de este navegador). */
 const OFFICE_MODE_KEY = "hermes-office-mode";
+/** Interruptor "Ambiente" (prendido por defecto): preferencia de este navegador. */
+const AMBIENT_KEY = "hermes-oficina-ambiente";
+
+function hhmm(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Una pregunta a un NPC: su texto y la respuesta, calculada en vivo con el estado actual. */
+interface NpcQuestion {
+  id: string;
+  label: string;
+  answer: () => NpcLine[];
+}
 
 export default function OficinaPage() {
   const theme = useTheme();
@@ -199,6 +228,16 @@ export default function OficinaPage() {
   const [modeBySession, setModeBySession] = useState<Record<string, AgentMode>>({});
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState(false);
+  // Gente del edificio: interruptor, semilla (QA) y el diálogo con un NPC.
+  const [ambient, setAmbientState] = useState(true);
+  const [ambientSeed, setAmbientSeed] = useState<number | undefined>(undefined);
+  const [npc, setNpc] = useState<OfficeNpcRole | null>(null);
+  const [npcQuestion, setNpcQuestion] = useState<string | null>(null);
+  const [npcFocus, setNpcFocus] = useState(0);
+  const [scheduled, setScheduled] = useState<ScheduledLite[] | null>(null);
+  const [pauseUntil, setPauseUntil] = useState<number | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
+  const { snapshot } = useDashboard();
   const sceneRef = useRef<OficinaSceneHandle>(null);
   const hireRef = useRef<HireDialogHandle>(null);
   const seatsRef = useRef<Map<string, string>>(new Map());
@@ -217,9 +256,13 @@ export default function OficinaPage() {
     try {
       const saved = localStorage.getItem(OFFICE_MODE_KEY);
       if (isOfficeMode(saved)) setOfficeModeState(saved);
+      if (localStorage.getItem(AMBIENT_KEY) === "off") setAmbientState(false);
     } catch {
-      /* sin storage: queda Auto */
+      /* sin storage: queda Auto y el ambiente prendido */
     }
+    // ?seed=N siembra la coreografía de la gente (ensayos y QA reproducibles).
+    const seed = Number(new URLSearchParams(window.location.search).get("seed"));
+    if (Number.isInteger(seed) && seed > 0) setAmbientSeed(seed);
   }, []);
   useEffect(() => {
     const tick = () => setDaylight(daylightAt(new Date()).label);
@@ -299,6 +342,7 @@ export default function OficinaPage() {
 
   const nearLabel = useMemo(() => {
     if (!near) return null;
+    if (near.kind === "npc") return `Hablar con ${OFFICE_NPCS[near.id].name}`;
     if (near.kind === "worker") {
       const w = workers.find((x) => x.id === near.id);
       return w ? `Hablar con ${w.name}` : null;
@@ -306,6 +350,107 @@ export default function OficinaPage() {
     const d = layout.desks.find((x) => x.id === near.id);
     return d ? (sim ? "Escritorio libre" : `Contratar aquí · ${projectName(d.project)}`) : null;
   }, [near, workers, layout, projectName, sim]);
+
+  // ── Gente del edificio: Recepción, Barista y Respiro ─────────────────
+  const npcOpenRef = useRef(false);
+  npcOpenRef.current = !!npc;
+
+  const openNpc = useCallback(
+    (role: OfficeNpcRole) => {
+      voice.cancel();
+      stopSpeaking();
+      setSelected(null);
+      setNpc(role);
+      setNpcQuestion(null);
+      setNpcFocus(0);
+      sceneRef.current?.world()?.setNpcTalking(role);
+      // Barista: las tareas programadas se piden al abrir (una vez, sin poll). Si falla, esa pregunta no aparece.
+      if (role === "barista") {
+        setScheduled(null);
+        hermesGet<ScheduledLite[]>("/scheduled")
+          .then((t) => setScheduled(Array.isArray(t) ? t : null))
+          .catch(() => setScheduled(null));
+      }
+    },
+    [voice],
+  );
+
+  const closeNpc = useCallback(() => {
+    setNpc(null);
+    setNpcQuestion(null);
+    sceneRef.current?.world()?.setNpcTalking(null);
+  }, []);
+
+  const setAmbient = useCallback(
+    (on: boolean) => {
+      setAmbientState(on);
+      if (!on) closeNpc();
+      try {
+        localStorage.setItem(AMBIENT_KEY, on ? "on" : "off");
+      } catch {
+        /* modo privado: dura la visita */
+      }
+    },
+    [closeNpc],
+  );
+
+  // La pausa de la azotea: cuenta regresiva real (y la hora que dicen los NPC).
+  useEffect(() => {
+    if (!pauseUntil && !npc) return;
+    const id = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [pauseUntil, npc]);
+
+  const controlsLines = (padOn: boolean): NpcLine[] =>
+    padOn
+      ? [
+          { text: "Stick izquierdo para caminar y RT para correr; el derecho mueve la cámara." },
+          { text: "A habla con quien tengas al lado o contrata en un escritorio libre; X salta y B cancela." },
+          { text: "Y llama por voz; LB y RB te llevan de un agente a otro; View cambia a la vista aérea." },
+        ]
+      : [
+          { text: "W A S D para caminar, Shift para correr y Espacio para saltar; arrastra para girar la cámara." },
+          { text: "E habla con quien tengas al lado o contrata en un escritorio libre." },
+          { text: "V cambia a la vista aérea y 1, 2 o 3 eligen el piso desde arriba." },
+        ];
+
+  /** Lo que dice cada NPC y qué se le puede preguntar: todo calculado del estado real, en cada render. */
+  const npcView = useMemo((): { greeting: NpcLine[]; questions: NpcQuestion[] } | null => {
+    if (!npc) return null;
+    const now = new Date(clock);
+    if (npc === "reception") {
+      const ctx = { connected: feed === "live", simulated: !!sim, projectName };
+      return {
+        greeting: receptionSummary(workers, ctx),
+        questions: [
+          { id: "needs_you", label: "¿Quién me necesita?", answer: () => receptionList(workers, "needs_you", ctx) },
+          { id: "working", label: "¿Quién está trabajando?", answer: () => receptionList(workers, "working", ctx) },
+          { id: "done", label: "¿Qué terminó?", answer: () => receptionList(workers, "done", ctx) },
+        ],
+      };
+    }
+    if (npc === "barista") {
+      const questions: NpcQuestion[] = [{ id: "day", label: "¿Cómo va el día?", answer: () => baristaDay(snapshot, now) }];
+      if (baristaWeather(snapshot).length) questions.push({ id: "weather", label: "¿Qué tal el clima?", answer: () => baristaWeather(snapshot) });
+      if (scheduled) questions.push({ id: "scheduled", label: "¿Qué hay programado?", answer: () => baristaScheduled(scheduled, now) });
+      return { greeting: baristaDay(snapshot, now), questions };
+    }
+    const left = pauseUntil ? pauseUntil - clock : 0;
+    return {
+      greeting: [{ text: pauseUntil ? `Vas en pausa: quedan ${formatCountdown(left)}.` : `Son las ${hhmm(now)}. ¿Te tomas un respiro?` }],
+      questions: [
+        {
+          id: "pause",
+          label: pauseUntil ? "Terminar la pausa" : "Pausa de 5 minutos",
+          answer: () => [{ text: pauseUntil ? `Listo: quedan ${formatCountdown(left)}. Te aviso cuando se acabe.` : "Pausa terminada." }],
+        },
+        { id: "controls", label: "¿Cómo me muevo?", answer: () => controlsLines(usingPad) },
+      ],
+    };
+    // controlsLines solo lee su argumento.
+  }, [npc, clock, feed, sim, projectName, workers, snapshot, scheduled, pauseUntil, usingPad]);
+
+  const npcLines = npcView ? (npcQuestion ? (npcView.questions.find((q) => q.id === npcQuestion)?.answer() ?? npcView.greeting) : npcView.greeting) : [];
 
   // ── Control de juego ──────────────────────────────────────────────────
   const usingPadRef = useRef(false);
@@ -555,6 +700,14 @@ export default function OficinaPage() {
       if (b === "B" || b === "MENU" || b === "A") setHelpOpen(false);
       return;
     }
+    // Diálogo con un NPC: la cruceta recorre las preguntas, A elige, B cierra.
+    if (npcOpenRef.current) {
+      const n = npcCountRef.current;
+      if (b === "B") closeNpc();
+      else if (b === "A") pickNpcRef.current(npcFocusRef.current);
+      else if ((b === "UP" || b === "DOWN") && n) setNpcFocus((f) => (f + (b === "UP" ? n - 1 : 1)) % n);
+      return;
+    }
     // Un agente con la mano levantada: A aprueba, B niega (antes que la voz).
     if (conversationOpen && selectedWorker?.approval && (b === "A" || b === "B")) {
       void decideApproval(selectedWorker, b === "A");
@@ -634,11 +787,49 @@ export default function OficinaPage() {
       move: s.move,
       look: s.look,
       run: s.rt >= TRIGGER_ON,
-      zoom: s.held.has("UP") ? -1 : s.held.has("DOWN") ? 1 : 0,
+      // Con un NPC abierto la cruceta es del diálogo, no del zoom.
+      zoom: npcOpenRef.current ? 0 : s.held.has("UP") ? -1 : s.held.has("DOWN") ? 1 : 0,
     });
   };
 
   const pad = useGamepad({ onFrame: onPadFrame, onPress: onPadPress });
+
+  /** Elegir una pregunta del NPC: la respuesta queda en vivo y, si "Respuestas" está prendido, se lee. */
+  const pickNpc = (i: number) => {
+    const q = npcView?.questions[i];
+    if (!q) return;
+    setNpcFocus(i);
+    setNpcQuestion(q.id);
+    pad.rumble("tap");
+    let say = q.answer().map((l) => l.text).join(" ");
+    if (q.id === "pause") {
+      const until = pauseUntil ? null : Date.now() + ROOFTOP_PAUSE_MS;
+      setPauseUntil(until);
+      setClock(Date.now());
+      say = until ? "Listo, cinco minutos. Te aviso cuando se acabe." : "Pausa terminada.";
+    }
+    if (replyVoice && !inCall) speak(say);
+  };
+  const pickNpcRef = useRef(pickNpc);
+  pickNpcRef.current = pickNpc;
+  const npcCountRef = useRef(0);
+  npcCountRef.current = npcView?.questions.length ?? 0;
+  const npcFocusRef = useRef(0);
+  npcFocusRef.current = npcFocus;
+
+  // Fin de la pausa: aviso, vibración y (si las respuestas en voz están prendidas) lo dice.
+  useEffect(() => {
+    if (!pauseUntil || clock < pauseUntil) return;
+    setPauseUntil(null);
+    toast("done", "☕ Se acabó la pausa");
+    pad.rumble("success");
+    if (replyVoice && !inCall) speak("Se acabó la pausa. A seguir.");
+    // pad.rumble lee el control al llamarse.
+  }, [clock, pauseUntil, toast, replyVoice, inCall]);
+
+  useEffect(() => {
+    if (selected && npc) closeNpc();
+  }, [selected, npc, closeNpc]);
 
   // ── Avisos: quién llega y quién termina (no al cargar ni en simulación) ──
   const prevRef = useRef<Map<string, OfficeWorker["status"]> | null>(null);
@@ -687,12 +878,14 @@ export default function OficinaPage() {
     (hit: OfficeHit | null) => {
       if (!hit) {
         closeConversation();
+        closeNpc();
         return;
       }
-      openConversation(hit);
+      if (hit.kind === "npc") openNpc(hit.id);
+      else openConversation(hit);
       sceneRef.current?.world()?.focus(hit);
     },
-    [openConversation, closeConversation],
+    [openConversation, closeConversation, openNpc, closeNpc],
   );
 
   const pickFromRoster = useCallback((w: OfficeWorker) => {
@@ -705,6 +898,17 @@ export default function OficinaPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Diálogo con un NPC: 1-3 o ↑↓ + Enter eligen, Esc cierra.
+      if (npcOpenRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey) {
+        const n = npcCountRef.current;
+        if (e.key === "Escape") closeNpc();
+        else if (/^Digit[1-9]$/.test(e.code) && Number(e.code.slice(5)) <= n) pickNpcRef.current(Number(e.code.slice(5)) - 1);
+        else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && n) setNpcFocus((f) => (f + (e.key === "ArrowUp" ? n - 1 : 1)) % n);
+        else if (e.key === "Enter") pickNpcRef.current(npcFocusRef.current);
+        else return;
+        e.preventDefault();
+        return;
+      }
       // Shift+Tab cambia de modo, como en Claude Code (solo con una conversación abierta).
       if (e.key === "Tab" && e.shiftKey && conversationOpenRef.current) {
         e.preventDefault();
@@ -723,7 +927,7 @@ export default function OficinaPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeConversation]);
+  }, [closeConversation, closeNpc]);
 
   const changeLook = (l: OwnerLook) => {
     setLook(l);
@@ -733,8 +937,8 @@ export default function OficinaPage() {
   // Seams de QA: simular sin tokens, leer el estado, clics reales, vista, caminar y dictar.
   const teamRef = useRef(team);
   teamRef.current = team;
-  const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad });
-  debugRef.current = { workers, seats, selected, layout, near, voice, usingPad };
+  const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad, npc });
+  debugRef.current = { workers, seats, selected, layout, near, voice, usingPad, npc };
   useEffect(() => {
     window.__hermesOficinaSim = (state) => setSim(state === "demo" ? demoOfficeState(live.projects, live.machine || "sim") : state);
     window.__hermesOficinaDebug = () => {
@@ -746,10 +950,12 @@ export default function OficinaPage() {
         selected: d.selected,
         desks: d.layout.desks.length,
         freeDesks: d.layout.desks.map((x) => x.id),
+        deskXZ: d.layout.desks.map((x) => [x.x, x.z]),
         pods: d.layout.pods.length,
         simulated: !!sim,
         voice: { state: d.voice.state, text: d.voice.text, engine: d.voice.engine },
         usingPad: d.usingPad,
+        npcDialog: d.npc,
         ...(world?.debug() ?? { fps: 0 }),
       };
     };
@@ -764,6 +970,10 @@ export default function OficinaPage() {
       voice.cancel();
       voice.edit(text);
     };
+    window.__hermesOficinaAmbient = ({ on, seed }) => {
+      if (on !== undefined) setAmbient(on);
+      if (seed !== undefined) setAmbientSeed(seed);
+    };
     return () => {
       delete window.__hermesOficinaSim;
       delete window.__hermesOficinaDebug;
@@ -775,8 +985,9 @@ export default function OficinaPage() {
       delete window.__hermesOficinaFloor;
       delete window.__hermesOficinaDictate;
       delete window.__hermesOficinaTeam;
+      delete window.__hermesOficinaAmbient;
     };
-  }, [live.projects, live.machine, sim, voice]);
+  }, [live.projects, live.machine, sim, voice, setAmbient]);
 
   const title = OWNER ? `Oficina de ${OWNER}` : "Oficina de agentes";
 
@@ -798,21 +1009,23 @@ export default function OficinaPage() {
         look={look}
         feed={feedLines}
         board={board}
-        nearLabel={nearLabel}
+        nearLabel={npc ? null : nearLabel}
         nearKey={pad.connected && usingPad ? "A" : "E"}
-        inputEnabled={!hiring}
+        inputEnabled={!hiring && !npc}
         onClick={onClick}
         onNear={setNear}
         onMode={setModeState}
         onFloor={setFloor}
         voices={team.voiceNames}
         speakingProbe={team.speakingWorker}
+        ambient={{ on: ambient, sessions: workers.length, seed: ambientSeed }}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
         <div className="flex flex-col items-start gap-2">
           <StatusCard title={title} machine={machine} feed={feed} simulated={!!sim} total={workers.length} tally={tally} daylight={daylight} />
           <FloorPicker floor={floor} mode={mode} onPick={(f) => sceneRef.current?.world()?.setFloorView(f)} />
+          {pauseUntil ? <PauseTimer left={formatCountdown(pauseUntil - clock)} onStop={() => setPauseUntil(null)} /> : null}
         </div>
         <div className="flex flex-col items-end gap-2">
           <Toolbar
@@ -836,6 +1049,8 @@ export default function OficinaPage() {
             hermesCall={team.available ? (team.status === "on" ? "on" : team.status === "connecting" ? "connecting" : team.status === "unavailable" ? "unavailable" : "off") : hermesCall}
             callLabel={team.available ? "Equipo" : "Hermes"}
             onHermesCall={toggleCall}
+            ambient={ambient}
+            onAmbient={() => setAmbient(!ambient)}
           />
           {hermes.error ? <p className="pointer-events-auto rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{hermes.error}</p> : null}
           {team.error ? <p className="pointer-events-auto max-w-sm rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{team.error}</p> : null}
@@ -918,6 +1133,27 @@ export default function OficinaPage() {
               setPendingFocus(id);
             }
           }}
+        />
+      ) : null}
+
+      {npc && npcView ? (
+        <NpcDialog
+          name={OFFICE_NPCS[npc].name}
+          place={OFFICE_NPCS[npc].place}
+          simulated={npc === "reception" && !!sim}
+          lines={npcLines}
+          options={npcView.questions}
+          focus={Math.min(npcFocus, npcView.questions.length - 1)}
+          padConnected={pad.connected && usingPad}
+          onPick={pickNpc}
+          onGo={(id) => {
+            closeNpc();
+            const hit: OfficeHit = { kind: "worker", id };
+            const world = sceneRef.current?.world();
+            if (world?.mode === "explore") world.walkTo(hit);
+            else world?.focus(hit);
+          }}
+          onClose={closeNpc}
         />
       ) : null}
 
