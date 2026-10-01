@@ -254,6 +254,15 @@ def main() -> int:
             if shots:
                 page.screenshot(path=str(shots / f"tarima-prompt-{theme}.png"))
 
+            # ── Log completo: una entrada por evento, con las salidas enteras ──
+            page.keyboard.press("3")
+            time.sleep(0.5)
+            n_log = page.locator("[data-log-line]").count()
+            log_text = page.locator("[data-logs]").text_content()
+            check(n_log == len(fx_events), f"Logs = el log completo de la traza: una entrada por evento ({n_log} de {len(fx_events)})")
+            check("Expected values to be strictly equal" in log_text and "+ '$ 1,234,567'" in log_text, "con la salida ENTERA de cada tool (el diff del test que falló)")
+            check(page.locator("[data-log-download]").count() == 1, "y se puede bajar en .txt")
+
             # ── 3. Vista pública: secretos sembrados ──
             page.evaluate("(t) => window.__hermesOficinaTraceReplay(t, { speed: 60, label: 'repetición QA (secretos falsos sembrados)' })", seeded_fixture(fixture_text))
             page.wait_for_function("(n) => { const t = window.__hermesOficinaDebug().trace; return t && t.id === 'replay-qa-sembrada' && t.events.length >= n; }", arg=len(fx_events) + 4, timeout=60000)
@@ -348,6 +357,30 @@ def main() -> int:
                 check(w is not None and w["status"] != "needs_you" and page.locator("[data-stage-approval]").count() == 0, "A lo aprueba sin salir de la tarima")
             page.evaluate("() => window.__hermesOficinaSim(null)")
             time.sleep(0.8)
+
+            # ── El panel de cada agente (fuera de la tarima) tiene su pestaña Log ──
+            page.keyboard.press("p")
+            time.sleep(0.6)
+            page.evaluate("() => window.__hermesOficinaSim('demo')")
+            time.sleep(1.5)
+            wid = dbg()["workers"][0]["id"]
+            page.evaluate("(id) => window.__hermesOficinaMode('aerial')", wid)
+            time.sleep(0.8)
+            page.evaluate("(id) => window.__hermesOficinaFocus({ kind: 'worker', id })", wid)
+            time.sleep(1.5)
+            pt = page.evaluate("(id) => window.__hermesOficinaScreenOf({ kind: 'worker', id })", wid)
+            if pt:
+                page.mouse.click(pt["x"], pt["y"])
+                time.sleep(0.8)
+            if page.locator("[data-drawer-tab='log']").count():
+                page.locator("[data-drawer-tab='log']").click()
+                time.sleep(0.5)
+            check(page.locator("[data-drawer-tab='log'][aria-selected='true']").count() == 1 and page.locator("[data-logs] [data-log-line]").count() > 0, "el panel de un agente tiene la pestaña Log con su log")
+            page.keyboard.press("Escape")
+            page.evaluate("() => window.__hermesOficinaSim(null)")
+            time.sleep(0.6)
+            page.keyboard.press("p")
+            time.sleep(0.6)
 
             # ── 6. Vitrina: entra sola por inactividad y sale con una tecla ──
             page.evaluate("() => window.__hermesOficinaVitrina(false, 3000)")

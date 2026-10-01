@@ -290,7 +290,7 @@ export function StageView({
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {tab === "tools" ? <InventoryList cards={cards} redact={redact} big onJump={jumpToStep} note={source === "sdk" ? "permisos: la configuración de session.ts" : source === "cli" ? "permisos: el modo del run + las reglas deny" : undefined} /> : null}
           {tab === "prompt" ? <PromptView prompt={data.prompt} publicView={publicView} ctx={publicCtx} redact={redact} big /> : null}
-          {tab === "logs" ? <LogsView lines={logs} source={logsSource} redact={redact} big /> : null}
+          {tab === "logs" ? <LogsView lines={logs} source={logsSource} redact={redact} big full downloadName={traceId ? `log-${traceId}.txt` : undefined} /> : null}
         </div>
       </section>
     </div>

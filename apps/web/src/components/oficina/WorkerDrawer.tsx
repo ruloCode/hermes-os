@@ -14,6 +14,7 @@ import { TraceList, type TraceListHandle } from "./trace/TraceList";
 import { InventoryList } from "./trace/InventoryList";
 import { PromptView } from "./trace/PromptView";
 import { useTraceView } from "./trace/useTraceView";
+import { LogsView, traceLogLines } from "./trace/LogsView";
 import { Markdown } from "@/components/Markdown";
 import { claudeKillRun, claudeRunStreamUrl } from "@/lib/hermes";
 import type { OfficeDictation } from "@/hooks/useOfficeDictation";
@@ -58,9 +59,10 @@ interface Line {
   t?: number;
 }
 
-export type DrawerTab = "out" | "trace" | "tools" | "prompt";
+export type DrawerTab = "out" | "log" | "trace" | "tools" | "prompt";
 const TABS: { id: DrawerTab; label: string }[] = [
   { id: "out", label: "Salida" },
+  { id: "log", label: "Log" },
   { id: "trace", label: "Traza" },
   { id: "tools", label: "Tools" },
   { id: "prompt", label: "Prompt" },
@@ -340,7 +342,32 @@ export function WorkerDrawer({
         {tab !== "out" && traceView.summary ? <span className="ml-auto truncate pr-2 text-[11px] text-text-dim" data-drawer-summary>{traceView.summary}</span> : null}
       </nav>
 
-      {tab === "trace" ? (
+      {tab === "log" ? (
+        <div className="min-h-0 flex-1 px-4 py-3">
+          <LogsView
+            full
+            big={expanded}
+            redact={redact}
+            downloadName={`log-${worker.id}.txt`}
+            lines={
+              traceView.data.events.length
+                ? traceLogLines(traceView.reduced, redact, publicView)
+                : stream
+                  ? stream.map((l) => ({ kind: l.kind, text: l.text, t: l.t }))
+                  : worker.lines.map((text) => ({ kind: "text", text }))
+            }
+            source={
+              traceView.data.events.length
+                ? "Log completo de su traza: cada evento con su contenido entero (input de cada tool, lo que devolvió, texto del modelo, permisos)"
+                : traceView.data.status === "loading"
+                  ? "Cargando su traza…"
+                  : stream
+                    ? "Esta sesión no tiene traza: el stream de su run"
+                    : "Esta sesión no tiene traza (no pasa por los puntos que la graban): sus últimas líneas"
+            }
+          />
+        </div>
+      ) : tab === "trace" ? (
         <TraceList reduced={traceView.reduced} redact={redact} publicView={publicView} size={expanded ? "xl" : "md"} focusSeq={focusSeq} onFocusSeq={setFocusSeq} handleRef={listRef} emptyText={traceView.data.status === "missing" ? "El agente no tiene la traza de esta sesión (empezó antes de que existiera o ya no está en disco)." : "Esperando el primer evento…"} />
       ) : tab === "tools" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">

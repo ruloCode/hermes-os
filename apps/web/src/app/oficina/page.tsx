@@ -83,7 +83,7 @@ import { traceStore, replayLabel } from "@/lib/oficina/trace-store";
 import { CLIENT_PROJECT_NAME, projectIsPublic, redactBoards, redactCalendar, redactFeed, redactQueue, redactWorker, usePublicViewInfo, useRedactor } from "@/lib/oficina/public-view";
 import { StageView, STAGE_SCENE_STYLE, STAGE_TABS, type StageTab } from "@/components/oficina/trace/StageView";
 import { useTraceView } from "@/components/oficina/trace/useTraceView";
-import { busLines } from "@/components/oficina/trace/LogsView";
+import { busLines, traceLogLines } from "@/components/oficina/trace/LogsView";
 import type { TraceListHandle } from "@/components/oficina/trace/TraceList";
 import { OWNER } from "@/lib/owner";
 import { useTheme } from "@/state/ThemeProvider";
@@ -2570,8 +2570,8 @@ export default function OficinaPage() {
           onTogglePublic={() => setPublicView(!publicView)}
           tab={stageTab}
           onTab={setStageTab}
-          logs={stageWorker?.source === "run" && !sim ? stageRunLines : stageAgentId ? busLines(events, stageAgentId) : []}
-          logsSource={stageWorker?.source === "run" && !sim ? "Stream del run de claude -p (lo mismo que la consola, con stderr)" : "Eventos del bus de actividad de este agente (lo que ven el feed y los monitores, recortado)"}
+          logs={stageTraceView.data.events.length ? traceLogLines(stageTraceView.reduced, redact, publicView) : stageWorker?.source === "run" && !sim ? stageRunLines : stageAgentId ? busLines(events, stageAgentId) : []}
+          logsSource={stageTraceView.data.events.length ? "Log completo de su traza: cada evento con su contenido entero" : stageWorker?.source === "run" && !sim ? "Stream del run de claude -p (lo mismo que la consola, con stderr)" : "Eventos del bus de actividad de este agente (lo que ven el feed y los monitores, recortado)"}
           replay={vitrina?.label ?? null}
           replayHint={vitrina ? (vitrina.kind === "vitrina" ? "cualquier tecla vuelve a lo vivo" : "R vuelve a lo vivo") : undefined}
           simulated={!!sim && !vitrina}
