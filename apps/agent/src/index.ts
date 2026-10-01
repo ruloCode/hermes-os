@@ -2625,9 +2625,10 @@ app.get("/office/traces", async (c) => {
 
 app.get("/office/trace/:id", async (c) => {
   const id = c.req.param("id");
-  if (viaTunnel((h) => c.req.header(h)) && officeWorkerPrivate(id)) return c.json({ error: "traza privada" }, 404);
+  // Una sesión sin traza (simulación, Estudio, juntas) no es un error: 200 con found:false (contrato como /lights).
+  if (viaTunnel((h) => c.req.header(h)) && officeWorkerPrivate(id)) return c.json({ found: false, error: "traza privada" });
   const file = await getTrace(id);
-  if (!file) return c.json({ error: "traza no encontrada" }, 404);
+  if (!file) return c.json({ found: false, error: "esta sesión no tiene traza" });
   const view = c.req.query("view");
   const source = file.meta?.source ?? "sdk";
   return c.json({

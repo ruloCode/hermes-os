@@ -102,7 +102,12 @@ class TraceStore {
     e.data = { ...e.data, status: "loading" };
     this.touch(id);
     try {
-      const file = await hermesGet<TraceFile & { config?: TraceConfig }>(`/office/trace/${encodeURIComponent(id)}`);
+      const file = await hermesGet<TraceFile & { config?: TraceConfig; found?: boolean }>(`/office/trace/${encodeURIComponent(id)}`);
+      if (file.found === false || !Array.isArray(file.events)) {
+        e.data = { ...e.data, status: e.bySeq.size ? "ok" : "missing" };
+        this.touch(id);
+        return;
+      }
       this.addEvents(e, file.events);
       e.data = {
         ...e.data,
