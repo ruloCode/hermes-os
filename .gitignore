@@ -48,3 +48,6 @@ apps/agent/native/window-helper
 # Persona del dueño: vive en ~/.hermes-os/SOUL.md, nunca en el repo
 SOUL.md
 !docs/SOUL.example.md
+
+# Fuentes PNG del arte de la Oficina (se regeneran: ver apps/web/public/oficina/README.md)
+apps/web/public/oficina/raw/

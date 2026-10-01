@@ -509,6 +509,12 @@ export function Toasts({ toasts }: { toasts: Toast[] }) {
 
 /** Las capas nuevas de la oficina: apagadas, la sala queda como antes de existir. Se guardan en este navegador. */
 export interface OfficeLayers {
+  /** Cielo, ciudad y calle afuera del edificio, con la hora real. */
+  exterior: boolean;
+  /** Texturas y arte en alta (ladrillo, concreto, deck, madera, tela, tiza, cuadros). */
+  hd: boolean;
+  /** Gente viva: charlas entre personas y reacciones a lo que pasa. */
+  lively: boolean;
   data: boolean;
   ceo: boolean;
   zones: boolean;
@@ -517,6 +523,9 @@ export interface OfficeLayers {
 }
 
 const LAYER_LABEL: { key: keyof OfficeLayers; label: string; hint: string }[] = [
+  { key: "exterior", label: "Exterior", hint: "Cielo, cerros, ciudad y calle afuera del edificio, con la hora real (día, atardecer y noche)" },
+  { key: "hd", label: "Texturas y arte", hint: "Ladrillo, concreto, deck, madera, tela y tiza en alta, y los cuadros y el afiche" },
+  { key: "lively", label: "Gente viva", hint: "La gente conversa entre sí, aplaude cuando un agente termina y reacciona cuando bailas" },
   { key: "data", label: "Pantallas y uso", hint: "Monitor en cada escritorio, sala de control y tablero de uso de Claude (piso 1)" },
   { key: "ceo", label: "Oficina de CEO", hint: "Tu oficina privada en el piso 1, con el modo sentado" },
   { key: "zones", label: "Zonas nuevas", hint: "Sala de juntas, biblioteca y cabinas (café) y el lounge de la azotea" },

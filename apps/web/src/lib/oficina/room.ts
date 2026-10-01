@@ -13,10 +13,11 @@
 // plantas, lámparas), con otra planta y colores del tema.
 
 import * as THREE from "three";
-import type { AmbientPoi, GameId, NavBox, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
+import { hourOf, skyAt, type AmbientPoi, type GameId, type NavBox, type OfficeBoardId, type OfficeLayout, type OfficeNpcRole } from "@hermes/shared";
 import { mergeByMaterial, mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
+import { hdImage, hdReady, hdTexture, hdToon, type HdTexture } from "./hd";
 
 export const WALL_H = 3.4;
 /** Grosor de la losa entre pisos. */
@@ -119,6 +120,8 @@ export interface CeoOffice {
  * oficina de CEO (vuelve su maceta) y sin las zonas de los pisos 2 y 3.
  */
 export interface RoomLayers {
+  /** Texturas y arte en alta (ladrillo, concreto, deck, madera, tela, tiza, cuadros). Apagada: los canvas de siempre. */
+  hd?: boolean;
   /** Sala de control + tablero de uso (piso 1, fondo noreste) y monitores de los escritorios. */
   data: boolean;
   ceo: boolean;
@@ -126,7 +129,23 @@ export interface RoomLayers {
   zones: boolean;
 }
 
-export const ALL_LAYERS: RoomLayers = { data: true, ceo: true, zones: true };
+export const ALL_LAYERS: RoomLayers = { data: true, ceo: true, zones: true, hd: true };
+
+/**
+ * ¿Esta sala se arma con las texturas HD? Se fija al empezar `buildRoom` (capa
+ * prendida y ya cargadas) y lo leen los constructores de muebles, así sus firmas
+ * no cambian.
+ */
+let HD = false;
+let HD_DARK = false;
+
+/** Toon teñido con textura HD si la sala va en alta; si no, el toon plano de siempre. */
+function surface(name: HdTexture, color: string, repeatU = 1, repeatV = 1): THREE.MeshToonMaterial {
+  if (!HD) return toon(color);
+  // La textura ya trae su color: el tinte se aclara para no oscurecerla dos veces.
+  const tint = name === "tela" ? mix(color, "#ffffff", 0.25) : name === "madera" ? mix(color, "#ffffff", HD_DARK ? 0.25 : 0.45) : color;
+  return hdToon(name, tint, repeatU, repeatV) ?? toon(color);
+}
 
 /**
  * Algo de la sala que el dueño usa con "E" (capa "Interacciones"): sentarse,
@@ -215,6 +234,8 @@ export interface Room {
   tick(now: Date): Daylight;
   /** Animación ambiental de la sala (vapor de la cafetera), cada frame. */
   animate(t: number): void;
+  /** Con el exterior prendido, las ventanas dejan ver afuera (sin el cielo pintado detrás del vidrio). */
+  setOutdoorViews(real: boolean): void;
   dispose(): void;
 }
 
@@ -226,15 +247,14 @@ function mix(a: string, b: string, t: number): string {
   return `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
 }
 
-/** Luz del día según la hora local: noche, amanecer/atardecer y día, con transición suave. */
+/**
+ * Luz del día según la hora local. Sale del mismo cielo que el exterior
+ * (`skyAt`, shared/office-sky.ts): el día pesa entero y el atardecer a medias,
+ * así la luz de adentro y el cielo de afuera nunca se contradicen.
+ */
 export function daylightAt(now: Date): Daylight {
-  const h = now.getHours() + now.getMinutes() / 60;
-  // 0 a medianoche, 1 entre 8 y 17, rampas de 6→8 y 17→19.
-  const day = h < 6 || h >= 19 ? 0 : h < 8 ? (h - 6) / 2 : h < 17 ? 1 : 1 - (h - 17) / 2;
-  const dusk = day > 0 && day < 1 ? 1 - Math.abs(day - 0.5) * 2 : 0;
-  const top = mix(mix("#0b1330", "#6fb1ff", day), "#f08a5d", dusk * 0.6);
-  const bottom = mix(mix("#1c2a52", "#dff1ff", day), "#ffd6a5", dusk * 0.8);
-  return { day, skyTop: top, skyBottom: bottom, label: day >= 1 ? "día" : day <= 0 ? "noche" : h < 12 ? "amanecer" : "atardecer" };
+  const s = skyAt(hourOf(now));
+  return { day: s.weights.day + s.weights.dusk * 0.5, skyTop: s.zenith, skyBottom: s.horizon, label: s.label };
 }
 
 // ── Estilo loft (coworking): ladrillo, concreto, neón, tiza ─────────────
@@ -269,17 +289,46 @@ function brickCanvas(dark: boolean): HTMLCanvasElement {
   return c;
 }
 
+/** Paño HD: 4 ladrillos × 10 hiladas en 1,4 × 1,2 m (ladrillos de ~35 cm, se leen a escala chibi). */
+const BRICK_HD = { w: 1.4, h: 1.2 };
+/** Una textura por canvas: los tramos la CLONAN (misma imagen en la GPU, distinto repeat). Antes cada tramo subía la suya. */
+const brickBase = new WeakMap<HTMLCanvasElement, THREE.CanvasTexture>();
+
 /** Material de ladrillo para un tramo de `u` × `v` metros (el paño no se estira). */
 function brickMaterial(canvas: HTMLCanvasElement, u: number, v: number, disposables: { dispose(): void }[]): THREE.MeshToonMaterial {
-  const t = new THREE.CanvasTexture(canvas);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(Math.max(0.2, u / BRICK_TILE.w), Math.max(0.2, v / BRICK_TILE.h));
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  const m = toonUnique("#ffffff");
+  const hd = HD ? hdTexture("ladrillo", Math.max(0.2, u / BRICK_HD.w), Math.max(0.2, v / BRICK_HD.h)) : null;
+  let t: THREE.Texture;
+  if (hd) t = hd;
+  else {
+    let b = brickBase.get(canvas);
+    if (!b) {
+      b = new THREE.CanvasTexture(canvas);
+      b.wrapS = b.wrapT = THREE.RepeatWrapping;
+      b.colorSpace = THREE.SRGBColorSpace;
+      b.anisotropy = 8;
+      brickBase.set(canvas, b);
+      disposables.push(b);
+    }
+    t = b.clone();
+    t.repeat.set(Math.max(0.2, u / BRICK_TILE.w), Math.max(0.2, v / BRICK_TILE.h));
+  }
+  // En el tema oscuro el ladrillo HD se apaga un poco (el canvas oscuro ya traía sus colores).
+  const m = toonUnique(hd && HD_DARK ? "#a08c84" : "#ffffff");
   m.map = t;
   disposables.push(t, m);
   return m;
+}
+
+/** Piso: concreto pulido o deck HD a escala del tramo; si no, el canvas de siempre. */
+function floorTexture(kind: "concreto" | "deck", dark: boolean, w: number, d: number): THREE.Texture {
+  const tile = kind === "concreto" ? 4 : 2.2;
+  return (HD ? hdTexture(kind, w / tile, d / tile) : null) ?? (kind === "concreto" ? concreteTexture(dark, w, d) : deckTexture(dark, w, d));
+}
+
+/** El color que tiñe un piso HD en el tema oscuro (en el claro, blanco: la textura manda). */
+function floorTint(kind: "concreto" | "deck"): string {
+  if (!HD || !HD_DARK) return "#ffffff";
+  return kind === "concreto" ? "#7f7a75" : "#9a8576";
 }
 
 /** Concreto pulido: gris cálido con manchas suaves y juntas de dilatación. */
@@ -349,11 +398,15 @@ function chalkboardCanvas(font: string): THREE.CanvasTexture {
   c.width = 512;
   c.height = 700;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#23282a";
-  g.fillRect(0, 0, 512, 700);
-  for (let i = 0; i < 40; i++) {
-    g.fillStyle = "rgba(255,255,255,0.025)";
-    g.fillRect((i * 71) % 512, (i * 113) % 700, 90, 30);
+  const slate = HD ? hdImage("tiza") : null;
+  if (slate) g.drawImage(slate, 0, 0, 512, 700);
+  else {
+    g.fillStyle = "#23282a";
+    g.fillRect(0, 0, 512, 700);
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = "rgba(255,255,255,0.025)";
+      g.fillRect((i * 71) % 512, (i * 113) % 700, 90, 30);
+    }
   }
   g.fillStyle = "#f4f1ea";
   g.textAlign = "center";
@@ -524,8 +577,8 @@ function phoneBooth(glass: THREE.Material): THREE.Group {
 /** Sillón individual (el del lounge). */
 function armchair(color: string): THREE.Group {
   const g = new THREE.Group();
-  const m = toon(color);
-  const dark = toon(mix(color, "#000000", 0.2));
+  const m = surface("tela", color);
+  const dark = surface("tela", mix(color, "#000000", 0.2));
   g.add(mesh(roundedBox(1.0, 0.42, 1.0, 0.16), m, 0, 0.3, 0));
   g.add(mesh(roundedBox(0.28, 0.8, 1.0, 0.12), m, -0.42, 0.55, 0));
   for (const s of [-1, 1]) g.add(mesh(roundedBox(0.9, 0.55, 0.22, 0.1), dark, 0.02, 0.45, s * 0.5));
@@ -558,8 +611,8 @@ function floorLamp(shade: string): { group: THREE.Group; bulbAt: THREE.Vector3 }
 
 function couch(color: string): THREE.Group {
   const g = new THREE.Group();
-  const m = toon(color);
-  const dark = toon(mix(color, "#000000", 0.2));
+  const m = surface("tela", color);
+  const dark = surface("tela", mix(color, "#000000", 0.2));
   g.add(mesh(roundedBox(1.0, 0.42, 3.6, 0.18), m, 0, 0.3, 0));
   g.add(mesh(roundedBox(0.3, 0.85, 3.6, 0.14), m, -0.45, 0.55, 0));
   for (const s of [-1, 1]) g.add(mesh(roundedBox(1.0, 0.62, 0.3, 0.14), dark, 0, 0.42, s * 1.75));
@@ -571,7 +624,7 @@ function couch(color: string): THREE.Group {
 
 function bookshelf(): THREE.Group {
   const g = new THREE.Group();
-  const wood = toon("#a86b44");
+  const wood = surface("madera", "#a86b44");
   g.add(mesh(box(2.2, 2.1, 0.45), wood, 0, 1.05, 0));
   const inner = toon("#6e4429");
   for (let r = 0; r < 4; r++) g.add(mesh(box(2.0, 0.42, 0.4), inner, 0, 0.3 + r * 0.5, 0.04));
@@ -947,11 +1000,12 @@ function buildFloorsAndStairs(ctx: FloorsCtx): { x: number; z: number; y: number
   const hole2 = { minX: minX + 1.95, maxX: minX + 3.65, minZ: zLow, maxZ: zHigh };
 
   const black = toon("#1f2024");
-  const treadMat = toon(p.dark ? "#8a5a3b" : "#b07a52");
+  const treadMat = surface("madera", p.dark ? "#8a5a3b" : "#b07a52");
   const riserMat = toon(p.dark ? "#3a3532" : "#5a524c");
 
   // Losa con hueco: cuatro rectángulos alrededor del hueco, cada uno con su textura a escala.
-  const slab = (level: number, hole: { minX: number; maxX: number; minZ: number; maxZ: number }, tex: (w: number, d: number) => THREE.CanvasTexture) => {
+  const slab = (level: number, hole: { minX: number; maxX: number; minZ: number; maxZ: number }, kind: "concreto" | "deck") => {
+    const tex = (w: number, d: number) => floorTexture(kind, p.dark, w, d);
     const g = floors[level];
     const rects = [
       [minX, maxX, minZ, hole.minZ],
@@ -964,7 +1018,7 @@ function buildFloorsAndStairs(ctx: FloorsCtx): { x: number; z: number; y: number
       const d = z1 - z0;
       if (w < 0.05 || d < 0.05) continue;
       const t = tex(w, d);
-      const m = new THREE.MeshToonMaterial({ map: t, color: "#ffffff" });
+      const m = new THREE.MeshToonMaterial({ map: t, color: floorTint(kind) });
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m);
       plane.rotation.x = -Math.PI / 2;
       plane.position.set((x0 + x1) / 2, 0.002, (z0 + z1) / 2);
@@ -976,8 +1030,8 @@ function buildFloorsAndStairs(ctx: FloorsCtx): { x: number; z: number; y: number
       col(level, { minX: x0, maxX: x1, minZ: z0, maxZ: z1, bottom: -SLAB, top: 0 });
     }
   };
-  slab(1, hole1, (w, d) => concreteTexture(p.dark, w, d));
-  slab(2, hole2, (w, d) => deckTexture(p.dark, w, d));
+  slab(1, hole1, "concreto");
+  slab(2, hole2, "deck");
 
   // Escalera maciza: cada escalón es una caja de su altura (el personaje los sube solo).
   const stair = (level: number, x0: number, x1: number, zStart: number, dir: 1 | -1) => {
@@ -1152,6 +1206,8 @@ function screenCanvas(w: number, h: number) {
 // ── La sala ─────────────────────────────────────────────────────────────
 
 export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: string, layers: RoomLayers = ALL_LAYERS): Room {
+  HD = !!layers.hd && hdReady();
+  HD_DARK = p.dark;
   const group = new THREE.Group();
   const colliders: Collider[] = [];
   const disposables: { dispose(): void }[] = [];
@@ -1193,7 +1249,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const maxZ = Math.max(layout.floor.maxZ + 1.5, 15);
   const W = maxX - minX;
   const D = maxZ - minZ;
-  const key = [minX, maxX, minZ, maxZ].map((n) => n.toFixed(1)).join(",") + `|${+layers.data}${+layers.ceo}${+layers.zones}`;
+  const key = [minX, maxX, minZ, maxZ].map((n) => n.toFixed(1)).join(",") + `|${+layers.data}${+layers.ceo}${+layers.zones}${+HD}`;
 
   // Ladrillo a la vista en los muros; acero negro en marcos y rodapiés.
   const brick = brickCanvas(p.dark);
@@ -1201,8 +1257,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const frameMat = toon("#1f2024");
 
   // Piso de concreto pulido en toda la planta (los tapetes marcan las zonas).
-  const floorTex = concreteTexture(p.dark, W, D);
-  const floorMat = new THREE.MeshToonMaterial({ map: floorTex, color: "#ffffff" });
+  const floorTex = floorTexture("concreto", p.dark, W, D);
+  const floorMat = new THREE.MeshToonMaterial({ map: floorTex, color: floorTint("concreto") });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((minX + maxX) / 2, 0.002, (minZ + maxZ) / 2);
@@ -1252,6 +1308,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   };
   const glassMat = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide });
   disposables.push(glassMat);
+  /** Los cielos pintados detrás de cada ventana (se ocultan cuando afuera hay mundo de verdad). */
+  const windowViews: THREE.Mesh[] = [];
 
   /** Muro a lo largo de un eje con huecos de ventana. `at` es la línea del muro; `inward` el signo hacia adentro. */
   const wall = (axis: "x" | "z", at: number, from: number, to: number, windows: number[], inward: 1 | -1) => {
@@ -1292,6 +1350,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
       const view = new THREE.Mesh(new THREE.PlaneGeometry(winW + 0.6, y1 - y0 + 0.6), skyMat);
       view.position.set(0, (y0 + y1) / 2, -0.35);
       win.add(view);
+      windowViews.push(view);
       // Construida a lo largo de x con el adentro hacia +z; se gira sobre su muro.
       if (axis === "x") {
         win.position.set(c, 0, at);
@@ -1471,8 +1530,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   on(1);
   // ── Cocina (oeste) ─────────────────────────────────────────────────────
   const kx = minX + WALL_T / 2 + 0.55;
-  const woodDark = toon(p.dark ? "#5a3b28" : "#8a5a3b");
-  const woodTop = toon(p.dark ? "#a9784f" : "#c99a6c");
+  const woodDark = surface("madera", p.dark ? "#5a3b28" : "#8a5a3b");
+  const woodTop = surface("madera", p.dark ? "#a9784f" : "#c99a6c");
   const counter = new THREE.Group();
   counter.add(mesh(box(1.0, 0.92, 5), woodDark, 0, 0.46, 0));
   counter.add(mesh(box(1.1, 0.08, 5.1), woodTop, 0, 0.96, 0));
@@ -1787,17 +1846,28 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   on(1);
   {
     const x = cx + 10.25;
-    const tex = posterCanvas(["Buenas", "ideas,", "mejor", "equipo"], "#e07a5f", "#fff7ef", p.font);
+    const tex = (HD ? hdTexture("afiche-cafe") : null) ?? posterCanvas(["Buenas", "ideas,", "mejor", "equipo"], "#e07a5f", "#fff7ef", p.font);
     const mat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(tex, mat);
     g.add(mesh(box(1.3, 1.7, 0.05), trimMat, x, 2.15, minZ + WALL_T / 2 + 0.025, false));
     const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.57), mat);
     poster.position.set(x, 2.15, minZ + WALL_T / 2 + 0.055);
     g.add(poster);
+    // Con el arte en alta, un cuadro apaisado más en la misma pared (amanecer sobre cerros).
+    const dawn = HD ? hdTexture("arte-amanecer") : null;
+    if (dawn) {
+      const dm = new THREE.MeshBasicMaterial({ map: dawn });
+      disposables.push(dawn, dm);
+      const dx = cx + 3.2;
+      g.add(mesh(box(1.62, 1.32, 0.05), toon("#2b2d42"), dx, 2.05, minZ + WALL_T / 2 + 0.025, false));
+      const art = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.2), dm);
+      art.position.set(dx, 2.05, minZ + WALL_T / 2 + 0.055);
+      g.add(art);
+    }
   }
   on(0);
   for (const [x, seed] of [[cx - 10.25, 3]]) {
-    const tex = artCanvas(p.skins, seed);
+    const tex = (HD ? hdTexture("arte-cafetal") : null) ?? artCanvas(p.skins, seed);
     const mat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(tex, mat);
     g.add(mesh(box(1.3, 1.6, 0.05), toon("#5a3a22"), x, 2.2, minZ + WALL_T / 2 + 0.025, false));
@@ -1882,7 +1952,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     // Tapete, escritorio de madera grande frente al ventanal y silla ejecutiva.
     g.add(mesh(roundedBox(4.6, 0.02, 4.4, 0.4), toon(p.dark ? mix(p.bg, "#6b4f3a", 0.45) : mix("#c9a27a", "#ffffff", 0.45)), (X0 + X1) / 2 + 0.3, 0.012, (Z0 + Z1) / 2, false));
     const desk = { x: X1 - 2.05, z: Z0 + 2.8, w: 0.9, d: 2.0, h: 0.76 };
-    const deskWood = toon(p.dark ? "#6b4428" : "#8a5a3b");
+    const deskWood = surface("madera", p.dark ? "#6b4428" : "#8a5a3b");
     g.add(mesh(box(desk.w, 0.06, desk.d), toon(p.dark ? "#8c5d3a" : "#a8754c"), desk.x, desk.h - 0.03, desk.z));
     g.add(mesh(box(0.06, desk.h - 0.06, desk.d - 0.1), deskWood, desk.x - desk.w / 2 + 0.05, (desk.h - 0.06) / 2, desk.z));
     for (const sz of [-1, 1]) g.add(mesh(box(desk.w - 0.1, desk.h - 0.06, 0.06), deskWood, desk.x, (desk.h - 0.06) / 2, desk.z + sz * (desk.d / 2 - 0.05)));
@@ -1939,7 +2009,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     ceoLamp = lamps.length;
     light(lampLight);
     {
-      const tex = artCanvas([p.accent, "#2a9d8f", "#e9c46a", "#264653"], 11);
+      const tex = (HD ? hdTexture("arte-circulos") : null) ?? artCanvas([p.accent, "#2a9d8f", "#e9c46a", "#264653"], 11);
       const mat = new THREE.MeshBasicMaterial({ map: tex });
       disposables.push(tex, mat);
       const zArt = minZ + 21.1;
@@ -2387,6 +2457,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
         paintSky(d);
       }
       return d;
+    },
+    setOutdoorViews(real) {
+      for (const v of windowViews) v.visible = !real;
     },
     animate(t) {
       for (const s of steam) {

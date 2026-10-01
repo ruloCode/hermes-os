@@ -37,7 +37,12 @@ import {
   type OfficeWorker,
   type PlanUsage,
   type UpcomingCalendar,
+  hourOf,
+  skyAt,
+  type SkyState,
 } from "@hermes/shared";
+import { Outdoor } from "./outdoor";
+import { hdMegabytes, hdReady, hdState, preloadHd } from "./hd";
 import { buildDesk, buildPodRug, type DeskView } from "./desk";
 import { Confetti } from "./confetti";
 import { Laptop } from "./laptop";
@@ -218,6 +223,13 @@ export class OfficeWorld {
   private readonly pointer = new THREE.Vector2();
   private readonly tmp = new THREE.Vector3();
   private readonly outside: THREE.Mesh;
+  /** Capa "Exterior": cielo, ciudad y calle que siguen la hora real. */
+  private outdoor: Outdoor | null = null;
+  private exteriorOn = true;
+  private panoramaLoading = false;
+  /** Hora forzada (QA y capturas: __hermesOficinaHour); null = la del reloj. */
+  private hourOverride: number | null = null;
+  private sky: SkyState = skyAt(hourOf(new Date()));
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly confetti: Confetti;
@@ -305,6 +317,8 @@ export class OfficeWorld {
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
+    // El contorno dibuja la escena dos veces: el contador se reinicia a mano por frame (si no, solo cuenta la segunda pasada).
+    renderer.info.autoReset = false;
     renderer.domElement.className = "absolute inset-0 h-full w-full";
     renderer.domElement.style.touchAction = "none";
     container.prepend(renderer.domElement);
@@ -346,6 +360,13 @@ export class OfficeWorld {
     this.outside.receiveShadow = true;
     this.scene.add(this.outside);
     this.disposables.push(this.outside.geometry);
+    this.setExterior(true);
+    // Texturas HD: la sala se rearma una vez cuando terminan de cargar (antes, los canvas de siempre).
+    void preloadHd().then((ok) => {
+      if (!ok || !this.layers.hd || !this.layout || this.disposed) return;
+      this.roomKey = "";
+      this.setLayout(this.layout);
+    });
 
     this.confetti = new Confetti(
       (x, z) => {
@@ -612,9 +633,10 @@ export class OfficeWorld {
 
   /** Prende o apaga capas: la sala se rehace (apagadas, queda como antes de existir). */
   setLayers(layers: RoomLayers) {
-    const same = layers.data === this.layers.data && layers.ceo === this.layers.ceo && layers.zones === this.layers.zones;
+    const next = { ...this.layers, ...layers };
+    const same = next.data === this.layers.data && next.ceo === this.layers.ceo && next.zones === this.layers.zones && next.hd === this.layers.hd;
     if (same) return;
-    this.layers = { ...layers };
+    this.layers = next;
     if (this.ceoOn && !layers.ceo) this.exitCeo();
     // Los monitores de los escritorios son de la capa de datos.
     if (!layers.data) for (const st of this.seated.values()) {
@@ -921,6 +943,52 @@ export class OfficeWorld {
     else this.frameAll();
   }
 
+  /** Lo que cuesta dibujar un frame (promedio de los últimos ~60): draw calls, triángulos y memoria. */
+  private renderAcc = { calls: 0, triangles: 0, n: 0 };
+  private renderStats = { calls: 0, triangles: 0 };
+  private sampleRender() {
+    const r = this.renderer.info.render;
+    const a = this.renderAcc;
+    a.calls += r.calls;
+    a.triangles += r.triangles;
+    if (++a.n >= 60) {
+      this.renderStats = { calls: Math.round(a.calls / a.n), triangles: Math.round(a.triangles / a.n) };
+      a.calls = a.triangles = a.n = 0;
+    }
+  }
+
+  /** Presupuesto de render (QA): draw calls y triángulos por frame, texturas y su memoria estimada en GPU. */
+  renderInfo() {
+    // Por imagen subida (Source), no por objeto Texture: los clones de una textura HD comparten la misma.
+    const seen = new Set<THREE.Source<unknown>>();
+    let bytes = 0;
+    this.scene.traverse((o) => {
+      const mats = (o as THREE.Mesh).material;
+      if (!mats) return;
+      for (const m of Array.isArray(mats) ? mats : [mats]) {
+        for (const v of Object.values(m)) {
+          if (!(v instanceof THREE.Texture) || seen.has(v.source)) continue;
+          seen.add(v.source);
+          const img = v.image as { width?: number; height?: number; videoWidth?: number } | undefined;
+          const w = img?.width ?? 0;
+          const h = img?.height ?? 0;
+          // RGBA8 con mipmaps (≈ 4/3).
+          bytes += w * h * 4 * (v.generateMipmaps && v.minFilter !== THREE.LinearFilter && v.minFilter !== THREE.NearestFilter ? 4 / 3 : 1);
+        }
+      }
+    });
+    const mem = this.renderer.info.memory;
+    return {
+      calls: this.renderStats.calls,
+      triangles: this.renderStats.triangles,
+      textures: mem.textures,
+      geometries: mem.geometries,
+      textureMB: +(bytes / 1048576).toFixed(1),
+      sceneTextures: seen.size,
+      pixelRatio: this.renderer.getPixelRatio(),
+    };
+  }
+
   /** Estado para QA (__hermesOficinaDebug). */
   debug() {
     const p = this.player.pos;
@@ -933,6 +1001,9 @@ export class OfficeWorld {
       floor: { mine: floorAt(p.y), shown: this.shownFloor },
       stairs: this.room?.stairs ?? [],
       fps: this.fps,
+      render: this.renderInfo(),
+      hd: { on: !!this.layers.hd, state: hdState(), applied: !!this.room?.key.endsWith("1"), megabytes: hdMegabytes() },
+      exterior: { on: this.exteriorOn, hour: +this.sky.hour.toFixed(2), forced: this.hourOverride !== null, ...(this.outdoor?.state ?? {}), counts: this.outdoor?.counts ?? null },
       ...this.crowd.debug(),
       ambient: this.crowd.on,
       monitors: Object.fromEntries([...this.seated].filter(([, s]) => s.monitor && !s.leaving).map(([id, s]) => [id, { lines: s.monitor!.shown(), paints: s.monitor!.paints }])),
@@ -1098,7 +1169,7 @@ export class OfficeWorld {
 
     // La sala se reconstruye solo si cambia la planta (tamaño o pods: sus lámparas cuelgan sobre cada uno).
     const f = layout.floor;
-    const roomKey = `${f.minX},${f.maxX},${f.minZ},${f.maxZ}|${layout.pods.map((p) => `${p.project}:${p.desks.length}`).join(",")}|${+this.layers.data}${+this.layers.ceo}${+this.layers.zones}`;
+    const roomKey = `${f.minX},${f.maxX},${f.minZ},${f.maxZ}|${layout.pods.map((p) => `${p.project}:${p.desks.length}`).join(",")}|${+this.layers.data}${+this.layers.ceo}${+this.layers.zones}${+!!(this.layers.hd && hdReady())}`;
     if (!this.room || roomKey !== this.roomKey) {
       this.roomKey = roomKey;
       if (this.room) {
@@ -1106,6 +1177,8 @@ export class OfficeWorld {
         this.room.dispose();
       }
       this.room = buildRoom(layout, this.palette, this.ownerName, this.layers);
+      this.room.setOutdoorViews(this.exteriorOn);
+      this.outdoor?.setBounds(this.room.bounds);
       this.shownFloor = -1;
       this.room.group.traverse((o) => {
         const m = o as THREE.Mesh;
@@ -1751,16 +1824,106 @@ export class OfficeWorld {
 
   /** Luz según la hora real: de día manda el sol, de noche las lámparas. */
   private applyDaylight() {
+    const now = this.now();
+    this.sky = skyAt(hourOf(now));
+    if (this.outdoor && this.exteriorOn) {
+      this.outdoor.update(this.sky, this.scene.fog as THREE.Fog);
+      (this.scene.background as THREE.Color).copy((this.scene.fog as THREE.Fog).color);
+    }
     if (!this.room) return;
-    const d = this.room.tick(new Date());
+    const d = this.room.tick(now);
     this.ceoAgenda?.setData(this.calendar, new Date());
     this.meetingScreen?.setData(this.calendar, new Date());
     const dark = this.palette.dark;
+    const w = this.sky.weights;
     this.sun.intensity = (dark ? 0.55 : 0.7) + d.day * (dark ? 1.05 : 1.4);
-    this.sun.color.set(d.day >= 1 ? "#fff1d6" : d.day <= 0 ? "#b8c6ff" : "#ffc58a");
+    // Sol tibio y largo al atardecer, frío y bajo de noche (la luna), blanco cálido de día.
+    this.sun.color.setRGB(0, 0, 0).add(new THREE.Color("#fff1d6").multiplyScalar(w.day)).add(new THREE.Color("#ffa864").multiplyScalar(w.dusk)).add(new THREE.Color("#a9b8ff").multiplyScalar(w.night));
     this.hemi.intensity = (dark ? 0.8 : 1.05) + d.day * 0.4;
+    // El cielo del hemisferio es el cielo de verdad (un poco aclarado: la sala no debe verse azul).
+    this.hemi.color.set("#fff5e6").lerp(new THREE.Color(this.sky.zenith), this.exteriorOn ? 0.25 : 0);
+    // El sol viene de donde está el sol (sobre el centro de la planta).
+    if (this.room) {
+      const b = this.room.bounds;
+      const s = this.sky.sun;
+      const c = this.sun.target.position.set((b.minX + b.maxX) / 2, 0, (b.minZ + b.maxZ) / 2);
+      this.sun.position.set(c.x + s.x * 40, s.y * 40, c.z + s.z * 40);
+    }
     this.lampBase = 0.6 + (1 - d.day) * 2.6;
     this.applyFloorLamps();
+  }
+
+  /** La hora que manda: la del reloj o la forzada para QA. */
+  private now(): Date {
+    if (this.hourOverride === null) return new Date();
+    const d = new Date();
+    const h = ((this.hourOverride % 24) + 24) % 24;
+    d.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0);
+    return d;
+  }
+
+  /** Fuerza la hora del cielo y la luz (QA y capturas); null vuelve al reloj. */
+  setHour(h: number | null) {
+    this.hourOverride = h === null || !Number.isFinite(h) ? null : h;
+    this.applyDaylight();
+  }
+
+  /**
+   * Capa "Exterior". Prendida: domo, panorama, calle y ciudad; niebla y fondo
+   * con el color del horizonte; las ventanas dejan ver afuera. Apagada: como
+   * antes (fondo de la interfaz y el plano neutro).
+   */
+  private exteriorApplied = false;
+
+  setExterior(on: boolean) {
+    if (this.exteriorApplied && on === this.exteriorOn) return;
+    this.exteriorApplied = true;
+    this.exteriorOn = on;
+    if (on && !this.outdoor) {
+      this.outdoor = new Outdoor(this.palette.dark);
+      this.scene.add(this.outdoor.group);
+      if (this.room) this.outdoor.setBounds(this.room.bounds);
+      this.loadPanorama();
+    }
+    if (this.outdoor) this.outdoor.group.visible = on;
+    this.outside.visible = !on;
+    this.room?.setOutdoorViews(on);
+    const bg = new THREE.Color(this.palette.bg);
+    if (!on) {
+      this.scene.background = bg;
+      this.scene.fog = new THREE.Fog(bg, 60, 130);
+    } else {
+      this.scene.background = new THREE.Color();
+      this.scene.fog = new THREE.Fog(new THREE.Color(), 70, 190);
+    }
+    this.applyDaylight();
+  }
+
+  /** Los tres panoramas (día, atardecer, noche) de public/oficina; si fallan, queda el domo con sus cerros. */
+  private loadPanorama() {
+    if (this.panoramaLoading) return;
+    this.panoramaLoading = true;
+    const loader = new THREE.TextureLoader();
+    const load = (name: string) =>
+      new Promise<THREE.Texture>((res, rej) =>
+        loader.load(
+          `/oficina/panorama-${name}.webp`,
+          (t) => {
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.anisotropy = 4;
+            res(t);
+          },
+          undefined,
+          rej,
+        ),
+      );
+    Promise.all([load("dia"), load("atardecer"), load("noche")])
+      .then(([day, dusk, night]) => {
+        if (!this.outdoor) return [day, dusk, night].forEach((t) => t.dispose());
+        this.disposables.push(day, dusk, night);
+        this.outdoor.setPanorama({ day, dusk, night });
+      })
+      .catch(() => this.outdoor?.setPanorama(null, "error"));
   }
 
   private frame(dt: number, now: number) {
@@ -1908,7 +2071,10 @@ export class OfficeWorld {
     this.room?.animate(t);
     this.confetti.update(dt);
     if (this.audio?.on) this.feedAudio(now);
+    if (this.outdoor && this.exteriorOn) this.outdoor.follow(this.camera);
+    this.renderer.info.reset();
     this.effect.render(this.scene, this.camera);
+    this.sampleRender();
     this.emitAnchors();
 
     this.frames++;
@@ -1985,7 +2151,10 @@ export class OfficeWorld {
     cancelAnimationFrame(this.raf);
   }
 
+  private disposed = false;
+
   dispose() {
+    this.disposed = true;
     this.stop();
     this.observer.disconnect();
     const el = this.renderer.domElement;
@@ -2024,6 +2193,7 @@ export class OfficeWorld {
       (r.material as THREE.Material).dispose();
     }
     this.room?.dispose();
+    this.outdoor?.dispose();
     for (const d of this.disposables) d.dispose();
     this.confetti.dispose();
     this.renderer.dispose();

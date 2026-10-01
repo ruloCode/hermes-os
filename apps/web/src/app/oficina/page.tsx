@@ -144,6 +144,8 @@ declare global {
     };
     /** QA del sonido: su estado (apagado al cargar; prende con un gesto real). */
     __hermesOficinaAudio?: () => unknown;
+    /** Fuerza la hora del cielo y la luz (0..24) para capturar día, atardecer y noche; null vuelve al reloj. */
+    __hermesOficinaHour?: (h: number | null) => void;
     /** QA del modo CEO: sentarse (true) o levantarse (false); devuelve si quedó sentado. */
     __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
@@ -236,7 +238,7 @@ const OFFICE_MODE_KEY = "hermes-office-mode";
 const AMBIENT_KEY = "hermes-oficina-ambiente-v2";
 /** Interruptor "Capas" (todas prendidas por defecto): preferencia de este navegador. */
 const LAYERS_KEY = "hermes-oficina-capas";
-const DEFAULT_LAYERS: OfficeLayers = { data: true, ceo: true, zones: true, games: true, interactions: true };
+const DEFAULT_LAYERS: OfficeLayers = { exterior: true, hd: true, lively: true, data: true, ceo: true, zones: true, games: true, interactions: true };
 /** Lo que el dueño hizo hoy en la oficina (cafés, gata, saludos, logros…): sus acciones reales, por día, en este navegador. */
 const DAY_KEY = "hermes-oficina-hoy";
 function todayKey(): string {
@@ -1658,6 +1660,7 @@ export default function OficinaPage() {
       exit: () => sceneRef.current?.world()?.exitGame(),
     };
     window.__hermesOficinaAudio = () => audioRef.current?.state() ?? null;
+    window.__hermesOficinaHour = (h) => sceneRef.current?.world()?.setHour(h);
     window.__hermesOficinaCeo = (on) => {
       const world = sceneRef.current?.world();
       if (!world) return false;
@@ -1685,6 +1688,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaGame;
       delete window.__hermesOficinaCeo;
       delete window.__hermesOficinaAudio;
+      delete window.__hermesOficinaHour;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 

@@ -37,4 +37,7 @@ export * from "./office-queue.js";
 export * from "./office-spend.js";
 export * from "./office-games.js";
 export * from "./office-play.js";
+export * from "./office-sky.js";
+export * from "./office-people-voices.js";
+export * from "./office-chatter.js";
 export * from "./gamepad.js";

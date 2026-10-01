@@ -227,10 +227,11 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
 
   useEffect(() => {
     if (!layers) return;
-    worldRef.current?.setLayers({ data: layers.data, ceo: layers.ceo, zones: layers.zones });
+    worldRef.current?.setLayers({ data: layers.data, ceo: layers.ceo, zones: layers.zones, hd: layers.hd });
     worldRef.current?.setGamesEnabled(layers.games);
     worldRef.current?.setInteractionsEnabled(layers.interactions);
-  }, [layers?.data, layers?.ceo, layers?.zones, layers?.games, layers?.interactions]);
+    worldRef.current?.setExterior(layers.exterior);
+  }, [layers?.data, layers?.ceo, layers?.zones, layers?.games, layers?.interactions, layers?.hd, layers?.exterior]);
 
   return (
     <div ref={wrapRef} className="absolute inset-0 overflow-hidden">
