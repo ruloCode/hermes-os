@@ -12,9 +12,9 @@
  */
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { platform, tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir, platform, tmpdir } from "node:os";
+import { join, dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { addTokens, assistantUsageDelta, parseModelUsage, ZERO_TOKENS, type ClaudeRunSummary, type RunTokenUsage, type SpendModel } from "@hermes/shared";
@@ -27,6 +27,8 @@ import { childEnv } from "./child-env.js";
 import { registerOfficeWorker, setOfficeMode, setOfficeSpend } from "../office/state.js";
 import { officeModeFromCli } from "@hermes/shared";
 import { closeApprovalsFor, issueRunToken, revokeRunToken } from "../office/approvals.js";
+import { startTrace } from "../office/trace.js";
+import { capField, type CliRunConfig } from "@hermes/shared";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
 const MODELS = new Set([
@@ -124,6 +126,38 @@ function approvalFlags(runId: string, token: string): string[] {
     "--permission-prompt-tool", APPROVAL_TOOL,
     "--disallowedTools", APPROVAL_TOOL,
   ];
+}
+
+/**
+ * Los CLAUDE.md que Claude Code carga para un cwd, con su regla documentada:
+ * el del usuario (~/.claude/CLAUDE.md) y, de la raíz hacia el cwd, el
+ * CLAUDE.md y CLAUDE.local.md de cada carpeta. Los de subcarpetas los carga al
+ * leer archivos ahí (no al arrancar), y los @imports no se expanden aquí.
+ */
+export function claudeMdFor(cwd: string): CliRunConfig["claudeMd"] {
+  const files: string[] = [join(homedir(), ".claude", "CLAUDE.md")];
+  const chain: string[] = [];
+  let dir = resolvePath(cwd);
+  while (dir && dir !== dirname(dir)) {
+    chain.unshift(dir);
+    dir = dirname(dir);
+  }
+  for (const d of chain) files.push(join(d, "CLAUDE.md"), join(d, "CLAUDE.local.md"));
+  const out: CliRunConfig["claudeMd"] = [];
+  for (const f of [...new Set(files)]) {
+    try {
+      const c = capField(readFileSync(f, "utf8"));
+      out.push({ path: f, content: c.value, ...(c.cut ? { cut: c.cut } : {}) });
+    } catch {
+      /* no existe */
+    }
+  }
+  return out;
+}
+
+/** Los args tal como se pasan, con el token del puente de aprobaciones tapado (es una credencial viva del run). */
+function argsForDisplay(args: string[]): string[] {
+  return args.map((a) => a.replace(/("HERMES_APPROVAL_TOKEN"\s*:\s*")[^"]+(")/, "$1[token por run: oculto]$2"));
 }
 
 // Ubica el binario `claude` (el server puede no tener ~/.local/bin en PATH).
@@ -402,6 +436,24 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
   // `--` cierra las opciones: un prompt que empiece con "-" no se lee como flag.
   args.push("--", s.prompt);
 
+  // Traza completa del run: el stream-json CRUDO (init entero incluido) + lo que
+  // Hermes controla de la invocación. El prompt base de Claude Code no se expone.
+  const trace = startTrace({ id: run.id, source: "cli", title: s.prompt, project: projectSlug });
+  const shown = argsForDisplay(args);
+  const mcpAt = shown.indexOf("--mcp-config");
+  trace.setPrompt({
+    kind: "cli",
+    args: shown,
+    cwd,
+    model: s.model,
+    effort: s.effort,
+    permissionMode: s.permissionMode,
+    claudeMd: claudeMdFor(cwd),
+    settings: existsSync(GUARDRAIL_SETTINGS) ? readFileSync(GUARDRAIL_SETTINGS, "utf8") : undefined,
+    mcpConfig: mcpAt >= 0 ? shown[mcpAt + 1] : undefined,
+    prompt: s.prompt,
+  });
+
   let proc: ChildProcess;
   try {
     // stdin cerrado ('ignore') → claude -p no espera 3s por datos por tubería.
@@ -412,6 +464,8 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
   } catch (err) {
     run.status = "error";
     pushLine(run, { t: Date.now(), kind: "error", text: `no se pudo iniciar claude: ${String(err)}` });
+    trace.error(`No se pudo iniciar claude: ${String(err)}`);
+    trace.end();
     void finishSession({
       id: run.sessionId,
       projectSlug: run.projectSlug,
@@ -438,6 +492,7 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
       if (!raw) continue;
       try {
         const ev = JSON.parse(raw);
+        trace.ingest(ev);
         // El init reporta el session_id real del CLI → lo adoptamos para resume
         // (cubre el caso en que el CLI forkee a un id distinto del asignado).
         if (ev?.type === "system" && ev?.subtype === "init" && typeof ev.session_id === "string") {
@@ -496,10 +551,13 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
   proc.stderr?.on("data", (chunk: string) => {
     const text = chunk.trim();
     if (text) pushLine(run, { t: Date.now(), kind: "error", text: text.slice(0, 200) });
+    // stderr suele traer avisos, no fallos del loop: entra a la traza sin contar como error.
+    if (text) trace.error(`stderr: ${text}`, false);
   });
   proc.on("error", (err) => {
     run.status = "error";
     pushLine(run, { t: Date.now(), kind: "error", text: String(err.message) });
+    trace.error(`El proceso falló: ${err.message}`);
   });
   // Checkpoint por tiempo: aunque el run sea corto, su transcript queda en disco
   // a los pocos segundos (un corte/reinicio pierde a lo sumo ~3s de líneas).
@@ -511,6 +569,9 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     revokeRunToken(approvalToken);
     run.exitCode = code ?? undefined;
     if (run.status !== "error") run.status = code === 0 ? "done" : "error";
+    if (run.cancelled) trace.error("Cancelado por el usuario", false);
+    else if (code !== 0) trace.error(`El proceso de claude terminó con código ${code ?? "?"}`);
+    trace.end();
     pushLine(run, {
       t: Date.now(),
       kind: run.status === "done" ? "done" : "error",

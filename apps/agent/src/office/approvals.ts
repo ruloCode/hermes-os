@@ -24,6 +24,15 @@ import {
   type OfficeMode,
 } from "@hermes/shared";
 import { setOfficeApproval } from "./state.js";
+import { liveTrace } from "./trace.js";
+
+const OUTCOME_TEXT: Record<ApprovalOutcome, string> = {
+  allowed: "Aprobado por el humano",
+  denied: "Negado por el humano",
+  "plan-changes": "El humano pidió cambios al plan",
+  timeout: "Nadie respondió en 10 minutos: se negó solo",
+  gone: "La solicitud se cerró (el run terminó o cambió)",
+};
 
 interface Pending {
   approval: OfficeApproval;
@@ -55,6 +64,13 @@ function close(id: string, outcome: ApprovalOutcome, note?: string, mode?: Offic
         }
       : { behavior: "deny", message: denialMessage(outcome, note) };
   decided.set(id, { decision, workerId: p.workerId });
+  // Queda en la traza del personaje: quién decidió y con qué nota (lo que recibe el modelo).
+  liveTrace(p.workerId)?.permission({
+    tool: p.approval.tool,
+    decision: outcome === "allowed" ? "allowed" : "denied",
+    by: outcome === "timeout" ? "timeout" : outcome === "gone" ? "nobody" : "human",
+    text: note ? `${OUTCOME_TEXT[outcome]}. Nota: ${note}` : `${OUTCOME_TEXT[outcome]}${mode ? ` · modo ${mode}` : ""}`,
+  });
   setTimeout(() => decided.delete(id), DECIDED_TTL_MS).unref();
   setOfficeApproval(p.workerId, null, outcome);
   p.resolve(decision);
@@ -87,6 +103,7 @@ export function requestApproval(
   const timer = setTimeout(() => close(id, "timeout"), APPROVAL_TIMEOUT_MS);
   timer.unref();
   pending.set(id, { approval, workerId, input, resolve, timer });
+  liveTrace(workerId)?.permission({ tool, decision: "asked", by: "human", text: `Levanta la mano: ${summary}`, input: detail });
   // Sin personaje en la oficina (p. ej. un run que nació antes de este proceso)
   // no hay dónde levantar la mano: nadie lo va a ver, así que se niega ya.
   if (!setOfficeApproval(workerId, approval)) close(id, "gone");

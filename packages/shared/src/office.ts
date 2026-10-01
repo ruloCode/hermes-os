@@ -12,6 +12,7 @@ import type { AgentActivityEvent } from "./types.js";
 import { FAILS_TO_DESPAIR, outputFailed, toolAction, type OfficeAction } from "./office-actions.js";
 import { PLAN_TOOL, type ApprovalOutcome, type OfficeApproval, type OfficeMode } from "./office-approvals.js";
 import type { WorkerSpend } from "./office-spend.js";
+import type { TraceEvent, TraceInventoryCapture, TracePromptInfo } from "./office-trace.js";
 
 export type OfficeWorkerStatus = "starting" | "working" | "thinking" | "blocked" | "needs_you" | "done" | "error";
 
@@ -76,7 +77,9 @@ export interface OfficeProject {
 export type OfficeUpdate =
   | { type: "snapshot"; state: OfficeState }
   | { type: "worker"; worker: OfficeWorker }
-  | { type: "removed"; id: string };
+  | { type: "removed"; id: string }
+  /** Traza completa de un personaje (eventos nuevos, el prompt al arrancar, el inventario cuando llega). */
+  | { type: "trace"; id: string; events?: TraceEvent[]; prompt?: TracePromptInfo; inventory?: TraceInventoryCapture };
 
 export interface OfficeState {
   workers: OfficeWorker[];

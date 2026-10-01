@@ -64,8 +64,27 @@ import {
   type PlanUsage,
   type QueueState,
   CHAT_LINES,
+  buildInventory,
+  parseTraceJsonl,
+  redactInventory,
+  redactPrompt,
+  redactTrace,
+  reduceOfficeEvent,
+  reduceTrace,
+  registerWorker,
+  traceSummary,
+  traceToJsonl,
+  type TraceEvent,
+  type TraceFile,
 } from "@hermes/shared";
-import { claudeStartRun, hermesGet, hermesPost, hermesPut, sseUrl } from "@/lib/hermes";
+import { claudeStartRun, hermesFetch, hermesGet, hermesPost, hermesPut, sseUrl } from "@/lib/hermes";
+import { downloadText } from "@/lib/download";
+import { traceStore, replayLabel } from "@/lib/oficina/trace-store";
+import { CLIENT_PROJECT_NAME, projectIsPublic, redactBoards, redactCalendar, redactFeed, redactQueue, redactWorker, usePublicViewInfo, useRedactor } from "@/lib/oficina/public-view";
+import { StageView, STAGE_SCENE_STYLE, STAGE_TABS, type StageTab } from "@/components/oficina/trace/StageView";
+import { useTraceView } from "@/components/oficina/trace/useTraceView";
+import { busLines } from "@/components/oficina/trace/LogsView";
+import type { TraceListHandle } from "@/components/oficina/trace/TraceList";
 import { OWNER } from "@/lib/owner";
 import { useTheme } from "@/state/ThemeProvider";
 import { useWorkspace } from "@/state/WorkspaceContext";
@@ -79,7 +98,7 @@ import { useOfficeDictation } from "@/hooks/useOfficeDictation";
 import { VoiceClientTools } from "@/components/VoiceClientTools";
 import { VoiceEventsBridge } from "@/components/VoiceEventsBridge";
 import { OficinaScene, type OficinaSceneHandle } from "@/components/oficina/OficinaScene";
-import { WorkerDrawer } from "@/components/oficina/WorkerDrawer";
+import { WorkerDrawer, useRunStream } from "@/components/oficina/WorkerDrawer";
 import { HireDialog, type HireDialogHandle } from "@/components/oficina/HireDialog";
 import { NpcDialog } from "@/components/oficina/NpcDialog";
 import { BoardPanel } from "@/components/oficina/BoardPanel";
@@ -160,6 +179,12 @@ declare global {
     __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
     __hermesOficinaShareTest?: () => void;
+    /** Modo tarima (P) por código. */
+    __hermesOficinaStage?: (on: boolean) => boolean;
+    /** QA: repite una traza grabada (texto JSONL) en tarima, marcada como repetición; null la detiene. */
+    __hermesOficinaTraceReplay?: (jsonl: string | null, opts?: { speed?: number; label?: string }) => string | null;
+    /** Modo vitrina: true lo fuerza ya, false lo detiene; `idleMs` cambia los 2 min de inactividad (QA). */
+    __hermesOficinaVitrina?: (on: boolean, idleMs?: number) => void;
   }
 }
 
@@ -180,6 +205,11 @@ function useOfficeFeed(): { live: Live; feed: Feed; snapshots: number } {
         return;
       }
       setFeed("live");
+      // La traza va a su store (fuera de React): un re-render por evento del loop tumbaría los fps.
+      if (u.type === "trace") {
+        traceStore.applyLive(u);
+        return;
+      }
       if (u.type === "snapshot") setSnapshots((n) => n + 1);
       setLive((prev) => {
         if (u.type === "snapshot") {
@@ -236,6 +266,40 @@ const NO_WORKERS: OfficeWorker[] = [];
 /** Lo que Hermes sabe de dónde estás cuando lo llamas desde la Oficina. */
 const HERMES_SCOPE =
   "El usuario está en la Oficina de agentes 3D, caminando entre sus agentes con un control. Si pide trabajo en un proyecto, usa work_on_project con ese proyecto: el agente aparece en su escritorio. Si pide algo general, run_task. Responde corto.";
+
+/** Vista pública (oculta secretos, correos, teléfonos, clientes y lo personal): se recuerda en este navegador. */
+const PUBLIC_VIEW_KEY = "hermes-oficina-vista-publica";
+/** Modo vitrina: sin tocar nada este tiempo en tarima, se repite la última traza real grabada. */
+const VITRINA_IDLE_MS = 120_000;
+
+/** Resumen al cerrar un run, solo con datos de su traza (" · 4 vueltas · 11 tools · …"); "" si no hay traza. */
+function closingSummary(id: string): string {
+  const events = traceStore.get(id).events;
+  return events.length ? ` · ${traceSummary(reduceTrace(events))}` : "";
+}
+
+/** Un evento de la traza como evento del bus: así la repetición mueve al personaje con el MISMO reductor de la oficina. */
+function activityOf(ev: TraceEvent, taskId: string): AgentActivityEvent | null {
+  const ts = new Date().toISOString();
+  switch (ev.kind) {
+    case "init":
+      return { ts, kind: "session_start", taskId };
+    case "tool_use":
+      return { ts, kind: "tool_call", taskId, toolName: ev.tool, detail: (ev.input ?? "").slice(0, 300) };
+    case "tool_result":
+      return { ts, kind: "tool_result", taskId, detail: (ev.output ?? "").slice(0, 200) };
+    case "text":
+      return { ts, kind: "text", taskId, detail: (ev.text ?? "").slice(0, 200) };
+    case "guardrail":
+      return { ts, kind: "error", taskId, toolName: ev.tool, detail: `GUARDRAIL: ${ev.text ?? ""}` };
+    case "error":
+      return ev.isError === false ? null : { ts, kind: "error", taskId, detail: (ev.text ?? "").slice(0, 300) };
+    case "result":
+      return ev.isError ? { ts, kind: "error", taskId, toolName: "claude(repetición)", detail: (ev.text ?? "").slice(0, 300) } : { ts, kind: "task_done", taskId, detail: (ev.text ?? "").slice(0, 300) };
+    default:
+      return null;
+  }
+}
 
 /** Modo de los agentes que contratas (localStorage: es una preferencia de este navegador). */
 const OFFICE_MODE_KEY = "hermes-office-mode";
@@ -533,13 +597,43 @@ export default function OficinaPage() {
     [projects],
   );
 
+  // ── Vista pública (tarima, mesa de demos, proyector) ──────────────────
+  // Todo lo que se pinta —traza, prompt, tools, laptops, monitores, pods,
+  // tableros, avisos— pasa por la redacción ANTES de llegar a React o a three.js.
+  // Se recuerda en este navegador y entrar a tarima la prende.
+  const publicInfo = usePublicViewInfo();
+  const [publicView, setPublicViewState] = useState(false);
+  const setPublicView = useCallback((on: boolean) => {
+    setPublicViewState(on);
+    try {
+      localStorage.setItem(PUBLIC_VIEW_KEY, on ? "on" : "off");
+    } catch {
+      /* sin storage: dura la visita */
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PUBLIC_VIEW_KEY) === "on") setPublicViewState(true);
+    } catch {
+      /* sin storage */
+    }
+  }, []);
+  const redact = useRedactor(publicView, publicInfo);
+  const publicCtx = useMemo(() => ({ hiddenTerms: publicInfo?.hiddenTerms ?? [] }), [publicInfo]);
+  const viewProjectName = useCallback(
+    (slug: string) => (publicView && !projectIsPublic(slug, publicInfo) ? CLIENT_PROJECT_NAME : projectName(slug)),
+    [publicView, publicInfo, projectName],
+  );
+  const viewWorkers = useMemo(() => (publicView ? workers.map((w) => redactWorker(w, redact)) : workers), [publicView, workers, redact]);
+  const hiddenCount = publicInfo ? projects.filter((p) => !projectIsPublic(p.slug, publicInfo)).length : 0;
+
   const podInfo = useMemo(() => {
     const names: Record<string, { name: string; count: number }> = {};
-    for (const pod of layout.pods) names[pod.project] = { name: projectName(pod.project), count: counts[pod.project] ?? 0 };
+    for (const pod of layout.pods) names[pod.project] = { name: viewProjectName(pod.project), count: counts[pod.project] ?? 0 };
     return names;
-  }, [layout, counts, projectName]);
+  }, [layout, counts, viewProjectName]);
 
-  const feedLines = useMemo(() => toFeedLines(events), [events]);
+  const feedLines = useMemo(() => (publicView ? redactFeed(toFeedLines(events), redact) : toFeedLines(events)), [events, publicView, redact]);
   const tally = useMemo(() => officeCounts(workers), [workers]);
   const board = useMemo(
     () => [
@@ -557,6 +651,34 @@ export default function OficinaPage() {
   const hiring = !!selectedDesk && !sim;
   const conversationOpen = hiring || !!selectedWorker;
   conversationOpenRef.current = conversationOpen;
+
+  // ── Modo tarima (P) y vitrina ─────────────────────────────────────────
+  const [stage, setStageState] = useState(false);
+  const stageRef = useRef(false);
+  stageRef.current = stage;
+  const [stageTab, setStageTab] = useState<StageTab>("tools");
+  const [stageAgent, setStageAgent] = useState<string | null>(null);
+  const [focusSeq, setFocusSeq] = useState<number | null>(null);
+  const traceListRef = useRef<TraceListHandle | null>(null);
+  const stageInputRef = useRef<HTMLInputElement>(null);
+  /** Repetición en curso: "vitrina" (por inactividad: cualquier tecla vuelve a lo vivo) o "manual" (R, el plan B: se navega). */
+  const [vitrina, setVitrina] = useState<{ id: string; label: string; kind: "vitrina" | "manual" } | null>(null);
+  const vitrinaRef = useRef<{ id: string; label: string; kind: "vitrina" | "manual"; stop: () => void } | null>(null);
+  const idleMsRef = useRef(VITRINA_IDLE_MS);
+  const lastInputRef = useRef(Date.now());
+  /** El agente que se ve en tarima: el elegido, el seleccionado, o el último vivo (la repetición manda en vitrina). */
+  const stageAgentId = useMemo(() => {
+    if (vitrina) return vitrina.id;
+    if (stageAgent && (workers.some((w) => w.id === stageAgent) || traceStore.get(stageAgent).events.length)) return stageAgent;
+    if (selected?.kind === "worker") return selected.id;
+    const active = [...workers].reverse().find((w) => w.status !== "done" && w.status !== "error");
+    return active?.id ?? workers[workers.length - 1]?.id ?? null;
+  }, [vitrina, stageAgent, workers, selected]);
+  const stageAgentIdRef = useRef(stageAgentId);
+  stageAgentIdRef.current = stageAgentId;
+  const stageTraceView = useTraceView(stage ? stageAgentId : null, { on: publicView, ctx: publicCtx });
+  const stageWorker = viewWorkers.find((w) => w.id === stageAgentId);
+  const stageRunLines = useRunStream(stage && stageTab === "logs" && stageWorker?.source === "run" && !sim ? stageWorker.id : null);
 
   const nearLabel = useMemo(() => {
     if (!near) return null;
@@ -814,13 +936,13 @@ export default function OficinaPage() {
     if (!npc) return null;
     const now = new Date(clock);
     if (npc === "reception") {
-      const ctx = { connected: feed === "live", simulated: !!sim, projectName };
+      const ctx = { connected: feed === "live", simulated: !!sim, projectName: viewProjectName };
       return {
-        greeting: receptionSummary(workers, ctx),
+        greeting: receptionSummary(viewWorkers, ctx),
         questions: [
-          { id: "needs_you", label: "¿Quién me necesita?", answer: () => receptionList(workers, "needs_you", ctx) },
-          { id: "working", label: "¿Quién está trabajando?", answer: () => receptionList(workers, "working", ctx) },
-          { id: "done", label: "¿Qué terminó?", answer: () => receptionList(workers, "done", ctx) },
+          { id: "needs_you", label: "¿Quién me necesita?", answer: () => receptionList(viewWorkers, "needs_you", ctx) },
+          { id: "working", label: "¿Quién está trabajando?", answer: () => receptionList(viewWorkers, "working", ctx) },
+          { id: "done", label: "¿Qué terminó?", answer: () => receptionList(viewWorkers, "done", ctx) },
         ],
       };
     }
@@ -844,7 +966,7 @@ export default function OficinaPage() {
       ],
     };
     // controlsLines solo lee su argumento.
-  }, [npc, clock, feed, sim, projectName, workers, snapshot, scheduled, pauseUntil, usingPad]);
+  }, [npc, clock, feed, sim, viewProjectName, viewWorkers, snapshot, scheduled, pauseUntil, usingPad]);
 
   const npcLines = npcView ? (npcQuestion ? (npcView.questions.find((q) => q.id === npcQuestion)?.answer() ?? npcView.greeting) : npcView.greeting) : [];
 
@@ -1053,6 +1175,275 @@ export default function OficinaPage() {
     [sim, deciding, toast, voice, modeFor],
   );
 
+  // ── Modo tarima: entrar/salir, pestañas, agente, tarea, vitrina ──────
+  const stopVitrina = useCallback(() => {
+    const v = vitrinaRef.current;
+    if (!v) return;
+    vitrinaRef.current = null;
+    v.stop();
+    traceStore.drop(v.id);
+    setVitrina(null);
+    setSim(null);
+    setStageAgent(null);
+    lastInputRef.current = Date.now();
+  }, []);
+
+  /**
+   * Repite una traza real grabada (la última del agente; sin agente, la que viene
+   * con la página) con el mismo reductor y la misma UI, siempre marcada
+   * "repetición de las HH:MM". En bucle, con 8 s de pausa al final.
+   */
+  const startVitrina = useCallback(
+    async (given?: TraceFile, labelOverride?: string, speed?: number, kind: "vitrina" | "manual" = "vitrina"): Promise<string | null> => {
+      stopVitrina();
+      let file = given;
+      if (!file) {
+        try {
+          const list = await hermesGet<{ traces: { meta: { id: string }; done: boolean; events: number }[] }>("/office/traces?limit=12");
+          const pick = list.traces.find((t) => t.done && t.events > 2);
+          if (pick) file = await hermesGet<TraceFile>(`/office/trace/${encodeURIComponent(pick.meta.id)}`);
+        } catch {
+          /* sin agente: la traza que viene con la página */
+        }
+        if (!file) {
+          try {
+            const r = await fetch("/oficina/traza-demo.jsonl");
+            if (r.ok) file = parseTraceJsonl(await r.text());
+          } catch {
+            /* nada que repetir */
+          }
+        }
+      }
+      if (!file?.meta || !file.events.length) {
+        toast("error", "No hay ninguna traza grabada para repetir");
+        return null;
+      }
+      const meta = file.meta;
+      const id = `replay-${meta.id}`;
+      const label = labelOverride ?? replayLabel(meta.startedAt);
+      const map = new Map<string, OfficeWorker>();
+      const push = () => setSim({ workers: [...map.values()].map((w) => ({ ...w, lines: [...w.lines], task: { ...w.task } })), projects: live.projects, machine: label, ts: new Date().toISOString() });
+      let stopReplay = () => {};
+      let hold: ReturnType<typeof setTimeout> | null = null;
+      const f = file;
+      const loop = () => {
+        map.clear();
+        registerWorker(map, { id, source: meta.source === "cli" ? "run" : "task", project: meta.project, title: meta.title, machine: label });
+        push();
+        stopReplay = traceStore.replay(id, f, label, {
+          speed,
+          onEvent: (ev) => {
+            const a = activityOf(ev, id);
+            if (!a) return;
+            reduceOfficeEvent(map, a, Date.now());
+            push();
+          },
+          onEnd: () => {
+            hold = setTimeout(loop, 8000);
+          },
+        });
+      };
+      loop();
+      vitrinaRef.current = {
+        id,
+        label,
+        kind,
+        stop: () => {
+          stopReplay();
+          if (hold) clearTimeout(hold);
+        },
+      };
+      setVitrina({ id, label, kind });
+      setStageAgent(id);
+      setFocusSeq(null);
+      return id;
+    },
+    [stopVitrina, toast, live.projects],
+  );
+
+  const setStage = useCallback(
+    (on: boolean) => {
+      if (on === stageRef.current) return;
+      lastInputRef.current = Date.now();
+      if (on) {
+        // Tarima: vista pública prendida, nada encima, la cámara arriba siguiendo al agente.
+        setPublicView(true);
+        voice.cancel();
+        setSelected((sel) => (sel?.kind === "worker" ? sel : null));
+        setWallBoard(null);
+        setQueueOpen(false);
+        setSpendOpen(false);
+        setControlOpen(false);
+        setLookOpen(false);
+        setLayersOpen(false);
+        closeNpc();
+        sceneRef.current?.world()?.setMode("aerial");
+      } else {
+        stopVitrina();
+        setStageAgent(null);
+      }
+      setStageState(on);
+    },
+    [setPublicView, voice, closeNpc, stopVitrina],
+  );
+
+  const setStageRef = useRef(setStage);
+  setStageRef.current = setStage;
+
+  const cycleStageTab = useCallback((dir: 1 | -1) => {
+    setStageTab((t) => STAGE_TABS[(STAGE_TABS.indexOf(t) + dir + STAGE_TABS.length) % STAGE_TABS.length]);
+  }, []);
+
+  const cycleStageAgent = useCallback(
+    (dir: 1 | -1) => {
+      if (vitrinaRef.current || !workers.length) return;
+      const i = stageAgentIdRef.current ? workers.findIndex((w) => w.id === stageAgentIdRef.current) : -1;
+      const next = workers[(i + dir + workers.length) % workers.length];
+      setStageAgent(next.id);
+      setFocusSeq(null);
+    },
+    [workers],
+  );
+
+  const toggleStageDictation = useCallback(() => {
+    if (sim || vitrinaRef.current) return;
+    if (voice.state === "listening") voice.stop();
+    else if (voice.state !== "transcribing") voice.start();
+  }, [voice, sim]);
+
+  /** La tarea va al escritorio General: una tarea del Agent SDK (POST /tasks), el agente de la tarima. */
+  const submitStageTask = useCallback(async () => {
+    const text = voice.text.trim();
+    if (!text || sim || vitrinaRef.current || sending || voice.state === "listening" || voice.state === "transcribing") return;
+    setSending(true);
+    try {
+      const r = await hermesPost<{ task_id?: string }>("/tasks", { prompt: text });
+      if (r.task_id) {
+        talkedRef.current.add(r.task_id);
+        setStageAgent(r.task_id);
+        setFocusSeq(null);
+      }
+      voice.cancel();
+      toast("start", "Tarea enviada a Hermes (General)");
+    } catch (err) {
+      toast("error", `No se pudo enviar: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSending(false);
+    }
+  }, [voice, sim, sending, toast]);
+
+  /** Exporta la traza en JSONL con la vista pública aplicada (del agente; una repetición se exporta aquí mismo). */
+  const exportTrace = useCallback(async () => {
+    const id = stageAgentIdRef.current;
+    if (!id) return;
+    const data = traceStore.get(id);
+    try {
+      let text: string;
+      if (data.replay) {
+        const prompt = data.prompt?.kind === "sdk" ? redactPrompt(data.prompt, publicCtx) : data.prompt;
+        text = traceToJsonl({ meta: data.meta, events: redactTrace(data.events, publicCtx), prompt, inventory: redactInventory(data.inventory, publicCtx), config: data.config });
+      } else {
+        const r = await hermesFetch(`/office/trace/${encodeURIComponent(id)}/export?view=public`);
+        if (!r.ok) throw new Error(`el agente respondió ${r.status}`);
+        text = await r.text();
+      }
+      downloadText(`traza-${id}-publica.jsonl`, text, "application/x-ndjson");
+    } catch (err) {
+      toast("error", `No se pudo exportar: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [publicCtx, toast]);
+
+  // Tarima: clic en un personaje con error → la traza salta a su último error sin corregir (cuando ya cargó).
+  const errorJumpRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!stage || errorJumpRef.current !== stageAgentId) return;
+    const errs = stageTraceView.reduced.errors;
+    if (!errs.length) return;
+    errorJumpRef.current = null;
+    const target = [...errs].reverse().find((x) => !x.fixedBy) ?? errs[errs.length - 1];
+    requestAnimationFrame(() => traceListRef.current?.jumpTo(target.seq));
+  }, [stage, stageAgentId, stageTraceView.reduced.errors]);
+
+  // Tarima: la cámara (vista aérea) sigue el escritorio del agente.
+  const stageSeat = stageAgentId ? seats.get(stageAgentId) : undefined;
+  useEffect(() => {
+    if (!stage || !stageAgentId) return;
+    const id = requestAnimationFrame(() => {
+      const world = sceneRef.current?.world();
+      if (!world) return;
+      if (world.mode !== "aerial") world.setMode("aerial");
+      world.focus({ kind: "worker", id: stageAgentId });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [stage, stageAgentId, stageSeat]);
+
+  // Tarima: el teclado es de la tarima (fase de captura: ni el dueño camina ni la página reacciona).
+  const stageKeysRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  stageKeysRef.current = (e: KeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    lastInputRef.current = Date.now();
+    // En vitrina, cualquier tecla vuelve a lo vivo (y no hace nada más).
+    if (vitrinaRef.current?.kind === "vitrina") {
+      stopVitrina();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    if (isTyping(e)) {
+      if (e.key === "Escape") {
+        (e.target as HTMLElement).blur();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      return;
+    }
+    const k = e.key;
+    let handled = true;
+    const asking = workers.find((w) => w.id === stageAgentIdRef.current && w.approval);
+    if (asking && (k === "a" || k === "A" || k === "b" || k === "B")) void decideApproval(asking, k === "a" || k === "A");
+    else if (k === "Escape" || k === "p" || k === "P") setStage(false);
+    else if (k === "1" || k === "2" || k === "3") setStageTab(STAGE_TABS[Number(k) - 1]);
+    else if (k === "ArrowLeft" || k === "ArrowRight") cycleStageTab(k === "ArrowLeft" ? -1 : 1);
+    else if (k === "ArrowUp" || k === "k") traceListRef.current?.move(-1);
+    else if (k === "ArrowDown" || k === "j") traceListRef.current?.move(1);
+    else if (k === "Enter") traceListRef.current?.toggle();
+    else if (k === "End" || k === "g" || k === "G") traceListRef.current?.follow();
+    else if (k === "Tab") cycleStageAgent(e.shiftKey ? -1 : 1);
+    else if (k === "n" || k === "N") stageInputRef.current?.focus();
+    else if (k === "m" || k === "M") toggleStageDictation();
+    else if (k === "o" || k === "O") setPublicView(!publicView);
+    // R: plan B — repetir la última traza real (marcada como repetición) o volver a lo vivo.
+    else if (k === "r" || k === "R") {
+      if (vitrinaRef.current) stopVitrina();
+      else void startVitrina(undefined, undefined, undefined, "manual");
+    } else handled = false;
+    if (handled) e.preventDefault();
+    // Nada de la tarima llega a la oficina (WASD, V, E, 1-3…).
+    e.stopImmediatePropagation();
+  };
+  useEffect(() => {
+    if (!stage) return;
+    const onKey = (e: KeyboardEvent) => stageKeysRef.current(e);
+    const onPointer = () => {
+      lastInputRef.current = Date.now();
+      if (vitrinaRef.current?.kind === "vitrina") stopVitrina();
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("wheel", onPointer, true);
+    // Modo vitrina: 2 min sin tocar nada (ni dictando ni enviando) → repite la última traza real.
+    const idle = setInterval(() => {
+      if (vitrinaRef.current || voiceRef.current.state === "listening" || voiceRef.current.state === "transcribing") return;
+      if (Date.now() - lastInputRef.current >= idleMsRef.current) void startVitrina();
+    }, 1000);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("wheel", onPointer, true);
+      clearInterval(idle);
+    };
+  }, [stage, stopVitrina, startVitrina]);
+
   // La respuesta del agente al que le hablaste, en voz alta (y el control vibra).
   useEffect(() => {
     for (const w of workers) {
@@ -1060,16 +1451,16 @@ export default function OficinaPage() {
       if (w.status !== "done" && w.status !== "error") continue;
       spokenRef.current.add(w.id);
       pad.rumble(w.status === "done" ? "success" : "alert");
-      toast(w.status === "done" ? "done" : "error", w.status === "done" ? `🔊 ${w.name} respondió` : `${w.name} falló`);
+      toast(w.status === "done" ? "done" : "error", w.status === "done" ? `🔊 ${w.name} respondió${closingSummary(w.id)}` : `${w.name} falló${closingSummary(w.id)}`);
       if (replyVoice && !inCall) {
-        speak(w.status === "done" ? (w.lastText ?? w.task.summary) : `No pude terminar: ${w.task.summary}`, () => {
+        speak(redact(w.status === "done" ? (w.lastText ?? w.task.summary) : `No pude terminar: ${w.task.summary}`), () => {
           // Ida y vuelta: si sigues en su panel, el micrófono vuelve a escucharte.
           const sel = selectedRef.current;
           if (sel?.kind === "worker" && sel.id === w.id && voiceRef.current.state === "idle") voiceRef.current.start();
         });
       }
     }
-  }, [workers, replyVoice, inCall, toast]);
+  }, [workers, replyVoice, inCall, toast, redact]);
 
   const cycleAgent = useCallback(
     (dir: 1 | -1) => {
@@ -1120,6 +1511,37 @@ export default function OficinaPage() {
   const onPadPress = (b: PadButton) => {
     markPad(true);
     const world = sceneRef.current?.world();
+    // Tarima: cruceta ▲▼ recorre la traza y ◀▶ las pestañas; A despliega (o envía lo dictado);
+    // X dicta; B cancela o vuelve al final; LB/RB otro agente; View sale. En vitrina, cualquier botón vuelve a lo vivo.
+    if (stageRef.current) {
+      lastInputRef.current = Date.now();
+      if (vitrinaRef.current?.kind === "vitrina") {
+        stopVitrina();
+        return;
+      }
+      const v = voiceRef.current;
+      const asking = workers.find((w) => w.id === stageAgentIdRef.current && w.approval);
+      if (asking && (b === "A" || b === "B")) {
+        void decideApproval(asking, b === "A");
+        return;
+      }
+      if (b === "UP") traceListRef.current?.move(-1);
+      else if (b === "DOWN") traceListRef.current?.move(1);
+      else if (b === "LEFT" || b === "RIGHT") cycleStageTab(b === "LEFT" ? -1 : 1);
+      else if (b === "A") {
+        if (v.state === "ready" && v.text.trim()) void submitStageTask();
+        else traceListRef.current?.toggle();
+      } else if (b === "X") toggleStageDictation();
+      else if (b === "B") {
+        if (v.state === "listening" || v.state === "transcribing") v.cancel();
+        else traceListRef.current?.follow();
+      } else if (b === "LB" || b === "RB") cycleStageAgent(b === "LB" ? -1 : 1);
+      else if (b === "VIEW") setStage(false);
+      else if (b === "Y") toggleCall();
+      else if (b === "MENU") setHelpOpen((x) => !x);
+      pad.rumble("tap");
+      return;
+    }
     // En un minijuego, A se lee sostenida (onPadFrame) y B sale; el resto no hace nada.
     if (gameRef.current) {
       if (b === "B") world?.exitGame();
@@ -1230,6 +1652,15 @@ export default function OficinaPage() {
   const onPadFrame = (s: PadState | null) => {
     const world = sceneRef.current?.world();
     if (!world) return;
+    // En tarima el dueño no camina: el control es de la traza.
+    if (stageRef.current) {
+      if (s && (s.move.x || s.move.y || s.look.x || s.look.y)) {
+        lastInputRef.current = Date.now();
+        if (vitrinaRef.current?.kind === "vitrina") stopVitrina();
+      }
+      world.setPad({ move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, run: false, zoom: 0 });
+      return;
+    }
     if (!s) {
       world.setPad({ move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, run: false, zoom: 0 });
       return;
@@ -1313,8 +1744,8 @@ export default function OficinaPage() {
         toast("start", `✋ ${w.name} te pide permiso: ${w.approval?.summary ?? ""}`);
         pad.rumble("alert");
       } else if (was && was !== w.status && !talkedRef.current.has(w.id)) {
-        if (w.status === "done") toast("done", `${w.name} terminó`);
-        else if (w.status === "error") toast("error", `${w.name} falló`);
+        if (w.status === "done") toast("done", `${w.name} terminó${closingSummary(w.id)}`);
+        else if (w.status === "error") toast("error", `${w.name} falló${closingSummary(w.id)}`);
       }
     }
   }, [workers, sim, snapshots, projectName, toast]);
@@ -1360,6 +1791,16 @@ export default function OficinaPage() {
   // Clic o E/A sobre el mundo: abre la conversación (y en aérea, la cámara va ahí).
   const onClick = useCallback(
     (hit: OfficeHit | null) => {
+      // En tarima, clic en un personaje = verlo por dentro (y si falló, su error).
+      if (stageRef.current) {
+        if (hit?.kind === "worker" && !vitrinaRef.current) {
+          setStageAgent(hit.id);
+          setFocusSeq(null);
+          const w = workers.find((x) => x.id === hit.id);
+          if (w && (w.status === "error" || w.status === "blocked")) errorJumpRef.current = hit.id;
+        }
+        return;
+      }
       if (!hit) {
         closeConversation();
         closeNpc();
@@ -1429,7 +1870,7 @@ export default function OficinaPage() {
       }
       sceneRef.current?.world()?.focus(hit);
     },
-    [openConversation, closeConversation, openNpc, closeNpc, startShare, stopShare, refreshSpend],
+    [openConversation, closeConversation, openNpc, closeNpc, startShare, stopShare, refreshSpend, workers],
   );
 
   const pickFromRoster = useCallback((w: OfficeWorker) => {
@@ -1489,6 +1930,11 @@ export default function OficinaPage() {
             return;
           }
         }
+      }
+      // P: modo tarima (la traza grande, para el proyector).
+      if ((e.key === "p" || e.key === "P") && !stageRef.current && !conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !dataPanelRef.current && !gameRef.current && !npcOpenRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey) {
+        setStageRef.current(true);
+        return;
       }
       // 1, 2, 3: ver ese piso desde arriba (fuera de una conversación y de un campo de texto).
       if (!conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !dataPanelRef.current && !gameRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
@@ -1636,8 +2082,32 @@ export default function OficinaPage() {
   focusRef.current = focusUntil;
   const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue, spend, plan, spendOpen, controlOpen });
   debugRef.current = { workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue, spend, plan, spendOpen, controlOpen };
+  const stageDebugRef = useRef({ stage, stageTab, publicView, publicCtx, publicInfo, vitrina, hiddenCount, focusSeq });
+  stageDebugRef.current = { stage, stageTab, publicView, publicCtx, publicInfo, vitrina, hiddenCount, focusSeq };
+  const startVitrinaRef = useRef(startVitrina);
+  startVitrinaRef.current = startVitrina;
   useEffect(() => {
     window.__hermesOficinaSim = (state, count) => setSim(state === "demo" ? demoOfficeState(live.projects, live.machine || "sim", count) : state);
+    window.__hermesOficinaStage = (on) => {
+      setStageRef.current(on);
+      return on;
+    };
+    window.__hermesOficinaTraceReplay = (jsonl, opts) => {
+      if (jsonl === null) {
+        stopVitrina();
+        return null;
+      }
+      const file = parseTraceJsonl(jsonl);
+      if (!file.meta) return null;
+      setStageRef.current(true);
+      void startVitrinaRef.current(file, opts?.label, opts?.speed, "manual");
+      return `replay-${file.meta.id}`;
+    };
+    window.__hermesOficinaVitrina = (on, idleMs) => {
+      if (idleMs !== undefined) idleMsRef.current = idleMs;
+      if (on) void startVitrinaRef.current();
+      else stopVitrina();
+    };
     window.__hermesOficinaDebug = () => {
       const d = debugRef.current;
       const world = sceneRef.current?.world();
@@ -1666,7 +2136,68 @@ export default function OficinaPage() {
         planUsage: d.plan === undefined ? "loading" : d.plan ? { available: d.plan.available, windows: d.plan.windows.map((w) => ({ label: w.label, utilization: w.utilization, resetsAt: w.resetsAt })) } : null,
         spendData: d.spend === undefined ? "loading" : d.spend ? { costUsd: d.spend.today.costUsd, runs: d.spend.today.runs, day: d.spend.today.day } : null,
         boards: d.boards ? { issues: d.boards.issues.items.length, prs: d.boards.prs.items.length, services: d.boards.services.items.length } : null,
+        ...traceDebug(),
         ...(world?.debug() ?? { fps: 0 }),
+      };
+    };
+    /** Traza, inventario, system prompt y tarima del agente que se ve (en tarima) o del seleccionado. */
+    const traceDebug = () => {
+      const st = stageDebugRef.current;
+      const sel = debugRef.current.selected;
+      const id = st.stage ? stageAgentIdRef.current : sel?.kind === "worker" ? sel.id : null;
+      const data = traceStore.get(id);
+      const r = reduceTrace(data.events);
+      const cards = buildInventory({
+        source: data.meta?.source ?? r.init?.source ?? "sdk",
+        init: r.init,
+        capture: st.publicView ? redactInventory(data.inventory, st.publicCtx) : data.inventory,
+        sdk: data.config?.sdk,
+        hermesTools: data.config?.sdk?.hermesTools,
+        cliDenyRules: data.config?.cliDenyRules,
+        reduced: r,
+      });
+      const p = data.prompt;
+      return {
+        trace: id
+          ? {
+              id,
+              status: data.status,
+              replay: data.replay ?? null,
+              events: data.events.map((e) => ({ seq: e.seq, kind: e.kind, turn: e.turn, tool: e.tool ?? null, isError: e.isError ?? false })),
+              errors: r.errors.map((e) => ({ seq: e.seq, step: e.step ?? null, tool: e.tool ?? null, fixedBy: e.fixedBy ?? null })),
+              steps: r.steps.map((x) => ({ n: x.n, tool: x.tool, useSeq: x.useSeq, resultSeq: x.resultSeq ?? null, ok: x.ok ?? null })),
+              turns: r.turns,
+              done: r.done,
+              summary: data.events.length ? traceSummary(r) : "",
+            }
+          : null,
+        inventory: cards.map((c) => ({ name: c.name, origin: c.origin, permission: c.permission, steps: c.steps, active: c.active, hasDescription: !!c.description, loaded: c.loaded ?? null })),
+        systemPrompt: !p
+          ? null
+          : p.kind === "sdk"
+            ? {
+                kind: "sdk",
+                raw: p.raw,
+                sections: p.sections.map((x) => ({ id: x.id, title: x.title, why: x.why, personal: !!x.personal, start: x.start, end: x.end })),
+                withoutWhy: p.sections.filter((x) => !x.why).map((x) => x.id),
+                redacted: (() => {
+                  const rp = redactPrompt(p, st.publicCtx);
+                  return { raw: rp.raw, sections: rp.sections.map((x) => ({ id: x.id, start: x.start, end: x.end })) };
+                })(),
+              }
+            : { kind: "cli", args: p.args, claudeMd: p.claudeMd.map((m) => m.path), mode: p.permissionMode, model: p.model },
+        stage: {
+          on: st.stage,
+          tab: st.stageTab,
+          publicView: st.publicView,
+          vitrina: st.vitrina?.label ?? null,
+          replayKind: st.vitrina?.kind ?? null,
+          focusSeq: st.focusSeq,
+          agentId: st.stage ? stageAgentIdRef.current : null,
+          hiddenProjects: st.hiddenCount,
+          hiddenTerms: st.publicCtx.hiddenTerms.length,
+          configured: st.publicInfo?.configured ?? null,
+        },
       };
     };
     window.__hermesOficinaScreenOf = (hit) => sceneRef.current?.world()?.screenOf(hit) ?? null;
@@ -1760,8 +2291,11 @@ export default function OficinaPage() {
       delete window.__hermesOficinaSay;
       delete window.__hermesOficinaPixels;
       delete window.__hermesOficinaTour;
+      delete window.__hermesOficinaStage;
+      delete window.__hermesOficinaTraceReplay;
+      delete window.__hermesOficinaVitrina;
     };
-  }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
+  }, [live.projects, live.machine, sim, voice, setAmbient, startShare, stopVitrina]);
 
   const title = OWNER ? `Oficina de ${OWNER}` : "Oficina de agentes";
 
@@ -1771,11 +2305,13 @@ export default function OficinaPage() {
       <VoiceClientTools projects={vaultProjects} onFocusProject={ws.focusProject} onShowPanel={ws.showPanel} onWork={ws.launchClaudeRun} />
       <VoiceEventsBridge events={events} />
 
+      {/* En tarima el canvas se va al hueco de la derecha (la escena se redimensiona sola). */}
+      <div style={stage ? STAGE_SCENE_STYLE : undefined} className={stage ? "z-[41] overflow-hidden rounded-xl border border-line" : "absolute inset-0"} data-scene-wrap>
       <OficinaScene
         key={theme.resolved}
         ref={sceneRef}
         layout={layout}
-        workers={workers}
+        workers={viewWorkers}
         seats={seats}
         selected={selected}
         podInfo={podInfo}
@@ -1783,9 +2319,9 @@ export default function OficinaPage() {
         look={look}
         feed={feedLines}
         board={board}
-        nearLabel={npc || wallBoard || queueOpen || spendOpen || controlOpen || gameHud ? null : nearLabel}
+        nearLabel={npc || wallBoard || queueOpen || spendOpen || controlOpen || gameHud || stage ? null : nearLabel && redact(nearLabel)}
         nearKey={pad.connected && usingPad ? "A" : "E"}
-        inputEnabled={!hiring && !npc && !wallBoard && !whiteboardOpen && !queueOpen && !spendOpen && !controlOpen}
+        inputEnabled={!hiring && !npc && !wallBoard && !whiteboardOpen && !queueOpen && !spendOpen && !controlOpen && !stage}
         onClick={onClick}
         onNear={setNear}
         onMode={setModeState}
@@ -1797,30 +2333,34 @@ export default function OficinaPage() {
         voices={team.voiceNames}
         speakingProbe={team.speakingWorker}
         ambient={{ on: ambient, sessions: workers.length, seed: ambientSeed }}
-        boards={boards}
+        boards={publicView ? redactBoards(boards, redact) : boards}
         nicks={nicks}
         whiteboard={whiteboardImage}
-        queue={queue}
+        queue={publicView ? redactQueue(queue, redact) : queue}
         spend={spend}
         plan={plan}
-        projectName={projectName}
+        projectName={viewProjectName}
         onGame={setGameHud}
         onCeo={(on) => {
           setCeo(on);
           if (!on) setCeoPick(null);
         }}
-        calendar={snapshot?.calendar ?? null}
+        calendar={publicView ? redactCalendar(snapshot?.calendar ?? null) : (snapshot?.calendar ?? null)}
         layers={layers}
         audio={audioRef.current}
         onActivity={setActivity}
         onStat={(st, detail) => addStat(st, detail)}
         onPropAction={onPropAction}
-        chatter={chatter}
+        chatter={() => redact(chatter())}
         peopleVoices={peopleVoicesRef.current}
-        chatContext={chatContext}
+        chatContext={() => {
+          const c = chatContext();
+          return { ...c, doneNick: c.doneNick ? redact(c.doneNick) : c.doneNick };
+        }}
       />
+      </div>
 
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
+      <div className={`pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3 ${stage ? "hidden" : ""}`}>
         <div className="flex flex-col items-start gap-2">
           <StatusCard title={title} machine={machine} feed={feed} simulated={!!sim} total={workers.length} tally={tally} daylight={daylight} />
           <FloorPicker floor={floor} mode={mode} onPick={(f) => sceneRef.current?.world()?.setFloorView(f)} />
@@ -1935,6 +2475,12 @@ export default function OficinaPage() {
             onAmbient={() => setAmbient(!ambient)}
             extra={
               <>
+                <ToolButton active={stage} onClick={() => setStage(!stage)} title="Modo tarima (P): la traza del loop en grande, para el proyector">
+                  ▣ Tarima
+                </ToolButton>
+                <ToolButton active={publicView} onClick={() => setPublicView(!publicView)} title="Vista pública: oculta secretos, correos, teléfonos, proyectos de clientes y lo personal en TODO lo que se pinta">
+                  {publicView ? "👁 Pública" : "👁 Privada"}
+                </ToolButton>
                 <ToolButton active={soundOn} onClick={() => void toggleSound()} title="Sonido de ambiente procedural (apagado por defecto; baja solo durante una llamada)">
                   {soundOn ? "🔈 Sonido" : "🔇 Sonido"}
                 </ToolButton>
@@ -1976,8 +2522,8 @@ export default function OficinaPage() {
           ) : null}
           {!selectedWorker && !lookOpen ? (
             <TeamRoster
-              workers={workers}
-              projectName={projectName}
+              workers={viewWorkers}
+              projectName={viewProjectName}
               selectedId={selected?.kind === "worker" ? selected.id : null}
               onPick={pickFromRoster}
               nicks={nicks}
@@ -2010,9 +2556,48 @@ export default function OficinaPage() {
         </div>
       ) : null}
 
-      <Toasts toasts={toasts} />
+      {stage ? (
+        <StageView
+          traceId={stageAgentId}
+          worker={stageWorker}
+          nick={stageAgentId ? nicks.get(stageAgentId) : undefined}
+          projectName={stageWorker ? viewProjectName(stageWorker.project) : stageTraceView.data.meta ? viewProjectName(stageTraceView.data.meta.project) : ""}
+          view={stageTraceView}
+          redact={redact}
+          publicView={publicView}
+          publicCtx={publicCtx}
+          hiddenCount={hiddenCount}
+          onTogglePublic={() => setPublicView(!publicView)}
+          tab={stageTab}
+          onTab={setStageTab}
+          logs={stageWorker?.source === "run" && !sim ? stageRunLines : stageAgentId ? busLines(events, stageAgentId) : []}
+          logsSource={stageWorker?.source === "run" && !sim ? "Stream del run de claude -p (lo mismo que la consola, con stderr)" : "Eventos del bus de actividad de este agente (lo que ven el feed y los monitores, recortado)"}
+          replay={vitrina?.label ?? null}
+          replayHint={vitrina ? (vitrina.kind === "vitrina" ? "cualquier tecla vuelve a lo vivo" : "R vuelve a lo vivo") : undefined}
+          simulated={!!sim && !vitrina}
+          focusSeq={focusSeq}
+          onFocusSeq={setFocusSeq}
+          listRef={traceListRef}
+          voice={voice}
+          sending={sending}
+          onSubmit={() => void submitStageTask()}
+          onExit={() => setStage(false)}
+          onExport={stageAgentId ? () => void exportTrace() : null}
+          agentIndex={Math.max(0, workers.findIndex((w) => w.id === stageAgentId))}
+          agentCount={workers.length}
+          padConnected={pad.connected && usingPad}
+          inputRef={stageInputRef}
+          deciding={deciding}
+          onDecide={(allow) => {
+            const w = workers.find((x) => x.id === stageAgentId);
+            if (w) void decideApproval(w, allow);
+          }}
+        />
+      ) : null}
 
-      {activity && !gameHud && !ceo ? (
+      <Toasts toasts={publicView ? toasts.map((t) => ({ ...t, text: redact(t.text) })) : toasts} />
+
+      {activity && !gameHud && !ceo && !stage ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-16 z-20 flex justify-center px-3">
           <div className="flex min-w-60 flex-col gap-1 rounded-xl border border-line bg-panel/90 px-4 py-2 text-sm shadow-lg backdrop-blur-md" data-activity>
             <span className="text-text">{activity.label}</span>
@@ -2027,14 +2612,14 @@ export default function OficinaPage() {
       ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
-        {gameHud || ceo ? null : <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />}
+        {gameHud || ceo || stage ? null : <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />}
         {ceo ? (
           <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel/90 px-4 py-2 text-sm text-text-dim shadow-lg backdrop-blur-md" data-ceo-bar>
             <span className="font-medium text-text">Modo CEO</span>
             <span>
               {(() => {
-                const w = workers.find((x) => x.id === ceoPick);
-                return w ? `${nicks.get(w.id) ?? w.name} · ${projectName(w.project)}` : workers.length ? "Elige un agente" : "Sin agentes vivos";
+                const w = viewWorkers.find((x) => x.id === ceoPick);
+                return w ? `${nicks.get(w.id) ?? w.name} · ${viewProjectName(w.project)}` : workers.length ? "Elige un agente" : "Sin agentes vivos";
               })()}
             </span>
             <span>{pad.connected && usingPad ? "LB/RB otro agente · A abrir · B levantarte" : "← → otro agente · Enter abrir · Esc levantarte"}</span>
@@ -2045,10 +2630,11 @@ export default function OficinaPage() {
         ) : null}
       </div>
 
-      {selectedWorker ? (
+      {selectedWorker && !stage ? (
         <WorkerDrawer
-          worker={selectedWorker}
-          projectName={projectName(selectedWorker.project)}
+          key={selectedWorker.id}
+          worker={viewWorkers.find((w) => w.id === selectedWorker.id) ?? selectedWorker}
+          projectName={viewProjectName(selectedWorker.project)}
           simulated={!!sim}
           onClose={closeConversation}
           voice={voice}
@@ -2060,10 +2646,13 @@ export default function OficinaPage() {
           mode={modeFor(selectedWorker)}
           onModeChange={(m) => setWorkerMode(selectedWorker, m)}
           model={ws.claudeConfig.model}
+          redact={redact}
+          publicView={publicView}
+          publicCtx={publicCtx}
         />
       ) : null}
 
-      {hiring && selectedDesk ? (
+      {hiring && selectedDesk && !stage ? (
         <HireDialog
           ref={hireRef}
           project={selectedDesk.project}
@@ -2109,7 +2698,7 @@ export default function OficinaPage() {
       {wallBoard ? (
         <BoardPanel
           id={wallBoard}
-          data={boards}
+          data={publicView ? redactBoards(boards, redact) : boards}
           refreshing={boardsRefreshing}
           padConnected={pad.connected && usingPad}
           onRefresh={refreshBoards}
@@ -2124,8 +2713,8 @@ export default function OficinaPage() {
 
       {queueOpen ? (
         <QueuePanel
-          queue={queue ?? null}
-          projects={projects.map((p) => ({ slug: p.slug, name: p.name }))}
+          queue={(publicView ? redactQueue(queue, redact) : queue) ?? null}
+          projects={projects.map((p) => ({ slug: p.slug, name: viewProjectName(p.slug) }))}
           simulated={!!sim}
           padConnected={pad.connected && usingPad}
           planning={planning}
@@ -2153,7 +2742,7 @@ export default function OficinaPage() {
         <SpendPanel
           data={spend}
           plan={plan}
-          projectName={projectName}
+          projectName={viewProjectName}
           nicks={nicks}
           refreshing={spendRefreshing}
           padConnected={pad.connected && usingPad}
@@ -2172,9 +2761,9 @@ export default function OficinaPage() {
 
       {controlOpen ? (
         <ControlRoomPanel
-          workers={workers}
+          workers={viewWorkers}
           nicks={nicks}
-          projectName={projectName}
+          projectName={viewProjectName}
           simulated={!!sim}
           padConnected={pad.connected && usingPad}
           onOpen={(w) => {

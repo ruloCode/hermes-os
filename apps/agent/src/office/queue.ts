@@ -162,7 +162,7 @@ export async function tick(): Promise<void> {
 
 let timer: ReturnType<typeof setInterval> | null = null;
 export function startQueue() {
-  if (timer) return;
+  if (timer || process.env.HERMES_JOBS === "off") return;
   timer = setInterval(() => void tick().catch((e) => console.error("[cola]", e)), 3000);
   void tick().catch((e) => console.error("[cola]", e));
 }

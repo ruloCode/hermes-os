@@ -104,7 +104,10 @@ import { planQueue } from "./office/queue-plan.js";
 import { listSalaAgents, officeCast, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
-import { NOBODY_WATCHING, PLAN_PRESENTED, PLAN_TOOL, SalaValidationError, isOfficeMode, needsApproval } from "@hermes/shared";
+import { NOBODY_WATCHING, PLAN_PRESENTED, PLAN_TOOL, SalaValidationError, isOfficeMode, needsApproval, redactInventory, redactPrompt, redactText, redactTrace, traceToJsonl, type TraceFile } from "@hermes/shared";
+import { getTrace, listTraces, liveTrace } from "./office/trace.js";
+import { publicViewForClient, serverPublicContext } from "./office/public-view.js";
+import { sdkAgentConfig } from "./agent/session.js";
 import {
   openInBrowser,
   listTabs,
@@ -116,7 +119,7 @@ import {
 } from "./browser.js";
 import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
 import { avatarProvider, terminatorAvatar } from "./avatar.js";
-import { officeState, officeViewerJoined, officeWatched, startOffice, subscribeOffice } from "./office/state.js";
+import { officeState, officeViewerJoined, officeWatched, officeWorkerPrivate, startOffice, subscribeOffice } from "./office/state.js";
 import { approvalState, decideApproval, pendingApprovals, requestApproval, runForToken } from "./office/approvals.js";
 import { transcribe } from "./meetings/stt.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
@@ -241,7 +244,7 @@ import {
   deleteClaudeSession,
 } from "./agent/claude-sessions.js";
 import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join as joinPath } from "node:path";
@@ -2575,6 +2578,81 @@ app.post("/office/dictate", bodyLimit({ maxSize: 15 * 1024 * 1024 }), async (c) 
   }
 });
 
+// ── Traza del loop de cada personaje (office/trace.ts) ─────────────────
+// Snapshot completo (memoria o ~/.hermes-os/trazas/<id>.jsonl); los eventos
+// nuevos llegan por /office/events ({type:"trace"}). ?view=public la entrega ya
+// redactada (secretos del entorno incluidos, que el navegador nunca recibe).
+const CLI_DENY_RULES: string[] = (() => {
+  try {
+    const raw = JSON.parse(readFileSync(new URL("../claude-settings.json", import.meta.url), "utf8")) as { permissions?: { deny?: string[] } };
+    return raw.permissions?.deny ?? [];
+  } catch {
+    return [];
+  }
+})();
+
+async function traceView(file: TraceFile, view: string | undefined): Promise<TraceFile> {
+  if (view !== "public") return file;
+  const ctx = await serverPublicContext();
+  const prompt =
+    file.prompt?.kind === "sdk"
+      ? redactPrompt(file.prompt, ctx)
+      : file.prompt?.kind === "cli"
+        ? {
+            ...file.prompt,
+            args: file.prompt.args.map((a) => redactText(a, ctx)),
+            cwd: redactText(file.prompt.cwd, ctx),
+            prompt: redactText(file.prompt.prompt, ctx),
+            mcpConfig: file.prompt.mcpConfig ? redactText(file.prompt.mcpConfig, ctx) : undefined,
+            claudeMd: file.prompt.claudeMd.map((m) => ({ ...m, path: redactText(m.path, ctx), content: redactText(m.content, ctx) })),
+          }
+        : null;
+  return {
+    meta: file.meta ? { ...file.meta, title: redactText(file.meta.title, ctx), project: redactText(file.meta.project, ctx) } : null,
+    events: redactTrace(file.events, ctx),
+    prompt,
+    inventory: redactInventory(file.inventory, ctx),
+  };
+}
+
+app.get("/office/public-view", async (c) => c.json(await publicViewForClient()));
+
+app.get("/office/traces", async (c) => {
+  const remote = viaTunnel((h) => c.req.header(h));
+  const list = await listTraces(Math.min(50, Number(c.req.query("limit")) || 20));
+  return c.json({ traces: remote ? list.filter((t) => !officeWorkerPrivate(t.meta.id)) : list });
+});
+
+app.get("/office/trace/:id", async (c) => {
+  const id = c.req.param("id");
+  if (viaTunnel((h) => c.req.header(h)) && officeWorkerPrivate(id)) return c.json({ error: "traza privada" }, 404);
+  const file = await getTrace(id);
+  if (!file) return c.json({ error: "traza no encontrada" }, 404);
+  const view = c.req.query("view");
+  const source = file.meta?.source ?? "sdk";
+  return c.json({
+    ...(await traceView(file, view)),
+    view: view === "public" ? "public" : "raw",
+    // La configuración ACTUAL de permisos (el inventario la cruza con el init del run).
+    config: source === "sdk" ? { sdk: sdkAgentConfig() } : { cliDenyRules: CLI_DENY_RULES },
+  });
+});
+
+// Exportar la traza como JSONL limpio: por defecto en vista pública (?view=raw para la cruda, solo local).
+app.get("/office/trace/:id/export", async (c) => {
+  const id = c.req.param("id");
+  const remote = viaTunnel((h) => c.req.header(h));
+  if (remote && officeWorkerPrivate(id)) return c.json({ error: "traza privada" }, 404);
+  const file = await getTrace(id);
+  if (!file) return c.json({ error: "traza no encontrada" }, 404);
+  const view = c.req.query("view") === "raw" && !remote ? "raw" : "public";
+  const config = (file.meta?.source ?? "sdk") === "sdk" ? { sdk: sdkAgentConfig() } : { cliDenyRules: CLI_DENY_RULES };
+  const body = traceToJsonl({ ...(await traceView(file, view)), config });
+  c.header("Content-Type", "application/x-ndjson; charset=utf-8");
+  c.header("Content-Disposition", `attachment; filename="traza-${id}${view === "public" ? "-publica" : ""}.jsonl"`);
+  return c.body(body);
+});
+
 // ── Aprobaciones: el agente levanta la mano (office/approvals.ts) ──────
 // El puente del run pide permiso aquí. Bash de solo lectura pasa sin
 // preguntar; sin nadie en la Oficina se niega como antes (claude -p no tenía a
@@ -2588,6 +2666,7 @@ app.post("/office/approvals/ask", async (c) => {
   const input = body.input && typeof body.input === "object" ? body.input : {};
   if (!needsApproval(tool, input)) return c.json({ decision: { behavior: "allow", updatedInput: input } });
   if (!officeWatched()) {
+    liveTrace(runId)?.permission({ tool, decision: "denied", by: "nobody", text: "Nadie miraba la Oficina: se negó sin preguntar" });
     return c.json({ decision: { behavior: "deny", message: tool === PLAN_TOOL ? PLAN_PRESENTED : NOBODY_WATCHING } });
   }
   const { id } = requestApproval(runId, tool, input);
@@ -2631,6 +2710,7 @@ app.get("/office/events", (c) =>
     const unsubscribe = subscribeOffice((u) => {
       if (!open) return;
       if (remote && u.type === "worker" && u.worker.private) return;
+      if (remote && u.type === "trace" && officeWorkerPrivate(u.id)) return;
       void stream.writeSSE({ data: JSON.stringify(u) });
     });
     stream.onAbort(() => {

@@ -8,7 +8,12 @@
 // exacto) y los dos botones: el run está pausado hasta que decidas.
 
 import { useEffect, useRef, useState } from "react";
-import { PLAN_TOOL, formatTokens, formatUsd, officeModeLabel, totalTokens, type OfficeMode, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
+import { PLAN_TOOL, formatTokens, formatUsd, officeModeLabel, totalTokens, type OfficeMode, type OfficeWorker, type OfficeWorkerStatus, type PublicViewContext } from "@hermes/shared";
+import type { Redact } from "@/lib/oficina/public-view";
+import { TraceList, type TraceListHandle } from "./trace/TraceList";
+import { InventoryList } from "./trace/InventoryList";
+import { PromptView } from "./trace/PromptView";
+import { useTraceView } from "./trace/useTraceView";
 import { Markdown } from "@/components/Markdown";
 import { claudeKillRun, claudeRunStreamUrl } from "@/lib/hermes";
 import type { OfficeDictation } from "@/hooks/useOfficeDictation";
@@ -50,7 +55,16 @@ const SOURCE_LABEL: Record<OfficeWorker["source"], string> = {
 interface Line {
   kind: string;
   text: string;
+  t?: number;
 }
+
+export type DrawerTab = "out" | "trace" | "tools" | "prompt";
+const TABS: { id: DrawerTab; label: string }[] = [
+  { id: "out", label: "Salida" },
+  { id: "trace", label: "Traza" },
+  { id: "tools", label: "Tools" },
+  { id: "prompt", label: "Prompt" },
+];
 
 function remaining(until: string): string {
   const s = Math.max(0, Math.round((Date.parse(until) - Date.now()) / 1000));
@@ -63,7 +77,7 @@ function elapsed(from: string, to?: string): string {
 }
 
 /** Stream real de un run; null si el run ya no existe en el agente (se evicta a los 5 min). */
-function useRunStream(runId: string | null): Line[] | null {
+export function useRunStream(runId: string | null): Line[] | null {
   const [lines, setLines] = useState<Line[] | null>(null);
   useEffect(() => {
     if (!runId) {
@@ -115,6 +129,9 @@ export function WorkerDrawer({
   mode,
   onModeChange,
   model,
+  redact,
+  publicView,
+  publicCtx,
 }: {
   worker: OfficeWorker;
   projectName: string;
@@ -130,6 +147,10 @@ export function WorkerDrawer({
   mode: OfficeMode;
   onModeChange: (mode: OfficeMode) => void;
   model: string;
+  /** Vista pública: todo texto pasa por aquí antes de pintarse. */
+  redact: Redact;
+  publicView: boolean;
+  publicCtx: PublicViewContext;
 }) {
   const isRun = worker.source === "run" && !simulated;
   const stream = useRunStream(isRun ? worker.id : null);
@@ -140,6 +161,20 @@ export function WorkerDrawer({
   const [stopping, setStopping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const active = worker.status !== "done" && worker.status !== "error";
+  // Clic en un personaje con error (o bloqueado): el panel abre en la traza, sobre el error.
+  const [tab, setTab] = useState<DrawerTab>(() => (worker.status === "error" || worker.status === "blocked" ? "trace" : "out"));
+  const traceView = useTraceView(tab === "out" ? null : worker.id, { on: publicView, ctx: publicCtx });
+  const listRef = useRef<TraceListHandle | null>(null);
+  const [focusSeq, setFocusSeq] = useState<number | null>(null);
+  const jumpedRef = useRef(false);
+  useEffect(() => {
+    if (jumpedRef.current || tab !== "trace" || (worker.status !== "error" && worker.status !== "blocked")) return;
+    const errs = traceView.reduced.errors;
+    if (!errs.length) return;
+    jumpedRef.current = true;
+    const target = [...errs].reverse().find((e) => !e.fixedBy) ?? errs[errs.length - 1];
+    requestAnimationFrame(() => listRef.current?.jumpTo(target.seq));
+  }, [tab, worker.status, traceView.reduced.errors]);
   const plan = worker.approval?.tool === PLAN_TOOL;
   // Un plan aprobado se ejecuta en el modo elegido para el agente (Auto si ese modo es Plan).
   const runMode: OfficeMode = mode === "plan" ? "auto" : mode;
@@ -248,11 +283,11 @@ export function WorkerDrawer({
           </div>
           {plan ? (
             <div className="mt-2 max-h-72 overflow-y-auto rounded-md border border-line bg-panel px-3 py-2 text-sm">
-              <Markdown source={worker.approval.detail} />
+              <Markdown source={redact(worker.approval.detail)} />
             </div>
           ) : (
             <pre className="mt-2 max-h-40 overflow-y-auto rounded-md border border-line bg-panel px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap text-text">
-              {worker.approval.detail}
+              {redact(worker.approval.detail)}
             </pre>
           )}
           <div className="mt-3 flex gap-2">
@@ -284,9 +319,48 @@ export function WorkerDrawer({
       ) : null}
 
       {worker.task.summary && !worker.approval ? (
-        <p className="border-b border-line px-4 py-2 font-mono text-xs break-all text-text-dim">{worker.task.summary}</p>
+        <p className="border-b border-line px-4 py-2 font-mono text-xs break-all text-text-dim">{redact(worker.task.summary)}</p>
       ) : null}
 
+      <nav className="flex items-center gap-1 border-b border-line px-2" role="tablist" aria-label="Qué ver del agente">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            data-drawer-tab={t.id}
+            onClick={() => setTab(t.id)}
+            className={`border-b-2 px-3 py-1.5 text-sm ${tab === t.id ? "border-accent text-text" : "border-transparent text-text-dim hover:text-text"}`}
+          >
+            {t.label}
+            {t.id === "trace" && traceView.reduced.errors.length ? <span className="ml-1 text-red">· {traceView.reduced.errors.length}</span> : null}
+          </button>
+        ))}
+        {tab !== "out" && traceView.summary ? <span className="ml-auto truncate pr-2 text-[11px] text-text-dim" data-drawer-summary>{traceView.summary}</span> : null}
+      </nav>
+
+      {tab === "trace" ? (
+        <TraceList reduced={traceView.reduced} redact={redact} publicView={publicView} size={expanded ? "xl" : "md"} focusSeq={focusSeq} onFocusSeq={setFocusSeq} handleRef={listRef} emptyText={traceView.data.status === "missing" ? "El agente no tiene la traza de esta sesión (empezó antes de que existiera o ya no está en disco)." : "Esperando el primer evento…"} />
+      ) : tab === "tools" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <InventoryList
+            cards={traceView.cards}
+            redact={redact}
+            big={expanded}
+            onJump={(step) => {
+              const st = traceView.reduced.steps[step - 1];
+              if (!st) return;
+              setTab("trace");
+              requestAnimationFrame(() => listRef.current?.jumpTo(st.useSeq));
+            }}
+          />
+        </div>
+      ) : tab === "prompt" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <PromptView prompt={traceView.data.prompt} publicView={publicView} ctx={publicCtx} redact={redact} big={expanded} />
+        </div>
+      ) : (
       <div
         ref={scrollRef}
         onScroll={(e) => {
@@ -300,7 +374,7 @@ export function WorkerDrawer({
         ) : (
           lines.map((l, i) => (
             <div key={i} className={`break-words whitespace-pre-wrap ${KIND_CLASS[l.kind] ?? "text-text"}`}>
-              {l.text}
+              {redact(l.text)}
             </div>
           ))
         )}
@@ -308,6 +382,7 @@ export function WorkerDrawer({
           <p className="mt-2 text-text-faint">El run ya salió de memoria del agente: estas son sus últimas líneas.</p>
         ) : null}
       </div>
+      )}
 
       {/* Conversación por voz: continúa la sesión del run (o abre uno nuevo en su proyecto). */}
       <section className="border-t border-line bg-panel-2/40 px-4 py-3">

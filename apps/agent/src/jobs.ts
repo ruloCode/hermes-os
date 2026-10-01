@@ -61,6 +61,15 @@ export function registerJob<T>(
   };
   registry.set(name, entry);
 
+  // HERMES_JOBS=off: un segundo agente de ensayo (otro puerto, otro worktree) no
+  // corre los jobs — si no, publicaría y barrería las tareas programadas en
+  // paralelo con producción. El job queda listado, sin correr.
+  if (process.env.HERMES_JOBS === "off") {
+    entry.lastResult = "skipped";
+    entry.lastDetail = "jobs apagados en este agente (HERMES_JOBS=off)";
+    return;
+  }
+
   const run = async () => {
     if (entry.running) {
       // La corrida anterior sigue viva: saltamos esta vuelta sin tocar estado.

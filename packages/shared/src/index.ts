@@ -41,3 +41,6 @@ export * from "./office-sky.js";
 export * from "./office-people-voices.js";
 export * from "./office-chatter.js";
 export * from "./gamepad.js";
+export * from "./office-trace.js";
+export * from "./office-redact.js";
+export * from "./office-inventory.js";

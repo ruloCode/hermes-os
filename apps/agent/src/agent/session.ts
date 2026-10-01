@@ -2,7 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import type { ChatToolStep, HermesTask, RunTokenUsage, SpendModel } from "@hermes/shared";
+import type { ChatToolStep, HermesTask, RunTokenUsage, SdkAgentConfig, SpendModel } from "@hermes/shared";
 import { needsApproval, parseModelUsage, tokensFromApiUsage, toolTarget } from "@hermes/shared";
 import { officeWatched, registerOfficeWorker, setOfficeSpend } from "../office/state.js";
 import { recordRunSpend } from "../usage.js";
@@ -12,12 +12,13 @@ import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
 import { setPresence } from "../presence.js";
 import { supabase } from "../supabase.js";
-import { buildSystemPrompt } from "./system-prompt.js";
+import { buildSystemPromptCaptured } from "./system-prompt.js";
+import { startTrace, type TraceHandle } from "../office/trace.js";
 import { checkTool } from "./guardrails.js";
 import { childEnv } from "./child-env.js";
 import { PLUGIN_DIR } from "../learning/skills.js";
 import { reviewTurnInBackground } from "../learning/review.js";
-import { hermesMcpServer, HERMES_TOOL_NAMES } from "./tools.js";
+import { hermesMcpServer, HERMES_TOOL_NAMES, HERMES_TOOL_DEFS } from "./tools.js";
 import { linearEnabled } from "../linear.js";
 import { ensureCdpChrome, CDP_URL } from "../browser.js";
 
@@ -68,6 +69,59 @@ function chromeMcpServer(bin: string) {
   };
 }
 
+/** Tools que corren sin preguntar (lectura + MCP de Hermes + web + Linear). */
+function sdkAllowedTools(): string[] {
+  return [
+    "Read",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "TodoWrite",
+    ...HERMES_TOOL_NAMES,
+    // "mcp__linear" pelado = todas las tools del server (regla de permisos
+    // por prefijo). Son mutaciones de workspace, no de la máquina.
+    ...(linearEnabled() ? ["mcp__linear"] : []),
+  ];
+}
+
+/** Tools que revisa el guardrail (guardrails.ts) dentro de canUseTool. */
+const GUARDED_TOOLS = ["Bash", "Write", "Edit", "NotebookEdit"];
+const CHROME_PREFIX = "mcp__chrome-devtools__";
+
+/**
+ * La configuración de permisos REAL de las tareas del SDK, para el inventario
+ * de la Oficina ("Qué tiene este agente"). Sale de las mismas listas que usa
+ * query(): no hay una copia a mano que se desactualice.
+ */
+export function sdkAgentConfig(): SdkAgentConfig & { hermesTools: { name: string; description: string }[] } {
+  return {
+    allowedTools: sdkAllowedTools(),
+    guardedTools: GUARDED_TOOLS,
+    checkedPrefixes: [{ prefix: CHROME_PREFIX, note: "canUseTool: garantiza el Chrome CDP dedicado antes de cada uso (si no está, se niega)" }],
+    approvalTools: ["Bash"],
+    permissionMode: "default",
+    mcpServers: ["hermes", ...(linearEnabled() ? ["linear"] : []), ...(env.BROWSER_AGENT_ENABLED && resolveChromeMcpBin() ? ["chrome-devtools"] : [])],
+    hermesTools: HERMES_TOOL_DEFS,
+  };
+}
+
+/** Pide al CLI las tools de cada MCP (con la descripción que ve el modelo) y las skills; sin bloquear el loop. */
+function captureInventory(q: { mcpServerStatus(): Promise<any[]>; supportedCommands(): Promise<any[]> }, trace: TraceHandle) {
+  void Promise.all([q.mcpServerStatus().catch(() => []), q.supportedCommands().catch(() => [])])
+    .then(([servers, commands]) => {
+      trace.setInventory({
+        mcp: (servers as any[]).map((sv) => ({
+          server: String(sv?.name ?? ""),
+          status: String(sv?.status ?? ""),
+          tools: Array.isArray(sv?.tools) ? sv.tools.map((t: any) => ({ name: String(t?.name ?? ""), ...(t?.description ? { description: String(t.description) } : {}) })) : [],
+        })),
+        commands: (commands as any[]).map((c) => ({ name: String(c?.name ?? ""), description: String(c?.description ?? "") })),
+      });
+    })
+    .catch(() => {});
+}
+
 /**
  * Corre UN turno agéntico con el Claude Agent SDK.
  *
@@ -116,7 +170,12 @@ export interface RunTurnResult {
 }
 
 export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
-  const systemPrompt = await buildSystemPrompt(opts.prompt, opts.project);
+  const captured = await buildSystemPromptCaptured(opts.prompt, opts.project);
+  const systemPrompt = captured.raw;
+  // Traza completa del loop (solo tareas con personaje en la Oficina; el chat no tiene taskId).
+  const trace = opts.taskId ? startTrace({ id: opts.taskId, source: "sdk", title: opts.prompt, project: opts.project || "general" }) : null;
+  trace?.setPrompt(captured);
+  let inventoryAsked = false;
   let sdkSessionId: string | undefined;
   let finalText = "";
   let toolCalls = 0;
@@ -153,27 +212,17 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
             ? { "chrome-devtools": chromeMcpServer(resolveChromeMcpBin()!) }
             : {}),
         },
-        allowedTools: [
-          "Read",
-          "Glob",
-          "Grep",
-          "WebSearch",
-          "WebFetch",
-          "TodoWrite",
-          ...HERMES_TOOL_NAMES,
-          // "mcp__linear" pelado = todas las tools del server (regla de permisos
-          // por prefijo). Son mutaciones de workspace, no de la máquina.
-          ...(linearEnabled() ? ["mcp__linear"] : []),
-        ],
+        allowedTools: sdkAllowedTools(),
         permissionMode: "default",
         canUseTool: async (toolName, input) => {
           // Tools del navegador: NO van en allowedTools a propósito — pasar
           // por aquí garantiza el Chrome CDP dedicado ANTES de cada uso (el
           // MCP solo se conecta; si el Chrome no está, el tool fallaría).
-          if (toolName.startsWith("mcp__chrome-devtools__")) {
+          if (toolName.startsWith(CHROME_PREFIX)) {
             const chrome = await ensureCdpChrome();
             if (!chrome.ok) {
               emit({ kind: "error", taskId: opts.taskId, toolName, detail: chrome.error });
+              trace?.permission({ tool: toolName, decision: "denied", by: "chrome", text: chrome.error ?? "Chrome CDP no disponible" });
               return { behavior: "deny", message: chrome.error ?? "Chrome CDP no disponible" };
             }
             return { behavior: "allow", updatedInput: input };
@@ -186,6 +235,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
               toolName,
               detail: `GUARDRAIL: ${verdict.reason}`,
             });
+            trace?.guardrail(toolName, verdict.reason ?? "Bloqueado por guardrail", input);
             return { behavior: "deny", message: verdict.reason ?? "Bloqueado por guardrail" };
           }
           // Un Bash con efectos en una tarea con personaje, y alguien mirando la
@@ -203,6 +253,14 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
 
     for await (const message of q) {
       const m = message as Record<string, any>;
+      // La traza lleva el mensaje entero (sin los deltas parciales: el bloque completo llega después).
+      if (trace && m.type !== "stream_event") {
+        trace.ingest(m);
+        if (!inventoryAsked && m.type === "system" && m.subtype === "init") {
+          inventoryAsked = true;
+          captureInventory(q, trace);
+        }
+      }
 
       if (m.type === "system" && m.session_id) {
         sdkSessionId = m.session_id as string;
@@ -288,8 +346,10 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
     isError = true;
     finalText = finalText || `Error ejecutando al agente: ${String(err).slice(0, 500)}`;
     emit({ kind: "error", taskId: opts.taskId, detail: String(err).slice(0, 300) });
+    trace?.error(`Error ejecutando al agente: ${String(err)}`);
   } finally {
     setPresence("idle");
+    trace?.end();
   }
 
   return { sdkSessionId, finalText, toolCalls, isError, costUsd, usage, models };

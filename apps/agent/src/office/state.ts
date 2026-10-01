@@ -47,6 +47,16 @@ function publish(update: OfficeUpdate) {
   }
 }
 
+/** Para otros módulos de la Oficina que publican por el mismo canal (las trazas). */
+export function publishOfficeUpdate(update: OfficeUpdate): void {
+  publish(update);
+}
+
+/** ¿El personaje es privado (Composición)? Su traza tampoco sale por el túnel. */
+export function officeWorkerPrivate(id: string): boolean {
+  return workers.get(id)?.private === true;
+}
+
 /** Las sesiones del Estudio no traen proyecto: son todas del proyecto de contenido. */
 function placeProject(w: OfficeWorker) {
   if (w.project === GENERAL_PROJECT && w.source.startsWith("content-")) w.project = CONTENT_PROJECT_SLUG;
