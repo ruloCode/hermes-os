@@ -136,6 +136,8 @@ export interface SpendPaintOpts {
   projectName: (slug: string) => string;
   /** Versión grande (monitor del CEO): serie de 30 días, por proyecto, por modelo y quién gasta ahora. */
   big?: boolean;
+  /** Píxeles por metro del canvas (el monitor del CEO es chico y necesita más resolución). */
+  pxPerM?: number;
 }
 
 /**
@@ -253,7 +255,7 @@ export class SpendBoard {
     private readonly opts: SpendPaintOpts,
     frame = "#1f2024",
   ) {
-    const scale = opts.big ? 500 : PX_PER_M;
+    const scale = opts.pxPerM ?? PX_PER_M;
     this.canvas.width = Math.round(spot.w * scale);
     this.canvas.height = Math.round(spot.h * scale);
     this.ctx = this.canvas.getContext("2d")!;

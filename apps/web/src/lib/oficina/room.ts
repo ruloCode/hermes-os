@@ -13,7 +13,7 @@
 // plantas, lámparas), con otra planta y colores del tema.
 
 import * as THREE from "three";
-import type { AmbientPoi, GameId, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
+import type { AmbientPoi, GameId, NavBox, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
 import { mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
@@ -91,6 +91,28 @@ export interface GameSpot {
   hide: THREE.Object3D[];
 }
 
+/**
+ * La oficina de CEO del dueño (piso 1, esquina sureste): vidrio con banda
+ * esmerilada, escritorio con dos monitores (uso de Claude en grande · quién te
+ * necesita y la cola), reloj y agenda real en el muro, y la silla ejecutiva
+ * desde donde se ve el salón por el vidrio (modo CEO).
+ */
+export interface CeoOffice {
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Donde se sienta el dueño: asiento, hacia dónde mira y desde dónde se alcanza con "E". */
+  chair: { x: number; z: number; seatY: number; facing: number; reach: { x: number; z: number } };
+  /** Afuera, frente a la puerta (con el nombre en el vidrio). */
+  door: { x: number; z: number; facing: number };
+  /** Monitores del escritorio (miran a la silla) y la pantalla del muro (reloj y agenda). */
+  spendSpot: BoardSpot;
+  inboxSpot: BoardSpot;
+  agendaSpot: BoardSpot;
+  /** Lo que dice la placa de la puerta (para el QA: sale de NEXT_PUBLIC_HERMES_OWNER_NAME). */
+  nameplate: string;
+  /** Solo para la gente de ambiente: es privada (el dueño sí entra por la puerta). */
+  privateZone: NavBox;
+}
+
 /** La pantalla de la arcade: un canvas que pinta el juego (o su espera, con el récord real). */
 export interface ArcadeScreen {
   canvas: HTMLCanvasElement;
@@ -134,6 +156,8 @@ export interface Room {
   spendSpot: BoardSpot;
   /** La TV del lounge (piso 2): centro de la pantalla y desde dónde se usa. */
   tv: { floor: number; x: number; y: number; z: number; front: { x: number; z: number } };
+  /** La oficina de CEO del dueño (piso 1, sureste). */
+  ceo: CeoOffice;
   /** Minijuegos de la azotea: dónde se juega cada uno. */
   gameSpots: Record<GameId, GameSpot>;
   arcadeScreen: ArcadeScreen;
@@ -1742,6 +1766,159 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   g.add(rack);
   col({ minX: rackAt.x - 0.25, maxX: rackAt.x + 0.25, minZ: rackAt.z - 0.25, maxZ: rackAt.z + 0.25, top: 1.8 });
 
+  // ── Oficina de CEO (piso 1, esquina sureste) ──────────────────────────
+  // Siempre libre: los pods tienen 3 columnas fijas (x ≤ 7,7) y crecen hacia el
+  // frente dentro de ese ancho. Se ancla a minZ (fijo), así el ventanal del
+  // muro este (minZ + 18) siempre le queda adentro.
+  on(0);
+  const ceoB = { minX: cx + 12.6, maxX: maxX - WALL_T / 2, minZ: minZ + 15.6, maxZ: minZ + 22 };
+  const ceo = ((): CeoOffice => {
+    const { minX: X0, maxX: X1, minZ: Z0, maxZ: Z1 } = ceoB;
+    const clear = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide });
+    const frost = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: p.dark ? 0.22 : 0.42, depthWrite: false, side: THREE.DoubleSide });
+    disposables.push(clear, frost);
+    const GH = 2.7;
+    /** Un tramo de vidrio con marco negro y banda esmerilada a la altura de los ojos (y su colisión). */
+    const glassRun = (axis: "x" | "z", at: number, from: number, to: number) => {
+      const len = to - from;
+      if (len < 0.05) return;
+      const mid = (from + to) / 2;
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(len, GH), clear);
+      const band = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.55), frost);
+      pane.position.set(axis === "x" ? mid : at, GH / 2, axis === "x" ? at : mid);
+      band.position.set(axis === "x" ? mid : at, 1.35, axis === "x" ? at : mid);
+      if (axis === "z") pane.rotation.y = band.rotation.y = Math.PI / 2;
+      g.add(pane, band);
+      const rail = (y: number, h: number) =>
+        g.add(axis === "x" ? mesh(box(len, h, 0.06), frameMat, mid, y, at, false) : mesh(box(0.06, h, len), frameMat, at, y, mid, false));
+      rail(0.04, 0.08);
+      rail(GH, 0.07);
+      const posts = Math.max(1, Math.round(len / 1.4));
+      for (let i = 0; i <= posts; i++) {
+        const u = from + (len * i) / posts;
+        g.add(axis === "x" ? mesh(box(0.06, GH, 0.06), frameMat, u, GH / 2, at, false) : mesh(box(0.06, GH, 0.06), frameMat, at, GH / 2, u, false));
+      }
+      col(axis === "x" ? { minX: from, maxX: to, minZ: at - 0.05, maxZ: at + 0.05, top: 99 } : { minX: at - 0.05, maxX: at + 0.05, minZ: from, maxZ: to, top: 99 });
+    };
+    // Norte entero; oeste con la puerta cerca del norte (se llega desde los pods); sur solo si la sala sigue más allá.
+    const door = { from: Z0 + 0.45, to: Z0 + 1.55 };
+    glassRun("x", Z0, X0, X1);
+    glassRun("z", X0, Z0, door.from);
+    glassRun("z", X0, door.to, Z1);
+    if (maxZ > Z1 + 0.3) glassRun("x", Z1, X0, X1);
+    // Placa con el nombre del dueño, en el vidrio junto a la puerta (mira hacia afuera).
+    const plateText = ownerName || "Oficina privada";
+    const plate = screenCanvas(512, 192);
+    {
+      const c = plate.ctx;
+      c.fillStyle = "#1f2024";
+      c.beginPath();
+      c.roundRect(4, 4, 504, 184, 22);
+      c.fill();
+      c.fillStyle = "#f4f1ea";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.font = `700 70px ${p.font}`;
+      c.fillText(plateText, 256, 82, 470);
+      c.fillStyle = p.accent;
+      c.font = `500 34px ${p.font}`;
+      c.fillText(ownerName ? "CEO" : "solo con cita", 256, 148);
+      plate.tex.needsUpdate = true;
+    }
+    const plateMat = new THREE.MeshBasicMaterial({ map: plate.tex, toneMapped: false });
+    disposables.push(plate.tex, plateMat);
+    const plateMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.225), plateMat);
+    plateMesh.position.set(X0 - 0.04, 1.55, door.to + 0.45);
+    plateMesh.rotation.y = -Math.PI / 2;
+    g.add(plateMesh);
+
+    // Tapete, escritorio de madera grande frente al ventanal y silla ejecutiva.
+    g.add(mesh(roundedBox(4.6, 0.02, 4.4, 0.4), toon(p.dark ? mix(p.bg, "#6b4f3a", 0.45) : mix("#c9a27a", "#ffffff", 0.45)), (X0 + X1) / 2 + 0.3, 0.012, (Z0 + Z1) / 2, false));
+    const desk = { x: X1 - 2.05, z: Z0 + 2.8, w: 0.9, d: 2.0, h: 0.76 };
+    const deskWood = toon(p.dark ? "#6b4428" : "#8a5a3b");
+    g.add(mesh(box(desk.w, 0.06, desk.d), toon(p.dark ? "#8c5d3a" : "#a8754c"), desk.x, desk.h - 0.03, desk.z));
+    g.add(mesh(box(0.06, desk.h - 0.06, desk.d - 0.1), deskWood, desk.x - desk.w / 2 + 0.05, (desk.h - 0.06) / 2, desk.z));
+    for (const sz of [-1, 1]) g.add(mesh(box(desk.w - 0.1, desk.h - 0.06, 0.06), deskWood, desk.x, (desk.h - 0.06) / 2, desk.z + sz * (desk.d / 2 - 0.05)));
+    g.add(mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.1, 10), toon("#ffffff"), desk.x + 0.3, desk.h + 0.05, desk.z + 0.15, false));
+    col({ minX: desk.x - desk.w / 2, maxX: desk.x + desk.w / 2, minZ: desk.z - desk.d / 2, maxZ: desk.z + desk.d / 2, top: desk.h });
+    const chairAt = { x: desk.x + 0.95, z: desk.z };
+    {
+      const leather = toon("#2b2d42");
+      const ch = new THREE.Group();
+      ch.add(mesh(roundedBox(0.62, 0.12, 0.6, 0.08), leather, 0, 0.5, 0));
+      ch.add(mesh(roundedBox(0.12, 0.95, 0.6, 0.08), leather, 0.3, 1.0, 0));
+      ch.add(mesh(roundedBox(0.16, 0.22, 0.42, 0.06), leather, 0.32, 1.52, 0));
+      for (const sz of [-1, 1]) ch.add(mesh(box(0.42, 0.06, 0.06), leather, 0.02, 0.72, sz * 0.32, false));
+      ch.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.42, 8), toon("#8d99ae"), 0, 0.23, 0, false));
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const leg = mesh(box(0.06, 0.04, 0.34), toon("#8d99ae"), Math.sin(a) * 0.17, 0.03, Math.cos(a) * 0.17, false);
+        leg.rotation.y = a;
+        ch.add(leg);
+      }
+      ch.position.set(chairAt.x, 0, chairAt.z);
+      g.add(ch);
+      col({ minX: chairAt.x - 0.3, maxX: chairAt.x + 0.38, minZ: chairAt.z - 0.3, maxZ: chairAt.z + 0.3, top: 0.55 });
+    }
+    // Sofá de dos puestos contra el vidrio sur, mirando al escritorio.
+    {
+      const color = p.dark ? "#7a4a3a" : "#b8553b";
+      const m = toon(color);
+      const sofa = new THREE.Group();
+      sofa.add(mesh(roundedBox(1.9, 0.4, 0.85, 0.14), m, 0, 0.28, 0));
+      sofa.add(mesh(roundedBox(1.9, 0.7, 0.24, 0.12), m, 0, 0.6, 0.32));
+      for (const sx of [-1, 1]) sofa.add(mesh(roundedBox(0.22, 0.55, 0.85, 0.1), toon(mix(color, "#000000", 0.2)), sx * 0.95, 0.4, 0));
+      sofa.position.set(X0 + 2.0, 0, Z1 - 0.8);
+      g.add(sofa);
+      col({ minX: X0 + 0.95, maxX: X0 + 3.05, minZ: Z1 - 1.25, maxZ: Z1 - 0.35, top: 0.5 });
+    }
+    // Estantería contra el vidrio sur, junto al sofá (al norte tapaba la vista a los pods desde la silla),
+    // planta grande, lámpara de pie y un cuadro propio.
+    const shelf = bookshelf();
+    shelf.position.set(X0 + 4.4, 0, Z1 - 0.3);
+    shelf.rotation.y = Math.PI;
+    g.add(shelf);
+    col({ minX: X0 + 3.3, maxX: X0 + 5.5, minZ: Z1 - 0.55, maxZ: Z1, top: 2.1 });
+    const big = plant(1.35);
+    big.position.set(X0 + 0.55, 0, Z1 - 0.55);
+    g.add(big);
+    col({ minX: X0 + 0.15, maxX: X0 + 0.95, minZ: Z1 - 0.95, maxZ: Z1 - 0.15, top: 0.7 });
+    const lamp = floorLamp("#f4e3c1");
+    lamp.group.position.set(X1 - 0.45, 0, Z0 + 0.45);
+    g.add(lamp.group);
+    col({ minX: X1 - 0.7, maxX: X1 - 0.2, minZ: Z0 + 0.2, maxZ: Z0 + 0.7, top: 1.9 });
+    const lampLight = new THREE.PointLight("#ffc98a", 1, 7, 1.6);
+    lampLight.position.set(X1 - 0.45, 1.75, Z0 + 0.45);
+    light(lampLight);
+    {
+      const tex = artCanvas([p.accent, "#2a9d8f", "#e9c46a", "#264653"], 11);
+      const mat = new THREE.MeshBasicMaterial({ map: tex });
+      disposables.push(tex, mat);
+      const zArt = minZ + 21.1;
+      g.add(mesh(box(0.05, 1.05, 0.85), toon("#1f2024"), X1 - 0.025, 1.75, zArt, false));
+      const art = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.95), mat);
+      art.position.set(X1 - 0.055, 1.75, zArt);
+      art.rotation.y = -Math.PI / 2;
+      g.add(art);
+    }
+    const plateFront = { x: X0 - 0.9, z: (door.from + door.to) / 2 };
+    return {
+      bounds: ceoB,
+      chair: { x: chairAt.x, z: chairAt.z, seatY: 0.56, facing: -Math.PI / 2, reach: { x: chairAt.x, z: chairAt.z + 0.9 } },
+      door: { x: plateFront.x, z: plateFront.z, facing: Math.PI / 2 },
+      // Monitores sobre el escritorio, mirando a la silla (+x).
+      // Vistos desde la silla (mirando a −x), +z es la izquierda: la bandeja a la izquierda, el grande al centro.
+      spendSpot: { x: desk.x - 0.05, y: desk.h + 0.5, z: desk.z - 0.3, rotY: Math.PI / 2, w: 1.12, h: 0.7, front: { x: chairAt.x, z: chairAt.z } },
+      inboxSpot: { x: desk.x + 0.02, y: desk.h + 0.38, z: desk.z + 0.68, rotY: Math.PI / 2 - 0.35, w: 0.66, h: 0.46, front: { x: chairAt.x, z: chairAt.z } },
+      // Reloj y agenda en el muro este, al sur del ventanal.
+      agendaSpot: { x: X1 - 0.05, y: 1.75, z: minZ + 20.05, rotY: -Math.PI / 2, w: 1.15, h: 0.85, front: { x: X1 - 1.2, z: minZ + 20.05 } },
+      nameplate: plateText,
+      privateZone: { minX: X0 - 0.05, maxX: X1, minZ: Z0 - 0.05, maxZ: Z1, top: 2 },
+    };
+  })();
+  // Los pies de los monitores (los pinta el mundo, con datos).
+  for (const sp of [ceo.spendSpot, ceo.inboxSpot]) g.add(mesh(box(0.22, sp.y - sp.h / 2 - 0.76, 0.1), toon("#1f2024"), sp.x, (sp.y - sp.h / 2 + 0.76) / 2, sp.z, false));
+
   // ── Plantas y lámparas ─────────────────────────────────────────────────
   // Cabina telefónica de vidrio en la esquina noreste del café.
   on(1);
@@ -1780,7 +1957,10 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     [cx + DOOR_HALF + 0.7, maxZ - 0.7, 0.8],
     [kitchen.maxX + 0.6, minZ + 0.9, 1.0],
   ];
+  const inCeo = (x: number, z: number) => x > ceoB.minX - 0.4 && x < ceoB.maxX + 0.4 && z > ceoB.minZ - 0.4 && z < ceoB.maxZ + 0.4;
   for (const [x, z, s] of plants) {
+    // La maceta de la esquina sureste quedaba dentro de la oficina de CEO (que trae la suya).
+    if (inCeo(x, z)) continue;
     const pl = plant(s);
     pl.position.set(x, 0, z);
     g.add(pl);
@@ -1968,6 +2148,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     spendSpot,
     gameSpots,
     arcadeScreen: arcadeScr,
+    ceo,
     tv: { floor: 1, x: tvX, y: FLOOR_Y[1] + 1.75, z: lz, front: { x: maxX - 2.2, z: lz - 0.5 } },
     setTvVideo,
     setBoard: paintBoard,

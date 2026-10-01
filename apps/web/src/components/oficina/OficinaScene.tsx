@@ -8,7 +8,7 @@
 // de la Sala).
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { OFFICE_NPCS, type OfficeBoards, type OfficeLayout, type OfficeNpcRole, type OfficeSpend, type OfficeWorker, type PlanUsage, type QueueState } from "@hermes/shared";
+import { OFFICE_NPCS, type OfficeBoards, type OfficeLayout, type OfficeNpcRole, type OfficeSpend, type OfficeWorker, type PlanUsage, type QueueState, type UpcomingCalendar } from "@hermes/shared";
 import { readOfficePalette } from "@/lib/oficina/palette";
 import { OfficeWorld, type OfficeHit, type OfficeMode, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
 import type { GameEvent, GameHud } from "@/lib/oficina/games";
@@ -63,6 +63,10 @@ interface Props {
   /** Minijuego: su HUD (null = se salió) y lo que suena en él. */
   onGame?: (hud: GameHud | null) => void;
   onGameEvent?: (ev: GameEvent, at: THREE.Vector3) => void;
+  /** Modo CEO (sentado en la oficina privada). */
+  onCeo?: (on: boolean) => void;
+  /** Agenda real para la pantalla de la oficina de CEO (snapshot.calendar). */
+  calendar?: UpcomingCalendar | null;
 }
 
 const NPC_ROLES = Object.keys(OFFICE_NPCS) as OfficeNpcRole[];
@@ -78,7 +82,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -87,8 +91,8 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   const headRef = useRef<HTMLDivElement>(null);
   const nearRef = useRef<HTMLDivElement>(null);
   const npcRefs = useRef(new Map<OfficeNpcRole, HTMLDivElement>());
-  const cb = useRef({ onClick, onNear, onMode, onFloor, onGame, onGameEvent });
-  cb.current = { onClick, onNear, onMode, onFloor, onGame, onGameEvent };
+  const cb = useRef({ onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo });
+  cb.current = { onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo };
   const initial = useRef({ ownerName, look });
 
   useImperativeHandle(ref, () => ({ world: () => worldRef.current }), []);
@@ -114,6 +118,7 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
         onFloor: (floor) => cb.current.onFloor?.(floor),
         onGame: (hud) => cb.current.onGame?.(hud),
         onGameEvent: (ev, at) => cb.current.onGameEvent?.(ev, at),
+        onCeo: (on) => cb.current.onCeo?.(on),
         onNpcs: (anchors) => {
           for (const role of NPC_ROLES) place(npcRefs.current.get(role) ?? null, anchors.find((a) => a.role === role) ?? null);
         },
@@ -184,6 +189,10 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   useEffect(() => {
     worldRef.current?.setPlanUsage(plan);
   }, [plan]);
+
+  useEffect(() => {
+    worldRef.current?.setCalendar(calendar ?? null);
+  }, [calendar]);
 
   return (
     <div ref={wrapRef} className="absolute inset-0 overflow-hidden">

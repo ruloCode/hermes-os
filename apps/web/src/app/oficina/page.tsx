@@ -130,6 +130,8 @@ declare global {
       state: () => unknown;
       exit: () => void;
     };
+    /** QA del modo CEO: sentarse (true) o levantarse (false); devuelve si quedó sentado. */
+    __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
     __hermesOficinaShareTest?: () => void;
   }
@@ -344,6 +346,11 @@ export default function OficinaPage() {
   const [gameHud, setGameHud] = useState<GameHud | null>(null);
   const gameRef = useRef(false);
   gameRef.current = !!gameHud;
+  // Modo CEO: sentado en la oficina privada; ←→/LB RB recorren agentes y Enter/A abre su panel.
+  const [ceo, setCeo] = useState(false);
+  const [ceoPick, setCeoPick] = useState<string | null>(null);
+  const ceoRef = useRef(false);
+  ceoRef.current = ceo;
   // Pantalla compartida en la TV del lounge (todo en el navegador: getDisplayMedia → VideoTexture).
   const [sharing, setSharing] = useState<string | null>(null);
   // Pizarra libre: el dibujo vive en el agente; el editor la abre en grande.
@@ -481,6 +488,7 @@ export default function OficinaPage() {
     if (near.kind === "spend") return "Ver el uso de Claude";
     if (near.kind === "control") return "Abrir la sala de control";
     if (near.kind === "game") return `Jugar ${GAME_INFO[near.id].title}`;
+    if (near.kind === "ceo") return "Sentarte en tu silla (modo CEO)";
     if (near.kind === "worker") {
       const w = workers.find((x) => x.id === near.id);
       return w ? `Hablar con ${nicks.get(w.id) ?? w.name}` : null;
@@ -969,6 +977,27 @@ export default function OficinaPage() {
     [workers, selected, near, voice],
   );
 
+  /** Modo CEO: el agente siguiente/anterior (la cámara voltea a su escritorio; no se camina). */
+  const ceoCycle = (dir: 1 | -1) => {
+    if (!workers.length) return;
+    const i = ceoPick ? workers.findIndex((w) => w.id === ceoPick) : -1;
+    const next = workers[(i + dir + workers.length) % workers.length];
+    setCeoPick(next.id);
+    sceneRef.current?.world()?.ceoAim(next.id);
+    pad.rumble("tap");
+  };
+  /** Modo CEO: abre el panel del agente elegido (el primero si no hay ninguno). */
+  const ceoOpen = () => {
+    const id = ceoPick ?? workers[0]?.id;
+    if (!id) return;
+    setCeoPick(id);
+    openConversation({ kind: "worker", id });
+  };
+  const ceoCycleRef = useRef(ceoCycle);
+  ceoCycleRef.current = ceoCycle;
+  const ceoOpenRef = useRef(ceoOpen);
+  ceoOpenRef.current = ceoOpen;
+
   /** Shift+Tab / View: el siguiente modo del agente abierto (o del que vas a contratar). */
   const cycleMode = () => {
     if (hiring) setOfficeMode(nextOfficeMode(officeMode));
@@ -1036,6 +1065,15 @@ export default function OficinaPage() {
         return;
       }
       if (hiring) return;
+    }
+    // Modo CEO: LB/RB recorren a los agentes, A abre su panel y B te levanta (sin caminar).
+    if (ceoRef.current) {
+      if (b === "LB" || b === "LEFT") ceoCycle(-1);
+      else if (b === "RB" || b === "RIGHT") ceoCycle(1);
+      else if (b === "A") ceoOpen();
+      else if (b === "B") world?.exitCeo();
+      else if (b === "Y") toggleCall();
+      return;
     }
     switch (b) {
       case "A":
@@ -1181,6 +1219,13 @@ export default function OficinaPage() {
         setWallBoard(null);
         return;
       }
+      if (hit.kind === "ceo") {
+        closeConversation();
+        closeNpc();
+        setWallBoard(null);
+        sceneRef.current?.world()?.enterCeo();
+        return;
+      }
       if (hit.kind === "game") {
         closeConversation();
         closeNpc();
@@ -1272,6 +1317,24 @@ export default function OficinaPage() {
         e.preventDefault();
         cycleModeRef.current();
         return;
+      }
+      // Modo CEO (sin panel encima): ←→ recorren agentes, Enter/E abre, Esc se levanta.
+      if (ceoRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey) {
+        if (e.key === "Escape" && !conversationOpenRef.current) {
+          sceneRef.current?.world()?.exitCeo();
+          return;
+        }
+        if (!conversationOpenRef.current) {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            ceoCycleRef.current(e.key === "ArrowLeft" ? -1 : 1);
+            return;
+          }
+          if (e.key === "Enter" || e.code === "KeyE") {
+            ceoOpenRef.current();
+            return;
+          }
+        }
       }
       // 1, 2, 3: ver ese piso desde arriba (fuera de una conversación y de un campo de texto).
       if (!conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !dataPanelRef.current && !gameRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
@@ -1367,6 +1430,13 @@ export default function OficinaPage() {
       state: () => sceneRef.current?.world()?.gameState() ?? null,
       exit: () => sceneRef.current?.world()?.exitGame(),
     };
+    window.__hermesOficinaCeo = (on) => {
+      const world = sceneRef.current?.world();
+      if (!world) return false;
+      if (on) world.enterCeo();
+      else world.exitCeo();
+      return world.ceoActive;
+    };
     window.__hermesOficinaAmbient = ({ on, seed }) => {
       if (on !== undefined) setAmbient(on);
       if (seed !== undefined) setAmbientSeed(seed);
@@ -1385,6 +1455,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaAmbient;
       delete window.__hermesOficinaShareTest;
       delete window.__hermesOficinaGame;
+      delete window.__hermesOficinaCeo;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 
@@ -1426,6 +1497,11 @@ export default function OficinaPage() {
         plan={plan}
         projectName={projectName}
         onGame={setGameHud}
+        onCeo={(on) => {
+          setCeo(on);
+          if (!on) setCeoPick(null);
+        }}
+        calendar={snapshot?.calendar ?? null}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
@@ -1531,7 +1607,22 @@ export default function OficinaPage() {
       <Toasts toasts={toasts} />
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
-        {gameHud ? null : <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />}
+        {gameHud || ceo ? null : <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />}
+        {ceo ? (
+          <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel/90 px-4 py-2 text-sm text-text-dim shadow-lg backdrop-blur-md" data-ceo-bar>
+            <span className="font-medium text-text">Modo CEO</span>
+            <span>
+              {(() => {
+                const w = workers.find((x) => x.id === ceoPick);
+                return w ? `${nicks.get(w.id) ?? w.name} · ${projectName(w.project)}` : workers.length ? "Elige un agente" : "Sin agentes vivos";
+              })()}
+            </span>
+            <span>{pad.connected && usingPad ? "LB/RB otro agente · A abrir · B levantarte" : "← → otro agente · Enter abrir · Esc levantarte"}</span>
+            <button type="button" onClick={() => sceneRef.current?.world()?.exitCeo()} className="rounded-md px-2 py-0.5 hover:bg-panel-2 hover:text-text">
+              Levantarte
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {selectedWorker ? (
