@@ -28,6 +28,16 @@ Agent server (apps/agent, Hono :8650) ── Claude Agent SDK ── spawnea el 
         └─ Integraciones opcionales: Linear · Google Calendar · AssemblyAI · OpenMontage · Kasa
 ```
 
+## Mira un agente por dentro: la Oficina
+
+<p align="center">
+  <img src="docs/img/oficina-tarima/tarima-traza-dark.png" alt="Modo tarima de la Oficina: la traza del loop con dos errores corregidos, el escritorio del agente en 3D y sus tools" width="900">
+</p>
+
+`/oficina` es una oficina 3D donde cada sesión viva del Agent SDK o run de `claude -p` es un personaje en su escritorio. Le hablas por voz o con un control de Xbox, levanta la mano cuando va a hacer algo con efectos y, con **P**, entras al **modo tarima**: la traza completa del loop (qué lee, qué tool llama, qué le devuelve, dónde se equivoca y en qué paso se corrigió), las tools que tiene con su permiso real, el system prompt exacto con el porqué de cada sección y el log completo. Una **vista pública** tapa secretos, correos, teléfonos y proyectos de clientes antes de que lleguen a la pantalla.
+
+Probarla sin gastar tokens: abre `localhost:31415/oficina`, presiona **P** y luego **R** (repite una traza real grabada, marcada como repetición). Con agentes de verdad: `scripts/demo-proyectos.sh prepare` arma cinco proyectos de práctica con bugs reales para contratar agentes en ellos. Todo en [docs/oficina-de-agentes.md](docs/oficina-de-agentes.md).
+
 ## Requisitos
 
 | Qué | Versión / nota |
@@ -106,8 +116,9 @@ apps/web        Next.js 15 — dashboard (shell único, providers, design system
 apps/agent      Hono — agente (Agent SDK, tools MCP, guardrails, jobs, rutas /v1 /tasks /meetings /content …)
 packages/shared Tipos y lógica compartida (contrato Hermes, etapas de contenido, beats de guion)
 mobile/         App Expo (Android): chat, grabación de juntas a prueba de red, tablero Linear
-supabase/       Migraciones (001 → 024)
-docs/           Guías: multi-máquina, flujo de contenido, publicación automática, SOUL.example.md
+supabase/       Migraciones (001 → 025)
+docs/           Guías: oficina de agentes, aprendizaje y tareas, multi-máquina, flujo de contenido, SOUL.example.md
+scripts/        Servicios (launchd, túnel), demos de la Oficina y utilidades
 hermes          Lanzador: dev · install · uninstall · doctor · stop · typecheck
 ```
 
@@ -123,6 +134,8 @@ La guía de arquitectura para trabajar en el código está en [CLAUDE.md](CLAUDE
 - **Estudio de contenido**: pipeline por etapas con criterios reales, teleprompter, checklist de captura contra el disco, voz en off, edición automática (OpenMontage) y métricas de YouTube.
 - **Vida**: finanzas (COP/USD) y hábitos por voz; agenda de Google Calendar con escritura por voz.
 - **Sistema (macOS)**: control por gestos con MediaPipe, navegación web agéntica en un Chrome dedicado, luces Kasa, multi-monitor.
+- **Oficina de agentes 3D**: un personaje por agente vivo, aprobaciones reales, modos de Claude Code, traza del loop, tools, system prompt y modo tarima con vista pública.
+- **Aprendizaje**: perfil que Hermes mantiene (USER.md), skills como memoria procedimental, propuestas de aprendizaje que apruebas y tareas programadas con cron en español.
 - **Multi-máquina y móvil**: un dashboard, un agente por PC (descubrimiento por heartbeat); túnel cloudflared + login Supabase para la app.
 
 ## Comandos
@@ -132,7 +145,7 @@ La guía de arquitectura para trabajar en el código está en [CLAUDE.md](CLAUDE
 | `./hermes` | Web + agente en desarrollo |
 | `./hermes install` / `uninstall` | Build de producción + autostart (launchd) / quitarlo |
 | `./hermes doctor` | Diagnóstico: requisitos, puertos, servicios, salud |
-| `pnpm typecheck` | Typecheck de todo el monorepo (obligatorio antes de commitear) |
+| `pnpm typecheck` · `pnpm test` | Typecheck y tests de todo el monorepo (obligatorios antes de commitear) |
 | `pnpm setup:elevenlabs` | Crea/actualiza los agentes de voz y sus client tools |
 | `pnpm backfill:knowledge` | Indexa el conocimiento existente (idempotente) |
 | `launchctl kickstart -k gui/$UID/com.hermes-os.agent` | Reinicia el agente de producción (`.web` para el dashboard) |
@@ -148,3 +161,9 @@ Logs de producción: `~/.hermes-os/logs/`.
 ## Convenciones
 
 Español en UI, comentarios y mensajes; código en inglés. **Todo dato visible es real**: sin métricas inventadas ni placeholders. Ningún nombre propio en el código — la identidad del dueño vive en `.env` + `SOUL.md`.
+
+## Contribuir
+
+Issues y PRs bienvenidos. Antes de abrir un PR: `pnpm typecheck` y `pnpm test` en verde, y si tocas la Oficina, sus QA de Playwright (`apps/web/scripts/oficina-*-qa.py`, sin gastar tokens). La guía de arquitectura y los "ojo" de cada parte están en [CLAUDE.md](CLAUDE.md). Hermes es un proyecto personal que corre en mi máquina: muchas features suponen macOS y tus propias cuentas (Supabase, ElevenLabs, Linear), y todas se apagan solas, con un mensaje, si falta la configuración.
+
+Licencia [MIT](LICENSE).

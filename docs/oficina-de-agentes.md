@@ -636,7 +636,7 @@ Un guion hablado, sin slides. Lo que se ve es real: los dos errores salen del mo
 - [ ] `scripts/tarima-demo.sh reset` (el repo vuelve a tener los bugs y el `dist/` viejo).
 - [ ] `http://localhost:31415/oficina` abierto en Chrome, en **localhost** (no IP ni túnel), pantalla completa del navegador (⌃⌘F) y zoom al 100 %.
 - [ ] **P** → tarima. El encabezado dice **EN VIVO** y **👁 Vista pública · N proyectos ocultos**. Si dice "APAGADA" en rojo, **O**.
-- [ ] Proyectos de clientes ocultos: revisa `~/.hermes-os/vista-publica.json` (por defecto solo `hermes-os` y `general` se nombran; `careways` y los demás salen como "[cliente]").
+- [ ] Proyectos de clientes ocultos: revisa `~/.hermes-os/vista-publica.json` (por defecto solo `hermes-os` y `general` se nombran; los proyectos de clientes salen como "[cliente]").
 - [ ] Permiso de micrófono dado una vez en `localhost:31415` (para dictar con **M** / **X**).
 - [ ] Control emparejado: presiona un botón con la página enfocada (Chrome no lo expone antes).
 - [ ] Volumen de la sala (las respuestas se leen en voz alta; 🔊 en el HUD normal lo apaga).

@@ -79,7 +79,7 @@ Cinco personajes, cada uno dueño de un proyecto activo del vault. Dos ya existe
 | `hermes` | Hermes | `hermes-os` (orquestador) | `run_task`, `search_memory`, `get_daily_brief`, `create_event` | Valeria · `NoS5MJPorMp1e5EcDXzn` · **ya existe** | Cabeza esfera, la más alta, blanco cálido |
 | `nevada` | Nevada | `nevadatech` | `get_project_status`, `run_task`; sabe los 3 tiers (490 / 1.190 / 2.490 USD) y la pieza para la Cámara de Comercio | Eleguar Deep Latin American · `q2XMPZ6icuVDBj7rgCxQ` | Cabeza cubo, ancho, azul acero |
 | `show` | Show | `rulocodeshow` | `create_content_idea`, `list_content_pieces`, «¿qué grabo el sábado?» | Ninoska · `zl1Ut8dvwcVSuQSB9XkG` | Cabeza icosaedro, delgada, terracota |
-| `care` | Care | `careways` | `get_project_status`, juntas y accionables del cliente, `list_linear_issues` | Fernanda Sanmiguel · `1aJyZpkt0vxhGPBnPyrs` | Cabeza cono, media, verde salvia |
+| `care` | Care | `acme-salud` | `get_project_status`, juntas y accionables del cliente, `list_linear_issues` | Fernanda Sanmiguel · `1aJyZpkt0vxhGPBnPyrs` | Cabeza cono, media, verde salvia |
 | `teacher` | Teacher | `ingles` | `save_vocab`, `recall_vocab`, `end_practice_session`; habla en inglés | Jessica · `cgSgspJ2msm6clMCkdW9` · **ya existe** | Cabeza toro, baja, ámbar |
 
 **Prompt de cada agente nuevo.** Copia la plantilla de `tutorConfig()` en `setup-elevenlabs-agent.ts`: `language: "es"`, `llm: claude-haiku-4-5` (como Hermes), `eleven_flash_v2_5`, `first_message` de una frase en su tono, y un prompt de ~10 líneas que diga quién es, qué proyecto le toca y que use `get_project_status("<slug>")` antes de opinar. El `focus_project` va fijo en el prompt, no como tool.
