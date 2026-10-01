@@ -163,7 +163,7 @@ export function MeetingsScreen() {
    * Sigue el job de ingest. `recordingId` es la grabación local que lo originó:
    * su audio SOLO se borra cuando el job confirma `done`. Un 200 del POST no
    * basta — significa "job aceptado", y el análisis puede fallar después (así
-   * se perdió la junta de Careways del 2026-07-16).
+   * se perdió una junta real el 2026-07-16).
    */
   const trackJob = (jobId: string, recordingId?: string) => {
     setBusy("Transcribiendo y resumiendo…");

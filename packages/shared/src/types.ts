@@ -916,7 +916,7 @@ export interface CodeGraphLink {
 
 /** Un repo indexable de esta máquina: una carpeta = un grafo. */
 export interface CodeGraphProject {
-  /** Slug del vault ("zylen", "teker"…); "hermes-os" es este monorepo. */
+  /** Slug del vault ("video-edit", "rulocode"…); "hermes-os" es este monorepo. */
   slug: string;
   /** Raíz del clon EN ESTA máquina (el selector la muestra como subtítulo). */
   root: string;

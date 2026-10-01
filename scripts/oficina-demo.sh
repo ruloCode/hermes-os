@@ -5,7 +5,7 @@
 # esfuerzo bajo: el costo total se imprime al final con --cost.
 #
 #   scripts/oficina-demo.sh                 # 3 proyectos activos con carpeta local (del vault)
-#   scripts/oficina-demo.sh zylen teker     # esos proyectos
+#   scripts/oficina-demo.sh video-edit rulocode   # esos proyectos
 #   scripts/oficina-demo.sh --cost          # costo de los runs que siguen en memoria
 #   scripts/oficina-demo.sh --kill          # detiene los runs en curso
 #

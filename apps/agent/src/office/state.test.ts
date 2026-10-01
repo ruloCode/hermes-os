@@ -170,7 +170,7 @@ describe("registerWorker", () => {
 
   it("un task_start con etiqueta renombra con lo que sigue a la etiqueta", () => {
     const m = office();
-    registerWorker(m, { id: "r1", source: "run", project: "careways", title: "Contexto: enfócate en careways. Arregla el login" }, T0);
+    registerWorker(m, { id: "r1", source: "run", project: "acme-salud", title: "Contexto: enfócate en acme-salud. Arregla el login" }, T0);
     reduceOfficeEvent(m, ev("task_start", T0 + 1, { detail: "tarea: Arreglar redirect del login" }));
     assert.equal(m.get("r1")?.name, "Arreglar redirect del login");
   });

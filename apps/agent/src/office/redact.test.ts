@@ -13,7 +13,7 @@ import {
   type TraceEvent,
 } from "@hermes/shared";
 
-const ctx = { hiddenTerms: ["careways", "Careways App"] };
+const ctx = { hiddenTerms: ["acme-salud", "Acme Salud App"] };
 const gone = (text: string, secret: string) => {
   const out = redactText(text, ctx);
   assert.ok(!out.includes(secret), `quedó a la vista: ${secret} en ${out}`);
@@ -56,21 +56,21 @@ describe("vista pública: secretos", () => {
 
 describe("vista pública: correos, teléfonos y clientes", () => {
   it("correos y teléfonos", () => {
-    gone("Author: Rulo <rulocode7@gmail.com>", "rulocode7@gmail.com");
+    gone("Author: Ana <ana.perez@correo.co>", "ana.perez@correo.co");
     gone("llámame al +57 300 123 4567", "300 123 4567");
     gone("cel 3001234567", "3001234567");
     gone("(415) 555-0123", "555-0123");
   });
 
   it("proyectos de clientes, en cualquier forma de escribirlos", () => {
-    const out = redactText("cd /Users/x/dev/careways-app && echo Careways App y CAREWAYS", ctx);
-    assert.ok(!/careways/i.test(out), out);
+    const out = redactText("cd /Users/x/dev/acme-salud-app && echo Acme Salud App y ACME-SALUD", ctx);
+    assert.ok(!/acme-salud/i.test(out), out);
     assert.match(out, /\[cliente\]-app/);
   });
 
   it("el usuario de una ruta de home no se confunde con un proyecto del mismo nombre", () => {
-    const out = redactText("/Users/rulocode/dev/side/rulocode/README.md y /home/rulocode/x", { hiddenTerms: ["rulocode"] });
-    assert.equal(out, "/Users/rulocode/dev/side/[cliente]/README.md y /home/rulocode/x");
+    const out = redactText("/Users/laura/dev/side/laura/README.md y /home/laura/x", { hiddenTerms: ["laura"] });
+    assert.equal(out, "/Users/laura/dev/side/[cliente]/README.md y /home/laura/x");
   });
 
   it("un proyecto público que contiene un término oculto queda intacto (rulocode-web con rulocode oculto)", () => {
@@ -82,12 +82,12 @@ describe("vista pública: correos, teléfonos y clientes", () => {
     const terms = hiddenTermsFor(
       [
         { slug: "hermes-os", name: "Hermes OS" },
-        { slug: "careways", name: "Careways" },
+        { slug: "acme-salud", name: "Acme Salud" },
         { slug: "app", name: "App" },
       ],
       { publicProjects: ["hermes-os"] },
     );
-    assert.ok(terms.includes("careways"));
+    assert.ok(terms.includes("acme-salud"));
     assert.ok(!terms.includes("hermes-os"));
     // Términos de menos de 4 letras no se ocultan (taparían media pantalla).
     assert.ok(!terms.includes("app"));
@@ -147,10 +147,10 @@ describe("vista pública: system prompt", () => {
   const parts = [
     { id: "identity", title: "Identidad", why: "w", text: "# Hermes\nEres Hermes. Correo: dueno@example.com" },
     { id: "soul", title: "SOUL.md", why: "w", personal: true, text: "# Sobre Ana (SOUL.md)\nMe gusta el café, vivo en Medellín" },
-    { id: "projects", title: "Proyectos activos", why: "w", text: "# Proyectos activos\n## Hermes OS (hermes-os)\nva bien\n## Careways (careways)\nfactura del cliente X\n## Otro (otro)\nok" },
+    { id: "projects", title: "Proyectos activos", why: "w", text: "# Proyectos activos\n## Hermes OS (hermes-os)\nva bien\n## Acme Salud (acme-salud)\nfactura del cliente X\n## Otro (otro)\nok" },
   ];
   const p = promptFromParts(parts, "\n\n---\n\n");
-  const r = redactPrompt(p, { hiddenTerms: ["careways", "Careways"] });
+  const r = redactPrompt(p, { hiddenTerms: ["acme-salud", "Acme Salud"] });
 
   it("las secciones personales dejan el título y 'oculto en vista pública'", () => {
     const soul = sectionText(r, r.sections[1]);
@@ -160,7 +160,7 @@ describe("vista pública: system prompt", () => {
 
   it("el resto se redacta como texto y la subsección del cliente se vacía", () => {
     const projects = sectionText(r, r.sections[2]);
-    assert.ok(!/careways|factura del cliente/i.test(projects), projects);
+    assert.ok(!/acme-salud|factura del cliente/i.test(projects), projects);
     assert.match(projects, /## Hermes OS \(hermes-os\)\nva bien/);
     assert.match(projects, /## Otro \(otro\)\nok/);
     assert.ok(!sectionText(r, r.sections[0]).includes("dueno@example.com"));
@@ -176,16 +176,16 @@ describe("vista pública: inventario", () => {
   it("las skills personales ocultan su descripción; las de Hermes se redactan como texto", () => {
     const inv = redactInventory(
       {
-        mcp: [{ server: "linear", status: "connected", tools: [{ name: "list_issues", description: "Lista issues de careways" }] }],
+        mcp: [{ server: "linear", status: "connected", tools: [{ name: "list_issues", description: "Lista issues de acme-salud" }] }],
         commands: [
-          { name: "junta", description: "Procesa juntas con el cliente (Mónica/Jacobo) de Careways" },
+          { name: "junta", description: "Procesa juntas con el cliente (Laura/Andrés) de Acme Salud" },
           { name: "hermes:deploy", description: "Despliega hermes-os a producción" },
         ],
       },
       ctx,
     )!;
     assert.match(inv.commands[0].description, new RegExp(HIDDEN));
-    assert.ok(!inv.commands[0].description.includes("Mónica"));
+    assert.ok(!inv.commands[0].description.includes("Laura"));
     assert.equal(inv.commands[1].description, "Despliega hermes-os a producción");
     assert.equal(inv.mcp[0].tools[0].description, "Lista issues de [cliente]");
   });

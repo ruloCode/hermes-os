@@ -53,7 +53,7 @@ FAKE = {
     "bearer": "QAFAKETOKEN1234567890abcdef",
     "correo": "qa.falso@example.com",
     "teléfono": "300 123 4567",
-    "cliente": "careways",
+    "cliente": "",  # se llena con un término oculto real del agente (GET /office/public-view)
     "env": "NOMBRE_QA=solo-en-el-env",
 }
 
@@ -132,6 +132,12 @@ def main() -> int:
     except Exception:
         live_cfg = None
     sdk_cfg = live_cfg or fx_config.get("sdk") or {}
+    # Un proyecto oculto de verdad (el primero que reporta el agente): así el QA no lleva nombres de clientes escritos.
+    try:
+        hidden = [t for t in agent_get(args.agent, "/office/public-view").get("hiddenTerms", []) if t.islower() and len(t) >= 5]
+    except Exception:
+        hidden = []
+    FAKE["cliente"] = hidden[0] if hidden else "proyecto-oculto-qa"
     print(f"· configuración de permisos: {'la del agente ' + args.agent if live_cfg else 'la de la fixture'}")
 
     with sync_playwright() as p:

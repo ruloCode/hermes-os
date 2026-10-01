@@ -18,8 +18,8 @@ describe("cbmProject", () => {
 
   it("colapsa espacios y puntos (rutas con nombre de carpeta humano)", () => {
     assert.equal(
-      cbmProject("/Users/rulocode/Documents/Claude/Projects/Rulo Code/teker-app"),
-      "Users-rulocode-Documents-Claude-Projects-Rulo-Code-teker-app",
+      cbmProject("/Users/ana/Documents/Mis Proyectos/Acme App/app-movil"),
+      "Users-ana-Documents-Mis-Proyectos-Acme-App-app-movil",
     );
   });
 
@@ -28,7 +28,7 @@ describe("cbmProject", () => {
   });
 
   it("es estable: el mismo repo siempre da el mismo slug", () => {
-    const r = "/Users/rulocode/dev/working/careways";
+    const r = "/Users/ana/dev/working/acme-salud";
     assert.equal(cbmProject(r), cbmProject(r));
   });
 });

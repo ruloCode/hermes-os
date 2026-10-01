@@ -61,7 +61,7 @@ const saveMemoryTool = tool(
   {
     content: z.string().describe("El contenido de la memoria, autocontenido y claro"),
     type: z.enum(MEMORY_TYPES).describe(`user=sobre ${OWNER}, feedback=correcciones, project=proyectos, reference=links/recursos, daily=diario, agent=aprendizajes propios`),
-    project: z.string().optional().describe("Slug del proyecto relacionado (ej: ternium, zylen)"),
+    project: z.string().optional().describe("Slug del proyecto relacionado (ej: hermes-os)"),
     tags: z.array(z.string()).optional(),
     importance: z.number().min(1).max(5).optional().describe("1=trivial, 5=crítico"),
   },
@@ -79,7 +79,7 @@ const searchKnowledgeTool = tool(
       .array(z.enum(KNOWLEDGE_SOURCES))
       .optional()
       .describe("Acotar a ciertas fuentes. Omitir para buscar en todas."),
-    project: z.string().optional().describe("Slug del proyecto para acotar (ej: ternium)"),
+    project: z.string().optional().describe("Slug del proyecto para acotar (ej: hermes-os)"),
     limit: z.number().max(20).optional(),
   },
   async ({ query, sources, project, limit }) => {
@@ -118,7 +118,7 @@ const savePreferenceTool = tool(
 const getProjectStatusTool = tool(
   "get_project_status",
   "Lee el estado real de los proyectos desde el vault de Obsidian (frontmatter + Estado Actual + Tareas Pendientes). Sin argumentos devuelve todos los activos.",
-  { project: z.string().optional().describe("Slug del proyecto (ej: ternium). Omitir para todos los activos.") },
+  { project: z.string().optional().describe("Slug del proyecto (ej: hermes-os). Omitir para todos los activos.") },
   async ({ project }) => {
     const projects = await readProjects();
     const filtered = project
@@ -231,7 +231,7 @@ const searchMeetingsTool = tool(
   "Búsqueda semántica en el historial de reuniones/juntas por su resumen. Úsala para responder '¿qué salió en la última junta de X?' o '¿qué decidimos sobre Y?'.",
   {
     query: z.string(),
-    project: z.string().optional().describe("Slug del proyecto para acotar (ej: divisual). Omitir para buscar en todos."),
+    project: z.string().optional().describe("Slug del proyecto para acotar (ej: hermes-os). Omitir para buscar en todos."),
     limit: z.number().max(10).optional(),
   },
   async ({ query, project, limit }) => {
@@ -319,12 +319,12 @@ const analyzeYouTubeTool = tool(
 
 const queryCodeGraphTool = tool(
   "query_code_graph",
-  `Responde preguntas sobre la ESTRUCTURA del código de los proyectos de ${OWNER} usando su grafo de dependencias (local, indexado con tree-sitter: no cuesta tokens ni sale de la máquina). Por defecto consulta hermes-os; pasa 'project' (slug del vault: zylen, ternium, careways, teker, video-edit…) para consultar otro. mode=query: pregunta libre ('¿qué conecta el checkout con el pago?'); usa términos que de verdad aparezcan en el código o en los docs del repo; mode=explain: explica un símbolo/módulo y sus conexiones ('explícame registerJob'); mode=path: ruta de dependencias entre dos símbolos/archivos (requiere target). Úsala para '¿dónde vive X?', '¿qué depende de Y?', '¿cómo se conectan A y B?' — nunca adivines arquitectura.`,
+  `Responde preguntas sobre la ESTRUCTURA del código de los proyectos de ${OWNER} usando su grafo de dependencias (local, indexado con tree-sitter: no cuesta tokens ni sale de la máquina). Por defecto consulta hermes-os; pasa 'project' (el slug de un proyecto activo del vault) para consultar otro. mode=query: pregunta libre ('¿qué conecta el checkout con el pago?'); usa términos que de verdad aparezcan en el código o en los docs del repo; mode=explain: explica un símbolo/módulo y sus conexiones ('explícame registerJob'); mode=path: ruta de dependencias entre dos símbolos/archivos (requiere target). Úsala para '¿dónde vive X?', '¿qué depende de Y?', '¿cómo se conectan A y B?' — nunca adivines arquitectura.`,
   {
     mode: z.enum(["query", "path", "explain"]).describe("query=pregunta libre, explain=explicar un símbolo, path=ruta entre dos nodos"),
     query: z.string().describe("La pregunta (query), el símbolo a explicar (explain) o el nodo origen (path)"),
     target: z.string().optional().describe("Solo para mode=path: nodo destino"),
-    project: z.string().optional().describe("Slug del proyecto a consultar (ej: zylen, ternium, careways). Omitir = hermes-os (este dashboard)."),
+    project: z.string().optional().describe("Slug del proyecto a consultar (un proyecto activo del vault). Omitir = hermes-os (este dashboard)."),
   },
   async ({ mode, query, target, project }) => {
     if (mode === "path" && !target) return text("mode=path requiere 'target' (nodo destino).");
@@ -343,7 +343,7 @@ const createLinearIssueTool = tool(
     title: z.string().describe("Título imperativo y específico (ej: 'Agregar retry al upload de grabaciones')"),
     description: z.string().describe("Contexto en markdown: qué, por qué, archivos relevantes, criterios de aceptación. SIN el prompt — ese va aparte."),
     prompt: z.string().describe("Prompt autocontenido para ejecutar la tarea en Claude Code: repo/ruta, instrucciones concretas, criterios de aceptación y verificación."),
-    project: z.string().optional().describe("Slug del proyecto del vault (ej: ternium) — el issue cae en el proyecto de Linear correspondiente (espejo del vault; se crea si falta)"),
+    project: z.string().optional().describe("Slug del proyecto del vault (ej: hermes-os) — el issue cae en el proyecto de Linear correspondiente (espejo del vault; se crea si falta)"),
     team: z.string().optional().describe("Key o nombre del team de Linear. Omitir = LINEAR_TEAM_KEY o el primer team."),
     priority: z.enum(LINEAR_PRIORITIES).optional().describe("Default: normal"),
     labels: z.array(z.string()).optional().describe("Labels extra (se crean si no existen)"),
@@ -371,7 +371,7 @@ const listLinearIssuesTool = tool(
   "list_linear_issues",
   "Lista los issues de Linear (abiertos por defecto). Úsala para '¿qué tengo en Linear?' o antes de crear uno para no duplicar.",
   {
-    project: z.string().optional().describe("Filtrar por proyecto (slug del vault, ej: ternium)"),
+    project: z.string().optional().describe("Filtrar por proyecto (slug del vault, ej: hermes-os)"),
     team: z.string().optional().describe("Key o nombre del team"),
     include_done: z.boolean().optional().describe("true para incluir completados/cancelados"),
     limit: z.number().max(50).optional(),

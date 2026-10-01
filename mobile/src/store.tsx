@@ -44,7 +44,7 @@ interface Store {
   settingsOpen: boolean;
   setSettingsOpen: (v: boolean) => void;
 
-  /** Resuelve lo que dice la voz ("careways", "el de salud") a un slug real. */
+  /** Resuelve lo que dice la voz ("acme-salud", "el de salud") a un slug real. */
   resolveSlug: (raw?: string) => string | null;
 
   /**

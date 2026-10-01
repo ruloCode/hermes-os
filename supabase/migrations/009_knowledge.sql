@@ -32,7 +32,7 @@ alter table conversation_messages
 -- El agente la sincroniza por hash (solo re-embebe lo que cambió).
 create table if not exists vault_docs (
   id bigint generated always as identity primary key,
-  -- Ruta relativa al vault (ej: projects/ternium/Ternium.md). Única: un doc = una fila.
+  -- Ruta relativa al vault (ej: projects/hermes-os/Hermes OS.md). Única: un doc = una fila.
   path text not null unique,
   -- Slug si vive bajo projects/<slug>/ (para filtrar por proyecto).
   project_slug text,

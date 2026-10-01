@@ -41,7 +41,7 @@ export function VoiceClientTools({ projects, onFocusProject, onShowPanel, onWork
   const { switchToTutor } = useVoiceConnect();
   const router = useRouter();
 
-  // Resuelve lo que dice la voz ("careways", "el de salud") a un slug real.
+  // Resuelve lo que dice la voz ("acme-salud", "el de salud") a un slug real.
   const resolveSlug = (raw?: string): string | null => {
     const q = str(raw)?.toLowerCase();
     if (!q) return null;

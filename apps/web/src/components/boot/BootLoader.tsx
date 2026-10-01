@@ -16,8 +16,8 @@ import { readToken } from "@/components/ui/tones";
 
 // Labels por defecto del asset (se usan si aún no hay proyectos en el cliente).
 const DEFAULT_LABELS = [
-  "ZYLEN", "TEKER", "SMOKECK2", "RULOCODE", "MG-COMPANY", "DIVISUAL",
-  "IKIGAI", "OPENMONTAGE", "CAREWAYS", "SMOKERUN", "TERNIUM",
+  "HERMES-OS", "RULOCODE", "OPENMONTAGE", "ESTUDIO", "OFICINA", "MEMORIA",
+  "VOZ", "LINEAR", "AGENDA", "JUNTAS", "GRAFO",
 ];
 
 interface GNode {

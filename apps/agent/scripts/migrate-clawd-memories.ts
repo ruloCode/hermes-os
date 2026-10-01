@@ -11,6 +11,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { readProjects } from "../src/vault/projects.js";
 
 const root = resolve(fileURLToPath(import.meta.url), "../../../..");
 config({ path: resolve(root, ".env") });
@@ -39,21 +40,22 @@ async function embed(text: string): Promise<number[] | null> {
   return json.data[0]?.embedding ?? null;
 }
 
+// Slugs de proyecto que reconoce la migración: los del vault (sin nombres escritos en el código).
+const projectSlugs: string[] = (await readProjects().catch(() => [])).map((p) => p.slug.toLowerCase());
+
 /** Heurística de tipo según nombre de archivo / título de sección. */
 function inferType(name: string): string {
   const n = name.toLowerCase();
   if (/rulo|sobre|user|perfil|interview|personal/.test(n)) return "user";
   if (/setup|config|install|quota|auth|mcp|gateway|tools/.test(n)) return "reference";
-  if (/vitau|teker|nevada|topra|zylen|ternium|careways|project/.test(n)) return "project";
+  if (projectSlugs.some((p) => n.includes(p)) || /project/.test(n)) return "project";
   if (/error|lesson|learning|propuesta|mejora|feedback/.test(n)) return "feedback";
   return "daily";
 }
 
 function inferProject(name: string): string | null {
-  const match = name
-    .toLowerCase()
-    .match(/(ternium|careways|teker|ikigai|zylen|vitau|nevada|topra)/);
-  return match ? match[1] : null;
+  const n = name.toLowerCase();
+  return projectSlugs.find((p) => n.includes(p)) ?? null;
 }
 
 const existingTags = new Set<string>();
