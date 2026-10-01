@@ -191,6 +191,46 @@ La oficina es un edificio de tres pisos (`FLOOR_Y` en `room.ts`: 0 · 3,6 · 7,2
 
 **QA:** `apps/web/scripts/oficina-npc-qa.py` revisa, en los dos temas, que haya gente en al menos dos pisos y nadie dentro de un pod; que Recepción diga los mismos conteos que la simulación y nombre a los agentes de cada estado; los diálogos de Barista y Respiro y la pausa real; que junto a un agente "E" sea del agente; el interruptor (apagado no queda nadie, se recuerda al recargar); y fps ≥ 55. Una vez, que alguien cruce de piso por la escalera y que a media altura siempre esté sobre una escalera. `?seed=N` en la URL o `__hermesOficinaAmbient({ seed })` fijan la coreografía.
 
+## Paredes con datos, TV compartida y la cola de agentes
+
+2026-09-30, a partir del recorrido por las funciones de agent-office en un reel de Kenji Phang. Se tomaron las ideas, no el código ni los diseños: los tableros, la pizarra, los apodos y la gata son propios.
+
+**Tableros de pared (piso 1).** Sus datos salen de `GET /office/boards` (`apps/agent/src/office/boards.ts`, lógica pura en `packages/shared/src/office-boards.ts`). Cada fuente tiene su caché y su error:
+
+| Tablero | Dónde | Fuente |
+| --- | --- | --- |
+| **Issues** (corcho con notas) | Pared del fondo, simétrico al cuadro | Linear (`linearBoard()`): Por hacer · En curso · Hecho. Los cancelados quedan fuera. "prompt listo" marca los issues que traen bloque Copy prompt |
+| **Pull requests** | Muro este | `gh pr list --repo <origin>` en cada repo de `indexableRepos()`. Ojo: sin `--repo`, en un fork `gh` lista los PR del upstream y la etiqueta mentía |
+| **Servicios** | Muro este | `lsof -iTCP -sTCP:LISTEN`, solo procesos de desarrollo en puertos < 49152. El proyecto sale de la carpeta del proceso; el agente y el dashboard se reconocen por su puerto |
+
+"E" o un clic abre el detalle, con "↻ Actualizar" (`?refresh=1`). Si una fuente falla, el tablero lo dice; nunca aparece vacío como si no hubiera nada. Los binarios van por ruta absoluta (`GH_BIN`, `LSOF_BIN`) porque launchd no trae `/opt/homebrew/bin` en el PATH. La página consulta la ruta cada 30 s, solo mientras la Oficina está abierta.
+
+**TV del café con pantalla compartida.** "E" frente a la TV llama a `getDisplayMedia` y pone el video en la pantalla (`VideoTexture`; `room.setTvVideo`). "dejar de compartir" (o el botón del navegador) vuelve al feed. Tres cosas que costaron:
+- El `<video>` tiene que estar en el DOM (oculto, de 2 px). Fuera de él, Chromium no produce cuadros y la TV queda negra.
+- El control no cuenta como gesto del navegador: con **A**, `getDisplayMedia` se niega, y el aviso pide E o clic.
+- La etiqueta dice qué se comparte (pestaña, ventana o pantalla), por `displaySurface`. El `label` del track es un id interno.
+
+En headless no hay pantalla que capturar, así que `__hermesOficinaShareTest()` manda un canvas animado por la misma ruta.
+
+**Pizarra libre** (muro oeste). "E" abre un editor de canvas con colores, grosores, borrador y limpiar. "Guardar" la deja en el agente (`PUT /office/whiteboard` → `~/.hermes-os/oficina/pizarra.png`, solo PNG, tope de 3 MB). Cualquier navegador que abra la oficina la ve, porque la página la relee cada 15 s mientras el editor está cerrado. Cerrar con trazos sin guardar pregunta.
+
+**Apodos** (`packages/shared/src/office-nicknames.ts`). Cada agente vivo tiene un nombre corto y estable (Lince, Brújula, Chispa…) junto a su tarea, en la tarjeta, en la lista del equipo y en el aviso de "E". Son pegajosos: la sesión que continúa a otra hereda su apodo, como hereda el escritorio. Nunca hay dos vivos con el mismo. Si se acaba la lista, se numeran.
+
+**La gata** (`lib/oficina/pet.ts`). Una atigrada low-poly que pasea por el piso 1 con la rejilla de la gente, se sienta a ratos y a veces se acerca al dueño. Va con "Ambiente".
+
+**Cola de agentes** (`apps/agent/src/office/queue.ts`, lógica pura en `packages/shared/src/office-queue.ts`). La cola recibe trabajo y lo reparte a agentes **nuevos** sin pasar de un tope (1 a 3 a la vez, con el modo de permisos de la Oficina, Auto por defecto):
+- Cada tarea es un run real de `claude -p` (`startClaudeRun`). Aparece en su escritorio como cualquier otro, con "Ir →" desde el panel.
+- Los issues de Linear entran con **«→ Cola»** desde el tablero de Issues. Van por su puente (`executeLinearIssue`): pasan a In Progress y al final se comenta cómo terminó.
+- El estado vive en `~/.hermes-os/oficina/cola.json` y se concilia cada 3 s con el run real. "En curso" existe solo con un run vivo detrás; si el agente se reinició, la tarea pasa a error con ese motivo.
+- Lo que no arrancó se puede sacar. Lo que corre se detiene desde el panel del agente.
+- Rutas: `GET /office/queue`, `POST /office/queue {items}`, `POST /office/queue/:id/cancel`, `PUT /office/queue/settings {max, mode}` y `POST /office/queue/plan {text, project}`.
+
+**El coordinador** (`office/queue-plan.ts`). Le dices qué hay que hacer y Haiku (`HERMES_QUEUE_MODEL`) lo parte en 1 a 6 tareas independientes, cada una con un prompt autocontenido y su proyecto (solo slugs reales; si no sabe, `general`). **Propone; no encola**: eliges con casillas qué entra, porque cada tarea gasta tokens al correr. Su única herramienta es `propose_tasks`: sin Bash, sin Read y sin red. Tiene cara: **Coordinación**, un NPC junto al tablero de la cola (con Ambiente), cuyo "E" abre el mismo panel. En simulación no se puede pedir ni encolar.
+
+Verificado de punta a punta: una tarea mínima pasó de esperando a en curso, su agente apareció en la Oficina, y quedó lista en 15 s. El coordinador partió un pedido doble en 2 tareas en 19 s.
+
+**QA:** `apps/web/scripts/oficina-features-qa.py` cubre los tres tableros contra lo que dice el agente, «→ Cola» deshabilitado en simulación, la TV, la pizarra (dibuja y cierra **sin guardar**: la real no se toca), la cola y Coordinación, los apodos, la gata y fps ≥ 55, en los dos temas. No gasta tokens.
+
 ## La sala
 
 `lib/oficina/room.ts` es un **loft de coworking** (look tipo WeWork, 2026-09-30, a partir de una imagen de referencia generada con Higgsfield): ladrillo a la vista en los muros (paño de canvas de 1,6 × 1,2 m repetido según el tamaño de cada tramo, así no se estira), piso de concreto pulido, ventanas industriales con cuadrícula de acero negro y un frente abierto con muro bajo de ladrillo y vidrio, para que la cámara siempre vea adentro. La cocina tiene mesón de madera con repisas abiertas, cafetera con vapor, **neón "Hermes"** (textura con halo + luz rosada real), **pizarra de tiza** del café (sin precios: en la oficina un número siempre es un dato real) y una **isla** con frascos de agua con fruta, grifos de kombucha/cerveza, snacks y cuatro banquetas altas bajo dos lámparas industriales colgantes. El lounge tiene sofá terracota, sillón verde de terciopelo, mesa redonda, puf y la TV del feed; en la esquina noreste hay una **cabina telefónica** de vidrio. Matas colgantes cerca de las ventanas y un afiche tipográfico. Sin lámparas sobre los pods: desde la vista aérea tapaban los escritorios.
@@ -306,6 +346,8 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | --- | --- |
 | `__hermesOficinaSim(state \| "demo" \| null)` | Sustituye el estado real, siempre marcado como simulación |
 | `__hermesOficinaDebug()` | Personajes, asientos, selección, escritorios y fps. Con el ambiente, `npcs` (`{id, role, floor, x, y, z, activity, state}`), `ambient`, `seed`, `floorChanges`, `navNodes`, `pois` (lugares que quedaron y descartados) y `npcDialog` |
+| `__hermesOficinaShareTest()` | Comparte un canvas animado en la TV (headless no tiene pantalla que capturar) |
+| `__hermesOficinaWalkTo({kind: "board" \| "tv" \| "whiteboard" \| "queue", id})` | Pone al dueño frente a un tablero (`issues`, `prs`, `services`), la TV (`lounge`), la pizarra (`free`) o la cola (`main`) |
 | `__hermesOficinaAmbient({ on?, seed? })` | Prende o apaga la gente del edificio y siembra su coreografía (también `?seed=N` en la URL) |
 | `__hermesOficinaScreenOf(hit)` | Posición en pantalla de un escritorio o personaje, para clics reales |
 | `__hermesOficinaFocus(hit)` | Lleva la cámara a un escritorio o personaje (vista aérea) |
