@@ -671,6 +671,24 @@ Para el escritorio General (tarea del Agent SDK, `POST /tasks`), con el repo rec
 
 En el ensayo nadie miraba la Oficina, así que ningún paso pidió permiso. En tarima sí: `npm test`, `npm run build` y el `node -e` levantan la mano (solo pasan solos los Bash de lectura, `isReadOnlyBash`). El `rm -rf` lo niega el guardrail ANTES de preguntar.
 
+## Proyectos para la demo
+
+Cinco pods con trabajo de verdad para que la demo fluya. Cada uno es un repo chico en `~/dev/demo/` con su CLAUDE.md y una nota en el vault (`estado: activo`, tag `demo-tarima`). Al hablarle a un agente en su escritorio corre `claude -p` en esa carpeta: la pestaña Prompt muestra el CLAUDE.md que cargó. `scripts/demo-proyectos.sh prepare` los crea (además deja sus nombres en la vista pública); `reset` los devuelve al punto de partida antes de cada ensayo; `status` dice qué falla.
+
+| Pod | Qué es | Pídele… | Qué va a encontrar (real) |
+| --- | --- | --- | --- |
+| **RuloCode Web** | Tu sitio real (rulocode.com) como worktree del repo del portafolio en la rama `demo/tarima`. Tu `main` y tus cambios sin commitear no se tocan | "Escribe la entrada del blog sobre la demo de hoy en el evento de Anthropic, en español e inglés, con el mismo formato que las demás" | Tiene que leer otra entrada para copiar el frontmatter y la estructura bilingüe |
+| **Edición de Reels** | Crudos reales del reel del gym (proxies 1080p) + tus voces en off por bloque + transcripciones | "Arma el reel listo para publicar siguiendo el CLAUDE.md y verifícalo con ffprobe" | La voz del bloque 03 es una prueba de sonido; las transcripciones son de la primera toma y manda la última; el ffmpeg del PATH no quema subtítulos (el CLAUDE.md dice cuál sí) |
+| **Finanzas Personales (demo)** | Movimientos ficticios de septiembre en COP y USD (Bancolombia, Nequi, Nu, Ontop) | "¿En qué se me fue la plata en septiembre? Si el reporte no cuadra, arréglalo sin tocar los tests" | Las transferencias entre cuentas propias se cuentan como gasto y los dólares se suman sin la TRM |
+| **Freelance Café Alto** | Cliente ficticio (tostadora en Manizales): horas, cuenta de cobro y landing | "Genera la cuenta de cobro de octubre y verifica los totales" · "Agrega una sección de precios a la landing" | Las horas se suman como texto y la retención se suma en vez de restarse |
+| **Liga BetPlay** | Tabla de posiciones con resultados de prueba | "Calcula la tabla y dime quién clasifica" | Los empates le dan 3 puntos al local y el desempate mira goles antes que diferencia (dos errores, uno tras otro) |
+
+Los tests de los tres proyectos de código están verificados de las dos maneras: con los bugs fallan y con el arreglo correcto pasan (si no, el agente nunca podría terminar).
+
+> **Ojo (lo encontró la preparación):** las tomas largas del video "El día a día de un ingeniero" son reuniones reales con otras personas: no van a un proyector. Por eso el reel sale de la pieza del gym, que es tuya de punta a punta.
+>
+> **Ojo:** el proyecto `rulocode` (estrategia) se oculta por defecto y su nombre está dentro de `rulocode-web`. La redacción aparta los nombres de los proyectos públicos antes de tapar los ocultos (`publicTerms`), así que "rulocode-web" no sale como "[cliente]-web".
+
 ## Ensayo y demo
 
 ```bash
