@@ -231,6 +231,98 @@ Verificado de punta a punta: una tarea mínima pasó de esperando a en curso, su
 
 **QA:** `apps/web/scripts/oficina-features-qa.py` cubre los tres tableros contra lo que dice el agente, «→ Cola» deshabilitado en simulación, la TV, la pizarra (dibuja y cierra **sin guardar**: la real no se toca), la cola y Coordinación, los apodos, la gata y fps ≥ 55, en los dos temas. No gasta tokens.
 
+## Uso de Claude y gasto de tokens
+
+2026-09-30. Un tablero en la pared del fondo del piso 1 (rincón noreste, junto a la sala de control) y su versión grande en el monitor de la oficina de CEO. "E" o un clic abre el panel **Uso de Claude**. En el HUD, una píldora resume el uso del plan ("Sesión 43 % · Semana 55 % · Fable 38 %") y también abre el panel.
+
+**Arriba, el uso del plan**, como en la página de uso de claude.ai: **sesión actual** (la ventana de 5 h), **esta semana** y los límites semanales propios de un modelo (**Fable esta semana**). Cada uno trae su barra, su "% usado" y "Se restablece el jue, 12:20 a.m.". La barra es azul, ámbar desde el 80 % y roja desde el 95 %.
+
+**Abajo, el gasto equivalente en dólares** de los agentes, con lo que el CLI reporta en cada `result`.
+
+| Número | Fuente | Alcance |
+| --- | --- | --- |
+| % de sesión, semana y por modelo, con su reinicio | `GET /office/plan-usage` → el control `get_usage` del CLI (lo mismo que `/usage`), por `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` del Agent SDK | La cuenta de claude.ai con la que corre Claude Code. **No llama al modelo: cero tokens.** Con API key, Bedrock o Vertex no hay límites de plan y el tablero lo dice |
+| Gasto de hoy, ejecuciones y tokens (entrada, salida, caché creada, caché leída) | `.data/usage/AAAA-MM-DD.json` (`usage.ts`, el `usage` de `/dashboard`) | Runs de `claude -p` y, desde este cambio, tareas del SDK (`POST /tasks`). **No incluye** el chat, las juntas ni el Estudio |
+| Serie de 7 y 30 días | Los mismos archivos diarios | Un día sin archivo después del primero de la máquina (hay desde el 2026-07-06) es un cero real; antes no hay dato y la barra no se pinta |
+| Por proyecto y por modelo (hoy y 7 días), "terminaron hace poco" | `.data/usage/runs-AAAA-MM-DD.jsonl`, una línea por run terminado con su proyecto y su `modelUsage` | **Existe desde el 2026-09-30.** El panel dice "registro por run desde el…" y, sin líneas, "sin desglose todavía" |
+| Lo que lleva cada agente | El personaje (`OfficeWorker.spend`): los tokens de cada mensaje de la API mientras corre (sumados una vez por `message.id`: el CLI repite el mensaje por bloque) y el costo y los tokens del `result` al terminar | **El costo solo existe al terminar**: mientras corre se muestran tokens y el panel lo aclara. La tarjeta del personaje lleva el costo solo cuando es final |
+
+- `task_executions` (Supabase) **no se usa**: solo guarda las ejecuciones del tablero de tareas (Ejecutar/Continuar). Su última fila es del 2026-07-30 y en septiembre no hay ninguna.
+- Rutas: `GET /office/spend` (caché de 10 s para los archivos; lo vivo sale de memoria) y `GET /office/plan-usage` (caché de 60 s: arrancar el CLI tarda ~1 s). La página consulta el gasto cada 15 s y el plan cada minuto, solo mientras la Oficina está abierta.
+- Lógica pura y probada en `packages/shared/src/office-spend.ts` (`parseModelUsage`, `assistantUsageDelta`, `spendByProject`, `spendByModel`, `spendSeries`, `parsePlanUsage`, `formatPlanReset`…).
+
+> **Ojo con `get_usage`:** el SDK lo marca EXPERIMENTAL. Si una versión lo cambia, la ruta responde el error y el tablero dice "sin datos". La consulta abre una sesión con entrada en streaming que nunca manda un mensaje (sin turno, sin modelo). Hay que **drenar el iterador** para que el SDK procese el control y cerrar la sesión en el `finally`. El reinicio llega como `05:19:59.88`: se redondea al minuto para leer 12:20, como claude.ai.
+
+## Pantallas de los agentes
+
+- **Monitor en cada escritorio ocupado** (`lib/oficina/monitor.ts`): una pantalla más grande que la laptop, en la punta exterior del escritorio, girada hacia la silla y el pasillo. Tiene una barra con el apodo, la tarea, el estado y lo que lleva gastado, y debajo el stream del agente: `⚙` tool y objetivo, `↩` resultado, texto del modelo, `✓`/`✗` cierre. Corta con "…" y nunca completa.
+- **Sala de control** (`lib/oficina/controlwall.ts`), piso 1, pared del fondo a la derecha de Issues: una cuadrícula con la terminal de **todos** los agentes vivos (hasta 12; el resto se cuenta). Muestra apodo, proyecto, estado y gasto. Clic en una pantalla abre el panel de ese agente. "E" abre la sala en grande (`ControlRoomPanel`). Sin agentes, la pared lo dice.
+- **Panel a pantalla completa**: ⤢ en el panel del agente. Trae la terminal grande con scroll, que sigue el final solo si ya estabas abajo, y la conversación de siempre debajo. La primera Esc sale de pantalla completa y la segunda cierra el panel. El panel también muestra el gasto.
+
+**Un solo canal, cero streams nuevos.** Cada actualización de `GET /office/events` ya trae las últimas 12 líneas de cada personaje, y de ahí leen el monitor y la sala de control. Solo el panel abierto usa el stream del run (`GET /claude/run/:id/stream`), como antes: uno a la vez. El monitor se repinta hasta 4 veces por segundo a menos de 6 m, una por segundo hasta 16 m y nunca fuera de cámara o con otro piso a la vista. La sala de control es **un** canvas y **una** malla para toda la pared, repintada hasta 3 veces por segundo si se ve.
+
+## Minijuegos de la azotea
+
+Los cinco puestos de la azotea se juegan. Acércate (sale "Jugar…") y presiona **E**, **A** o haz clic. La cámara pasa al juego y el dueño se esconde para no tapar la mesa. **Esc** o **B** salen. Con la partida terminada, **Espacio** o **A** empiezan otra. El HUD del juego (abajo) muestra el puntaje de esta partida, tu **récord** y los controles.
+
+| Juego | Teclado | Control | Cómo se gana |
+| --- | --- | --- | --- |
+| **Dardos** | Flechas/WASD mueven la mira (oscila sola, como el pulso); Espacio lanza | Stick y A | 9 dardos en tres rondas. El puntaje sale del sector y el anillo **reales** de la diana pintada: 20 arriba, triple, doble, diana 50 y su anillo 25 |
+| **Ping-pong** | ←→ o A/D | Stick | Contra la CPU, hasta que te gane 3 puntos. Tu puntaje son los puntos que le ganas. Pegarle con el borde de la raqueta cruza la pelota, y la CPU (más lenta) no llega |
+| **Futbolín** | ↑↓ o W/S suben y bajan tus varillas (rojas); Espacio las gira y patea | Stick y A | Las ocho varillas de la mesa (1-2-3-5-5-3-2-1). Hasta que te metan 3; tu puntaje son tus goles |
+| **Canasta** | ↑↓ cambian el ángulo; mantener Espacio carga la fuerza (sube y baja) y soltar lanza | Stick y A sostenida | 10 pelotas a la cesta. Entra si cruza el aro bajando por dentro; si toca el borde, rebota |
+| **Lluvia de tokens** (arcade) | ←→ | Stick | Juego propio: un cursor de terminal atrapa tokens verdes (+1) y esquiva bugs rojos (−1 vida). Cada 10 tokens la lluvia acelera. 3 vidas |
+
+- **Récords** en localStorage (`hermes-oficina-record-<juego>`), uno por navegador. Son datos reales de partidas reales. La pantalla de la arcade, en espera, muestra el título y su récord, o "sin récord todavía". La ilustración de marcianitos se fue: imitaba un juego conocido.
+- **Si alguien de ambiente está jugando ahí, se aparta** (`AmbientPlanner.reserve`), y nadie vuelve a ese lugar mientras juegas.
+- Física y puntaje **puros y probados** en `packages/shared/src/office-games.ts`; cada juego se dibuja en `lib/oficina/games/<juego>.ts`.
+
+> **Ojo (futbolín):** la primera versión tenía cuatro varillas. Dejaba una franja de 36 cm al centro donde ningún muñeco llegaba, y con tanta fricción la pelota se dormía ahí: 0 a 0 para siempre. Ahora tiene las ocho de la mesa, una leve pendiente que despierta una pelota quieta y una CPU que decide cada 0,3 s (sin eso, alineaba perfecto y bloqueaba todo).
+>
+> **Ojo (canasta):** una pelota que rozaba el aro rebotaba contra el borde para siempre (cada cruce del plano del aro volvía a rebotar). Tras tocar el borde ya no se evalúa el aro.
+>
+> **Ojo (cámara):** durante el juego no se llama `player.update`, porque reubica la cámara detrás del dueño en cada frame. Las teclas del juego se sueltan al perder el foco (`blur`): si no, una flecha quedaba "presionada".
+
+## Oficina de CEO
+
+La oficina del dueño, en el **piso 1, esquina sureste** (x 12,6–19,4 · z 8,6–15). Ese rincón siempre está libre: los pods tienen 3 columnas fijas (x ≤ 7,7) y solo crecen hacia el frente dentro de ese ancho. Se ancla a `minZ`, así el ventanal del muro este, con el cielo de la hora real, siempre queda adentro, y por el vidrio se ve al equipo.
+
+- Vidrio con **banda esmerilada** y marco negro. La puerta da a los pods, y en el vidrio está la **placa** con `NEXT_PUBLIC_HERMES_OWNER_NAME` ("Oficina privada" si está vacía).
+- Escritorio de madera frente al ventanal, silla ejecutiva, sofá, estantería, planta grande, lámpara de pie (con su luz) y un cuadro propio.
+- **Pantallas con datos reales**: el monitor grande trae el uso de Claude, el gasto, los 30 días, por proyecto, por modelo y quién gasta ahora. El monitor chico, **quién te necesita** (permisos abiertos con su comando o plan) y la cola. En el muro, el reloj y la **agenda** (`snapshot.calendar` de `/dashboard`, la misma de la Barista).
+- **Modo CEO**: "E" junto a la silla. La cámara son los ojos del dueño sentado y mira el salón por el vidrio, con los monitores abajo. ←→ o **LB/RB** recorren a los agentes: la cámara voltea a su escritorio, sin caminar. **Enter** o **A** abren su panel. **Esc** o **B** te levantan (si hay un panel abierto, la primera Esc lo cierra).
+- **Privada**: una caja solo-obstáculo en la rejilla de la gente; ni la gente de ambiente ni la gata entran.
+
+> **Ojo (lo encontró el QA):** el vidrio tenía tope de muro (`top: 99`). En `col()`, 99 es absoluto, así que bloqueaba **los pisos de arriba**: sobre la oficina había una pared invisible en el café y en la azotea, justo donde está el futbolín. Una pared que no es muro de la sala lleva su altura real (2,9 m).
+
+## Zonas nuevas y capas
+
+**Medir antes de llenar.** `NavGrid.openZones(piso, k)` (`office-nav.ts`, método del histograma, con test) devuelve los rectángulos libres más grandes de cada piso sobre la misma rejilla de la gente. Se ven en `__hermesOficinaDebug().freeZones`. Sin agentes medía 336 m² en el piso 1 (rincón este), 222 m² en el café (centro-norte) y 213 m² en la azotea (todo el frente).
+
+| Zona | Dónde | Qué tiene |
+| --- | --- | --- |
+| Sala de juntas | Café, frente oeste | Vidrio con puerta, mesa para 6 y una pantalla con **la próxima junta del calendario real** ("Sin juntas próximas" o "Calendario sin configurar" si no hay) |
+| Biblioteca | Café, frente centro-este | Dos estanterías contra el balcón, dos sillones y una mesita |
+| Cabinas de foco | Café, frente este | Dos cabinas de vidrio |
+| Lounge de la azotea | Azotea, frente (el área vacía más grande) | Mesa baja, tres pufs y dos materas |
+
+Hay 6 lugares nuevos para la gente (33 en total, ninguno descartado). Los muebles estáticos se funden por material (`mergeByMaterial`): pocos draw calls, porque el contorno dibuja todo dos veces. No hay hot desks: un escritorio sin personaje se confundiría con un escritorio de pod.
+
+**Interruptor "Capas"** (HUD, `hermes-oficina-capas`): **Pantallas y uso** (monitores, sala de control, tablero y píldora), **Oficina de CEO**, **Zonas nuevas** y **Minijuegos**. Apagadas, la sala se arma como antes: vuelven la ventana del fondo y las dos matas. La única excepción es la pantalla de la arcade, que muestra su espera en vez de la ilustración vieja.
+
+## Sonido
+
+Todo procedural con WebAudio (`lib/oficina/audio.ts`): sin samples ni audio con derechos. El botón **Sonido** viene **apagado**. El `AudioContext` nace con ese clic (política de autoplay), se suspende con la pestaña oculta y **baja solo durante una llamada** con Hermes o el equipo. El volumen se guarda (`hermes-oficina-volumen`).
+
+| Suena | Cuándo |
+| --- | --- |
+| Tono de sala | El del piso que se ve: equipos (rumor grave), café (murmullo en la banda de la voz que respira lento), azotea (viento y la ciudad abajo). Se cruzan al cambiar de piso |
+| Teclados | Solo agentes con estado `working`, posicionales (`PannerNode`, más fuertes cerca), a lo sumo 6 y solo con el piso 1 a la vista. Ráfagas de 3 a 9 teclas y una pausa |
+| Cafetera | Vapor o molino cada 9–21 s, posicional en la barra del café |
+| Minijuegos | Golpe, rebote, punto, error, lanzamiento y fin de partida |
+| Pasos | Los del dueño al caminar o correr |
+| Avisos | Dos notas cuando un agente te necesita; tres cuando alguien termina (con el confeti) |
+
 ## La sala
 
 `lib/oficina/room.ts` es un **loft de coworking** (look tipo WeWork, 2026-09-30, a partir de una imagen de referencia generada con Higgsfield): ladrillo a la vista en los muros (paño de canvas de 1,6 × 1,2 m repetido según el tamaño de cada tramo, así no se estira), piso de concreto pulido, ventanas industriales con cuadrícula de acero negro y un frente abierto con muro bajo de ladrillo y vidrio, para que la cámara siempre vea adentro. La cocina tiene mesón de madera con repisas abiertas, cafetera con vapor, **neón "Hermes"** (textura con halo + luz rosada real), **pizarra de tiza** del café (sin precios: en la oficina un número siempre es un dato real) y una **isla** con frascos de agua con fruta, grifos de kombucha/cerveza, snacks y cuatro banquetas altas bajo dos lámparas industriales colgantes. El lounge tiene sofá terracota, sillón verde de terciopelo, mesa redonda, puf y la TV del feed; en la esquina noreste hay una **cabina telefónica** de vidrio. Matas colgantes cerca de las ventanas y un afiche tipográfico. Sin lámparas sobre los pods: desde la vista aérea tapaban los escritorios.
@@ -244,7 +336,7 @@ Además hay rincones para caminar, todos procedurales como el resto (cero assets
 | Esquina sureste | Futbolín (rojo contra azul, varillas 1-2-3-5-5-3-2-1) y máquina arcade con marcianitos en la pantalla |
 | Detalles | Dos cuadros en la pared del fondo y un perchero en la entrada |
 
-La pantalla de la arcade es una ilustración: no muestra puntajes, porque en esta oficina un número siempre es un dato real.
+La pantalla de la arcade es el juego "Lluvia de tokens" y, en espera, su récord: un número de partidas reales de este navegador (ver Minijuegos).
 
 Lo que muestra datos es real:
 
@@ -347,6 +439,12 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaSim(state \| "demo" \| null)` | Sustituye el estado real, siempre marcado como simulación |
 | `__hermesOficinaDebug()` | Personajes, asientos, selección, escritorios y fps. Con el ambiente, `npcs` (`{id, role, floor, x, y, z, activity, state}`), `ambient`, `seed`, `floorChanges`, `navNodes`, `pois` (lugares que quedaron y descartados) y `npcDialog` |
 | `__hermesOficinaShareTest()` | Comparte un canvas animado en la TV (headless no tiene pantalla que capturar) |
+| `__hermesOficinaSim("demo", n)` | La simulación con `n` personajes (capturas con 0, 3 y 10) |
+| `__hermesOficinaGame.start(id)` · `.input({x, y, action, pressed})` · `.state()` · `.exit()` | Minijuegos por código: `state().inner` trae la pelota, las varillas o los tokens para jugar de verdad |
+| `__hermesOficinaCeo(on)` | Sentarse en la silla de la oficina de CEO (true) o levantarse |
+| `__hermesOficinaAudio()` | Estado del sonido (prendido, contexto, volumen, si está bajo por llamada, teclados activos, eventos) |
+| `__hermesOficinaWalkTo({kind: "spend" \| "control", id: "wall"})` · `({kind: "game", id})` · `({kind: "ceo", id: "chair"})` | Frente al tablero de uso, a la sala de control, a un minijuego o junto a la silla de CEO |
+| `__hermesOficinaDebug()` (nuevo) | `spendData`, `planUsage`, `monitors` (líneas y repintes por agente), `controlWall`, `game`, `ceo`, `layers`, `meeting`, `freeZones` y, por personaje, `lines` y `spend` |
 | `__hermesOficinaWalkTo({kind: "board" \| "tv" \| "whiteboard" \| "queue", id})` | Pone al dueño frente a un tablero (`issues`, `prs`, `services`), la TV (`lounge`), la pizarra (`free`) o la cola (`main`) |
 | `__hermesOficinaAmbient({ on?, seed? })` | Prende o apaga la gente del edificio y siembra su coreografía (también `?seed=N` en la URL) |
 | `__hermesOficinaScreenOf(hit)` | Posición en pantalla de un escritorio o personaje, para clics reales |
@@ -356,9 +454,15 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaDictate(text)` | Deja `text` como lo dictado, listo para enviar (QA sin micrófono) |
 | `__hermesOficinaTeam.say(text)` / `.debug()` | Le habla al equipo sin micrófono / reparto de voces, runs vigilados, cola y avisos |
 
+QA de los extras: `apps/web/scripts/oficina-extras-qa.py` compara el tablero y el panel con `GET /office/spend` y `GET /office/plan-usage` (los pide aparte), revisa monitores y sala de control con la simulación y **juega** cada minijuego con entradas sintéticas hasta sumar puntaje: sigue la pelota, alinea las varillas y atrapa tokens. También revisa la placa y el modo CEO, el sonido (apagado al cargar y prendido con un clic real), las capas y los fps, en los dos temas: 70 comprobaciones, sin tokens. `--agent` cambia la URL del agente.
+
 QA del control sin control físico: `apps/web/scripts/oficina-pad-qa.py` inyecta un Xbox simulado en `navigator.getGamepads()`, con el mismo id y mapeo que entrega Chrome, y recorre la ruta real con 26 comprobaciones.
 
 ## Pendiente (stretch)
+
+- Agenda de la sala de juntas: muestra el próximo evento del calendario aunque no sea una junta. La última junta del vault (`meetings`) sería más precisa.
+- Tableros de gasto por modelo antes del 2026-09-30: el registro por run nació ese día y lo viejo no se puede reconstruir.
+- El costo en vivo de un run: el CLI solo lo da al terminar. Calcularlo con una tabla de precios sería una estimación, no un dato.
 
 - Fase 2 de la gente: que un agente **listo** camine al café durante su gracia de 3 minutos y uno **pensando** dé unos pasos junto a su escritorio (nunca uno trabajando o que te necesita). Se dejó fuera para no arriesgar la demo: el "near" y el clic de los agentes dependen de que sigan en su silla.
 - Que la gente se aparte entre sí. Hoy solo esquiva al dueño; dos personas que se cruzan pueden atravesarse un instante.
