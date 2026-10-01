@@ -156,4 +156,25 @@ describe("AmbientPlanner", () => {
     planner.failed("p0", 1);
     for (let t = 2; t < 30; t += 1) for (const o of planner.tick(t)) assert.notEqual(o.poi.id, first.poi.id);
   });
+
+  it("el dueño reserva un juego: quien estaba se aparta y nadie vuelve hasta liberarlo", () => {
+    const planner = new AmbientPlanner([{ id: "dardos", floor: 2, activity: "darts", slots: [slot(1, 1)] }, ...POIS.filter((p) => !p.together)], 5);
+    planner.add("a", 2, 0);
+    const placed = planner.place("a", 0);
+    // Se fuerza a "a" a estar en los dardos (place elige al azar).
+    const a = planner.people.get("a")!;
+    Object.assign(a, { phase: "staying", poi: "dardos", slot: 0, until: 999 });
+    assert.ok(placed);
+    assert.deepEqual(planner.reserve("dardos", 1), ["a"]);
+    assert.equal(a.phase, "idle");
+    for (let now = 1; now < 400; now += 1) {
+      for (const o of planner.tick(now)) {
+        assert.notEqual(o.poi.id, "dardos", "nadie elige el lugar reservado");
+        planner.arrived(o.id, now + 0.5);
+      }
+    }
+    assert.deepEqual(planner.reserve(null, 400), []);
+    assert.deepEqual(planner.reserve("no-existe", 400), []);
+  });
 });
+

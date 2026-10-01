@@ -18,6 +18,11 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { OutlineEffect } from "three/addons/effects/OutlineEffect.js";
 import {
   type QueueState,
+  type GameId,
+  type GameInput,
+  GAME_INFO,
+  NO_INPUT,
+  bestKey,
   DESK_SIZE,
   SEAT_ANCHOR,
   deskToWorld,
@@ -44,6 +49,7 @@ import { QueueBoard } from "./queueboard";
 import { SpendBoard } from "./spendboard";
 import { ControlWall } from "./controlwall";
 import { DeskMonitor } from "./monitor";
+import { createGame, paintArcadeIdle, type GameEvent, type GameHud, type MiniGame } from "./games";
 import { PlayerController, isTyping, type Collider } from "./player";
 import { buildRoom, type BoardStat, type FeedLine, type Room, FLOOR_Y, floorAt } from "./room";
 import { noOutline, setToonFont, toon } from "./toon";
@@ -56,6 +62,30 @@ const FRAME_DIR = new THREE.Vector3(0, 0.62, 0.78).normalize();
 const REACH = 1.7;
 /** Distancia a la que "E" alcanza un tablero de pared (desde su punto de uso). */
 const BOARD_REACH = 1.8;
+/** Distancia a la que "E" alcanza un minijuego (desde donde se para el jugador). */
+const GAME_REACH = 1.4;
+
+/** Récord de un minijuego en este navegador (null = nunca se jugó o el storage no responde). */
+export function readBest(id: GameId): number | null {
+  try {
+    const v = localStorage.getItem(bestKey(id));
+    const n = v === null ? NaN : Number(v);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBest(id: GameId, score: number): boolean {
+  const best = readBest(id);
+  if (score <= 0 || (best !== null && score <= best)) return false;
+  try {
+    localStorage.setItem(bestKey(id), String(score));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Lo que se clickea o alcanza con "E": un agente, un escritorio libre, un NPC con rol o un tablero de pared. */
 export type OfficeHit =
@@ -67,7 +97,8 @@ export type OfficeHit =
   | { kind: "whiteboard"; id: "free" }
   | { kind: "queue"; id: "main" }
   | { kind: "spend"; id: "wall" }
-  | { kind: "control"; id: "wall" };
+  | { kind: "control"; id: "wall" }
+  | { kind: "game"; id: GameId };
 export type OfficeMode = "explore" | "aerial";
 
 export interface ScreenAnchor {
@@ -90,6 +121,10 @@ export interface OfficeWorldHooks {
   onMode?: (mode: OfficeMode) => void;
   /** El piso que se ve cambió (explorar: donde está el dueño; aérea: el elegido). */
   onFloor?: (floor: number) => void;
+  /** Minijuego: su HUD cuando cambia (null = se salió). */
+  onGame?: (hud: GameHud | null) => void;
+  /** Algo sonó en un minijuego (golpe, punto…) y dónde. */
+  onGameEvent?: (ev: GameEvent, at: THREE.Vector3) => void;
   /** Cada frame: dónde está la cabeza de cada NPC con rol (para su etiqueta). */
   onNpcs?: (anchors: (ScreenAnchor & { role: OfficeNpcRole })[]) => void;
 }
@@ -187,6 +222,19 @@ export class OfficeWorld {
   private readonly frustum = new THREE.Frustum();
   private readonly projScreen = new THREE.Matrix4();
   private readonly sphere = new THREE.Sphere();
+  /** Minijuego en curso: la cámara y la entrada son suyos hasta salir. */
+  private game: MiniGame | null = null;
+  private readonly gameKeys = new Set<string>();
+  private gamePadA = false;
+  private gameSynth: Partial<GameInput> | null = null;
+  private gamePrevAction = false;
+  private gameHudKey = "";
+  private gameSaved = false;
+  private gameMoved: string[] = [];
+  private lastGameEvent: GameEvent | null = null;
+  private readonly gameLook = new THREE.Vector3();
+  private gameHudAt = 0;
+  private gameOverAt = 0;
   mode: OfficeMode = "explore";
   fps = 0;
 
@@ -271,6 +319,8 @@ export class OfficeWorld {
     el.addEventListener("pointerleave", this.onLeave);
     el.addEventListener("wheel", this.onWheel, { passive: false });
     window.addEventListener("keydown", this.onKey);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", this.onBlur);
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(container);
@@ -281,6 +331,8 @@ export class OfficeWorld {
 
   setMode(mode: OfficeMode) {
     if (mode === this.mode) return;
+    // Cambiar de vista saca del minijuego (la cámara vuelve a ser de la vista).
+    if (this.game) this.exitGame();
     this.mode = mode;
     this.focusGoal = null;
     if (mode === "aerial") {
@@ -301,8 +353,99 @@ export class OfficeWorld {
 
   /** Mientras hay un diálogo abierto el dueño no camina (las teclas son del diálogo). */
   setInputEnabled(on: boolean) {
-    this.player.setEnabled(on && this.mode === "explore");
+    this.inputOn = on;
+    this.player.setEnabled(on && this.mode === "explore" && !this.game);
   }
+  private inputOn = true;
+
+  // ── Minijuegos de la azotea ───────────────────────────────────────────
+
+  /** Entra a un minijuego: el dueño se para en su puesto y la cámara y la entrada pasan al juego. */
+  startGame(id: GameId): boolean {
+    const spot = this.room?.gameSpots[id];
+    if (!spot || !this.room) return false;
+    this.exitGame();
+    if (this.mode !== "explore") this.setMode("explore");
+    this.player.spawn(spot.stand.x, spot.stand.z, spot.stand.facing, FLOOR_Y[spot.floor]);
+    this.player.setEnabled(false);
+    for (const o of spot.hide) o.visible = false;
+    this.game = createGame(id, { spot, room: this.room, palette: this.palette, seed: Math.floor(performance.now()) });
+    noOutline(this.game.group);
+    this.scene.add(this.game.group);
+    // Quien estaba jugando ahí se aparta (y nadie vuelve mientras juegas).
+    const poi = GAME_INFO[id].poi;
+    this.gameMoved = poi ? this.crowd.reservePoi(poi) : [];
+    this.gameKeys.clear();
+    this.gamePrevAction = true; // la tecla que abrió el juego no cuenta como primera acción
+    this.gameSaved = false;
+    this.gameOverAt = 0;
+    this.lastGameEvent = null;
+    this.gameHudKey = "";
+    this.camera.getWorldDirection(this.gameLook).multiplyScalar(3).add(this.camera.position);
+    this.emitGameHud();
+    return true;
+  }
+
+  /** Sale del minijuego (Esc/B): guarda el récord, devuelve las piezas de adorno y la cámara al dueño. */
+  exitGame() {
+    const g = this.game;
+    if (!g) return;
+    if (!this.gameSaved) writeBest(g.id, g.score);
+    const spot = this.room?.gameSpots[g.id];
+    for (const o of spot?.hide ?? []) o.visible = true;
+    g.dispose();
+    this.game = null;
+    if (g.id === "arcade" && this.room) paintArcadeIdle(this.room.arcadeScreen, readBest("arcade"));
+    this.crowd.reservePoi(null);
+    this.gameMoved = [];
+    this.gameSynth = null;
+    this.player.setEnabled(this.inputOn && this.mode === "explore");
+    this.hooks.onGame?.(null);
+  }
+
+  get gameId(): GameId | null {
+    return this.game?.id ?? null;
+  }
+
+  /** QA: entrada sintética del minijuego (se suma a teclado y control; null la quita). */
+  gameInput(input: Partial<GameInput> | null) {
+    this.gameSynth = input;
+  }
+
+  /** QA y HUD: el estado del juego en curso. */
+  gameState() {
+    const g = this.game;
+    if (!g) return null;
+    return { ...g.hud(), id: g.id, best: readBest(g.id), moved: this.gameMoved, lastEvent: this.lastGameEvent, inner: g.debug?.() ?? null };
+  }
+
+  private gameInputNow(): GameInput {
+    const k = this.gameKeys;
+    const axis = (pos: string[], neg: string[]) => (pos.some((c) => k.has(c)) ? 1 : 0) - (neg.some((c) => k.has(c)) ? 1 : 0);
+    const syn = this.gameSynth ?? {};
+    const pad = this.padInput.move;
+    const x = Math.max(-1, Math.min(1, axis(["ArrowRight", "KeyD"], ["ArrowLeft", "KeyA"]) + pad.x + (syn.x ?? 0)));
+    const y = Math.max(-1, Math.min(1, axis(["ArrowUp", "KeyW"], ["ArrowDown", "KeyS"]) + pad.y + (syn.y ?? 0)));
+    const action = ["Space", "Enter", "KeyE"].some((c) => k.has(c)) || this.gamePadA || !!syn.action;
+    const pressed = (action && !this.gamePrevAction) || !!syn.pressed;
+    this.gamePrevAction = action;
+    if (syn.pressed) this.gameSynth = { ...syn, pressed: false };
+    return { ...NO_INPUT, x, y, action, pressed };
+  }
+
+  private emitGameHud() {
+    const g = this.game;
+    if (!g) return;
+    const hud: GameHud = { ...g.hud(), id: g.id, best: readBest(g.id) };
+    const key = JSON.stringify(hud);
+    if (key === this.gameHudKey) return;
+    this.gameHudKey = key;
+    this.hooks.onGame?.(hud);
+  }
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    this.gameKeys.delete(e.code);
+  };
 
   setLook(look: OwnerLook) {
     this.owner.setLook(look);
@@ -380,12 +523,14 @@ export class OfficeWorld {
   // ── Control de juego (lo alimenta la página cada frame) ────────────────
 
   /** Sticks y gatillos: mover, cámara, correr y zoom continuo (cruceta ↑↓). */
-  setPad(p: { move: { x: number; y: number }; look: { x: number; y: number }; run: boolean; zoom: number }) {
+  setPad(p: { move: { x: number; y: number }; look: { x: number; y: number }; run: boolean; zoom: number; a?: boolean }) {
     this.padInput = p;
+    this.gamePadA = !!p.a;
   }
 
   /** Lo mismo que E: habla con el agente o contrata en el escritorio al alcance. */
   interact(): boolean {
+    if (this.game) return false;
     if (this.mode !== "explore" || !this.near || !this.player.enabled) return false;
     this.owner.wave();
     this.hooks.onClick?.(this.near);
@@ -417,6 +562,7 @@ export class OfficeWorld {
       ambient: this.crowd.on,
       monitors: Object.fromEntries([...this.seated].filter(([, s]) => s.monitor && !s.leaving).map(([id, s]) => [id, { lines: s.monitor!.shown(), paints: s.monitor!.paints }])),
       controlWall: this.controlWall?.debug() ?? null,
+      game: this.gameState(),
       spend: this.spendData === undefined ? "loading" : this.spendData ? { costUsd: this.spendData.today.costUsd, runs: this.spendData.today.runs } : null,
       plan: this.planData === undefined ? "loading" : this.planData ? this.planData.windows.map((w) => ({ label: w.label, utilization: w.utilization })) : null,
     };
@@ -424,6 +570,13 @@ export class OfficeWorld {
 
   /** Lleva al dueño junto a un escritorio o personaje (lista del equipo en vista explorar). */
   walkTo(hit: OfficeHit) {
+    if (hit.kind === "game") {
+      const spot = this.room?.gameSpots[hit.id];
+      if (!spot) return;
+      if (this.mode !== "explore") this.setMode("explore");
+      this.player.spawn(spot.stand.x, spot.stand.z, spot.stand.facing, FLOOR_Y[spot.floor]);
+      return;
+    }
     if (hit.kind === "spend" || hit.kind === "control") {
       const spot = hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
       if (!spot) return;
@@ -567,6 +720,14 @@ export class OfficeWorld {
       this.scene.add(this.controlWall.group);
       this.room.setFeed(this.feed);
       this.room.setBoard(this.board);
+      // La sala nueva trae su arcade en blanco: su espera con el récord real (o sin récord).
+      if (this.game) {
+        this.game.dispose();
+        this.game = null;
+        this.hooks.onGame?.(null);
+        this.crowd.reservePoi(null);
+      }
+      paintArcadeIdle(this.room.arcadeScreen, readBest("arcade"));
       if (this.tvVideo) this.room.setTvVideo(this.tvVideo);
       const b = this.room.bounds;
       const c = new THREE.Vector3((b.minX + b.maxX) / 2, 0, (b.minZ + b.maxZ) / 2);
@@ -656,7 +817,7 @@ export class OfficeWorld {
   /** Acerca la cámara a un escritorio o personaje (vista aérea). */
   focus(hit: OfficeHit) {
     if (this.mode !== "aerial") return;
-    if (hit.kind === "tv" || hit.kind === "whiteboard" || hit.kind === "queue") return;
+    if (hit.kind === "tv" || hit.kind === "whiteboard" || hit.kind === "queue" || hit.kind === "game") return;
     if (hit.kind === "board" || hit.kind === "spend" || hit.kind === "control") {
       const spot = hit.kind === "board" ? this.boards?.spot(hit.id) : hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
       if (!spot) return;
@@ -761,6 +922,10 @@ export class OfficeWorld {
   }
 
   screenOf(hit: OfficeHit): { x: number; y: number } | null {
+    if (hit.kind === "game") {
+      const a = this.room?.gameSpots[hit.id]?.anchor;
+      return a ? this.project(this.tmp.set(a.x, a.y, a.z)) : null;
+    }
     if (hit.kind === "spend" || hit.kind === "control") {
       const spot = hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
       return spot ? this.project(this.tmp.set(spot.x, spot.y, spot.z)) : null;
@@ -832,6 +997,13 @@ export class OfficeWorld {
         const d = Math.hypot(wb.front.x - this.player.pos.x, wb.front.z - this.player.pos.z);
         if (d <= BOARD_REACH && (!best || d < best.d)) best = { hit: { kind: "whiteboard", id: "free" }, d, at: new THREE.Vector3(wb.x, wb.y + wb.h / 2 + 0.3, wb.z) };
       }
+      if (this.room && !this.game) {
+        for (const spot of Object.values(this.room.gameSpots)) {
+          if (spot.floor !== floor) continue;
+          const d = Math.hypot(spot.stand.x - this.player.pos.x, spot.stand.z - this.player.pos.z);
+          if (d <= GAME_REACH && (!best || d < best.d)) best = { hit: { kind: "game", id: spot.id }, d, at: new THREE.Vector3(spot.anchor.x, spot.anchor.y + 0.7, spot.anchor.z) };
+        }
+      }
       const tv = this.room?.tv;
       if (tv && floor === tv.floor) {
         const d = Math.hypot(tv.front.x - this.player.pos.x, tv.front.z - this.player.pos.z);
@@ -850,6 +1022,16 @@ export class OfficeWorld {
   // ── Entrada ────────────────────────────────────────────────────────────
 
   private onKey = (e: KeyboardEvent) => {
+    if (this.game && !isTyping(e) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // En un minijuego las teclas son del juego: Esc sale; flechas y Espacio no mueven la página.
+      if (e.code === "Escape") {
+        this.exitGame();
+        return;
+      }
+      if (/^(Arrow|Space)/.test(e.code)) e.preventDefault();
+      this.gameKeys.add(e.code);
+      return;
+    }
     if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
     if (e.code === "KeyV") {
       this.setMode(this.mode === "explore" ? "aerial" : "explore");
@@ -923,6 +1105,11 @@ export class OfficeWorld {
 
   private onDown = (e: PointerEvent) => {
     this.drag = { x: e.clientX, y: e.clientY, moved: 0 };
+  };
+
+  /** Al perder el foco se sueltan las teclas (si no, una flecha queda "presionada" para siempre). */
+  private onBlur = () => {
+    this.gameKeys.clear();
   };
 
   private onUp = (e: PointerEvent) => {
@@ -1067,7 +1254,38 @@ export class OfficeWorld {
       this.clockAt = now;
       this.applyDaylight();
     }
-    if (this.mode === "explore") {
+    if (this.game) {
+      // Minijuego: la entrada va al juego y la cámara a su puesto (se desliza hasta ahí).
+      const g = this.game;
+      const input = this.gameInputNow();
+      // Con la partida terminada, la acción (después de un respiro) empieza otra.
+      if (g.over) {
+        if (!this.gameOverAt) this.gameOverAt = now;
+        if (input.pressed && now - this.gameOverAt > 800) {
+          g.restart();
+          this.gameSaved = false;
+          this.gameOverAt = 0;
+        }
+      } else this.gameOverAt = 0;
+      const ev = g.update(dt, input);
+      if (ev) {
+        this.lastGameEvent = ev;
+        this.hooks.onGameEvent?.(ev, new THREE.Vector3(g.camera.target.x, g.camera.target.y, g.camera.target.z));
+      }
+      if (g.over && !this.gameSaved) {
+        this.gameSaved = true;
+        writeBest(g.id, g.score);
+      }
+      const k = 1 - Math.exp(-dt * 6);
+      this.camera.position.lerp(g.camera.pos, k);
+      this.gameLook.lerp(g.camera.target, k);
+      // Sin player.update: reubicaría la cámara detrás del dueño en cada frame.
+      this.camera.lookAt(this.gameLook);
+      if (now - this.gameHudAt > 100) {
+        this.gameHudAt = now;
+        this.emitGameHud();
+      }
+    } else if (this.mode === "explore") {
       const pad = this.padInput;
       this.player.setPad(pad.move.x, pad.move.y, pad.run);
       if (pad.look.x || pad.look.y) this.player.padLook(pad.look.x, pad.look.y, dt);
@@ -1100,6 +1318,8 @@ export class OfficeWorld {
     // El dueño sigue a su controlador (también visible desde la vista aérea).
     this.owner.root.position.copy(this.player.pos);
     this.updateFloors();
+    // Jugando, la cámara es la del juego: el dueño taparía la mesa o la pantalla.
+    if (this.game) this.owner.root.visible = false;
     this.owner.root.rotation.y = this.player.facing;
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
     this.crowd.update(dt, t, this.player.pos, this.shownFloor);
@@ -1206,6 +1426,9 @@ export class OfficeWorld {
     el.removeEventListener("pointerleave", this.onLeave);
     el.removeEventListener("wheel", this.onWheel);
     window.removeEventListener("keydown", this.onKey);
+    window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.onBlur);
+    this.exitGame();
     this.controls.dispose();
     this.player.dispose();
     this.owner.dispose();

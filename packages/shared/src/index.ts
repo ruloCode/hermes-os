@@ -35,4 +35,5 @@ export * from "./office-boards.js";
 export * from "./office-nicknames.js";
 export * from "./office-queue.js";
 export * from "./office-spend.js";
+export * from "./office-games.js";
 export * from "./gamepad.js";

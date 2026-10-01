@@ -21,6 +21,8 @@ import {
   GENERAL_PROJECT,
   assignNicknames,
   OFFICE_BOARD_TITLES,
+  GAME_INFO,
+  isGameId,
   OFFICE_NPCS,
   PLAN_TOOL,
   ROOFTOP_PAUSE_MS,
@@ -77,6 +79,8 @@ import { WhiteboardEditor } from "@/components/oficina/WhiteboardEditor";
 import { QueuePanel } from "@/components/oficina/QueuePanel";
 import { SpendPanel } from "@/components/oficina/SpendPanel";
 import { ControlRoomPanel } from "@/components/oficina/ControlRoomPanel";
+import { GameOverlay } from "@/components/oficina/GameOverlay";
+import type { GameHud } from "@/lib/oficina/games";
 import {
   ControllerHelp,
   ControlsHint,
@@ -119,6 +123,13 @@ declare global {
     __hermesOficinaTeam?: { say: (text: string) => boolean; debug: () => unknown };
     /** QA: prende/apaga la gente del edificio y siembra su coreografía. */
     __hermesOficinaAmbient?: (opts: { on?: boolean; seed?: number }) => void;
+    /** QA de los minijuegos: entrar, entrada sintética, estado y salir. */
+    __hermesOficinaGame?: {
+      start: (id: string) => boolean;
+      input: (i: { x?: number; y?: number; action?: boolean; pressed?: boolean } | null) => void;
+      state: () => unknown;
+      exit: () => void;
+    };
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
     __hermesOficinaShareTest?: () => void;
   }
@@ -329,6 +340,10 @@ export default function OficinaPage() {
   const [controlOpen, setControlOpen] = useState(false);
   const dataPanelRef = useRef(false);
   dataPanelRef.current = spendOpen || controlOpen;
+  // Minijuego en curso (el mundo manda su HUD; null = no hay juego).
+  const [gameHud, setGameHud] = useState<GameHud | null>(null);
+  const gameRef = useRef(false);
+  gameRef.current = !!gameHud;
   // Pantalla compartida en la TV del lounge (todo en el navegador: getDisplayMedia → VideoTexture).
   const [sharing, setSharing] = useState<string | null>(null);
   // Pizarra libre: el dibujo vive en el agente; el editor la abre en grande.
@@ -465,6 +480,7 @@ export default function OficinaPage() {
     if (near.kind === "queue") return "Ver la cola de agentes";
     if (near.kind === "spend") return "Ver el uso de Claude";
     if (near.kind === "control") return "Abrir la sala de control";
+    if (near.kind === "game") return `Jugar ${GAME_INFO[near.id].title}`;
     if (near.kind === "worker") {
       const w = workers.find((x) => x.id === near.id);
       return w ? `Hablar con ${nicks.get(w.id) ?? w.name}` : null;
@@ -963,6 +979,11 @@ export default function OficinaPage() {
   const onPadPress = (b: PadButton) => {
     markPad(true);
     const world = sceneRef.current?.world();
+    // En un minijuego, A se lee sostenida (onPadFrame) y B sale; el resto no hace nada.
+    if (gameRef.current) {
+      if (b === "B") world?.exitGame();
+      return;
+    }
     if (helpOpen) {
       if (b === "B" || b === "MENU" || b === "A") setHelpOpen(false);
       return;
@@ -1064,6 +1085,7 @@ export default function OficinaPage() {
       move: s.move,
       look: s.look,
       run: s.rt >= TRIGGER_ON,
+      a: s.held.has("A"),
       // Con un NPC abierto la cruceta es del diálogo, no del zoom.
       zoom: npcOpenRef.current || boardOpenRef.current || queueOpenRef.current || dataPanelRef.current ? 0 : s.held.has("UP") ? -1 : s.held.has("DOWN") ? 1 : 0,
     });
@@ -1159,6 +1181,13 @@ export default function OficinaPage() {
         setWallBoard(null);
         return;
       }
+      if (hit.kind === "game") {
+        closeConversation();
+        closeNpc();
+        setWallBoard(null);
+        sceneRef.current?.world()?.startGame(hit.id);
+        return;
+      }
       if (hit.kind === "spend" || hit.kind === "control") {
         closeConversation();
         closeNpc();
@@ -1245,7 +1274,7 @@ export default function OficinaPage() {
         return;
       }
       // 1, 2, 3: ver ese piso desde arriba (fuera de una conversación y de un campo de texto).
-      if (!conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !dataPanelRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
+      if (!conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !dataPanelRef.current && !gameRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
         sceneRef.current?.world()?.setFloorView(Number(e.code.slice(5)) - 1);
         return;
       }
@@ -1332,6 +1361,12 @@ export default function OficinaPage() {
         draw();
         return stream;
       });
+    window.__hermesOficinaGame = {
+      start: (id) => (isGameId(id) ? (sceneRef.current?.world()?.startGame(id) ?? false) : false),
+      input: (i) => sceneRef.current?.world()?.gameInput(i),
+      state: () => sceneRef.current?.world()?.gameState() ?? null,
+      exit: () => sceneRef.current?.world()?.exitGame(),
+    };
     window.__hermesOficinaAmbient = ({ on, seed }) => {
       if (on !== undefined) setAmbient(on);
       if (seed !== undefined) setAmbientSeed(seed);
@@ -1349,6 +1384,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaTeam;
       delete window.__hermesOficinaAmbient;
       delete window.__hermesOficinaShareTest;
+      delete window.__hermesOficinaGame;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 
@@ -1372,7 +1408,7 @@ export default function OficinaPage() {
         look={look}
         feed={feedLines}
         board={board}
-        nearLabel={npc || wallBoard || queueOpen || spendOpen || controlOpen ? null : nearLabel}
+        nearLabel={npc || wallBoard || queueOpen || spendOpen || controlOpen || gameHud ? null : nearLabel}
         nearKey={pad.connected && usingPad ? "A" : "E"}
         inputEnabled={!hiring && !npc && !wallBoard && !whiteboardOpen && !queueOpen && !spendOpen && !controlOpen}
         onClick={onClick}
@@ -1389,12 +1425,34 @@ export default function OficinaPage() {
         spend={spend}
         plan={plan}
         projectName={projectName}
+        onGame={setGameHud}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
         <div className="flex flex-col items-start gap-2">
           <StatusCard title={title} machine={machine} feed={feed} simulated={!!sim} total={workers.length} tally={tally} daylight={daylight} />
           <FloorPicker floor={floor} mode={mode} onPick={(f) => sceneRef.current?.world()?.setFloorView(f)} />
+          {plan?.available && plan.windows.length ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSpendOpen(true);
+                refreshSpend();
+              }}
+              data-plan-pill
+              title="Uso del plan de Claude (lo mismo que /usage): clic para el detalle"
+              className="pointer-events-auto flex items-center gap-3 rounded-xl border border-line bg-panel/85 px-3 py-1.5 text-xs text-text-dim shadow-lg backdrop-blur-md hover:text-text"
+            >
+              {plan.windows.slice(0, 3).map((w) => (
+                <span key={w.key} className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-10 overflow-hidden rounded-full bg-panel-2">
+                    <span className={`block h-full rounded-full ${w.utilization >= 95 ? "bg-red" : w.utilization >= 80 ? "bg-amber" : "bg-blue"}`} style={{ width: `${Math.max(2, w.utilization)}%` }} />
+                  </span>
+                  {w.key === "five_hour" ? "Sesión" : w.key === "seven_day" ? "Semana" : w.label.replace(/ esta semana$/, "")} {Math.round(w.utilization)}%
+                </span>
+              ))}
+            </button>
+          ) : null}
           {pauseUntil ? <PauseTimer left={formatCountdown(pauseUntil - clock)} onStop={() => setPauseUntil(null)} /> : null}
           {sharing ? (
             <div className="pointer-events-auto flex max-w-xs items-center gap-2 rounded-xl border border-line bg-panel/85 px-3 py-1.5 text-sm shadow-lg backdrop-blur-md" role="status">
@@ -1473,7 +1531,7 @@ export default function OficinaPage() {
       <Toasts toasts={toasts} />
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
-        <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />
+        {gameHud ? null : <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />}
       </div>
 
       {selectedWorker ? (
@@ -1577,6 +1635,8 @@ export default function OficinaPage() {
           onClose={() => setQueueOpen(false)}
         />
       ) : null}
+
+      {gameHud ? <GameOverlay hud={gameHud} pad={pad.connected && usingPad} onExit={() => sceneRef.current?.world()?.exitGame()} /> : null}
 
       {spendOpen ? (
         <SpendPanel

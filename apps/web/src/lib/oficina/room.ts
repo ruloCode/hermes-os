@@ -13,7 +13,7 @@
 // plantas, lámparas), con otra planta y colores del tema.
 
 import * as THREE from "three";
-import type { AmbientPoi, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
+import type { AmbientPoi, GameId, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
 import { mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
@@ -76,6 +76,28 @@ export interface BoardSpot {
   front: { x: number; z: number };
 }
 
+/**
+ * Dónde se juega cada minijuego de la azotea (coordenadas del mundo): dónde se
+ * para el dueño, el centro de la cosa (mesa, diana, cesta, pantalla) y las
+ * piezas decorativas que se esconden mientras se juega (las raquetas de
+ * adorno, las varillas quietas del futbolín…).
+ */
+export interface GameSpot {
+  id: GameId;
+  floor: number;
+  stand: { x: number; z: number; facing: number };
+  /** Centro de la cosa en el mundo (mesa: su cubierta; diana: su cara; cesta: el aro; arcade: la pantalla). */
+  anchor: { x: number; y: number; z: number };
+  hide: THREE.Object3D[];
+}
+
+/** La pantalla de la arcade: un canvas que pinta el juego (o su espera, con el récord real). */
+export interface ArcadeScreen {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  tex: THREE.CanvasTexture;
+}
+
 export interface Room {
   group: THREE.Group;
   colliders: Collider[];
@@ -112,6 +134,9 @@ export interface Room {
   spendSpot: BoardSpot;
   /** La TV del lounge (piso 2): centro de la pantalla y desde dónde se usa. */
   tv: { floor: number; x: number; y: number; z: number; front: { x: number; z: number } };
+  /** Minijuegos de la azotea: dónde se juega cada uno. */
+  gameSpots: Record<GameId, GameSpot>;
+  arcadeScreen: ArcadeScreen;
   /** Pone un video en la TV (pantalla compartida) o, con null, vuelve al feed de actividad. */
   setTvVideo(video: HTMLVideoElement | null): void;
   setFeed(lines: FeedLine[]): void;
@@ -604,11 +629,14 @@ function pingPongTable(): THREE.Group {
     p.add(mesh(box(0.1, 0.02, 0.03), toon("#c98b5a"), 0.12, 0, 0, false));
     p.position.set(x, H + 0.033, z);
     p.rotation.y = rot;
+    p.userData.gamePiece = true;
     g.add(p);
   };
   paddle("#e63946", 0.72, 0.32, 0.6);
   paddle("#2b2d42", -0.8, -0.28, 2.6);
-  g.add(mesh(new THREE.SphereGeometry(0.022, 10, 8), toon("#ff9f1c"), 0.34, H + 0.047, -0.18, false));
+  const ball = mesh(new THREE.SphereGeometry(0.022, 10, 8), toon("#ff9f1c"), 0.34, H + 0.047, -0.18, false);
+  ball.userData.gamePiece = true;
+  g.add(ball);
   return g;
 }
 
@@ -636,27 +664,31 @@ function foosball(): THREE.Group {
   const count = [1, 2, 3, 5, 5, 3, 2, 1];
   const rodMat = toon("#c9ced6");
   const colors = [toon("#e63946"), toon("#3a86ff")];
+  // Lo que se mueve al jugar (varillas, manijas, muñecos, pelota) va marcado: el juego lo esconde y pone el suyo.
+  const piece = (m: THREE.Object3D) => {
+    m.userData.gamePiece = true;
+    g.add(m);
+    return m;
+  };
   team.forEach((t, i) => {
     const x = -0.525 + i * 0.15;
-    const rod = mesh(new THREE.CylinderGeometry(0.01, 0.01, W + 0.5, 8), rodMat, x, H - 0.05, 0, false);
+    const rod = piece(mesh(new THREE.CylinderGeometry(0.01, 0.01, W + 0.5, 8), rodMat, x, H - 0.05, 0, false));
     rod.rotation.x = Math.PI / 2;
-    g.add(rod);
     const side = t === 0 ? 1 : -1;
-    const handle = mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.13, 10), toon("#1d1d1d"), x, H - 0.05, side * (W / 2 + 0.3), false);
+    const handle = piece(mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.13, 10), toon("#1d1d1d"), x, H - 0.05, side * (W / 2 + 0.3), false));
     handle.rotation.x = Math.PI / 2;
-    g.add(handle);
     const n = count[i];
     for (let k = 0; k < n; k++) {
       const z = n === 1 ? 0 : -0.28 + (k * 0.56) / (n - 1);
-      g.add(mesh(box(0.04, 0.1, 0.03), colors[t], x, H - 0.1, z, false));
-      g.add(mesh(new THREE.SphereGeometry(0.02, 8, 6), toon("#f1c27d"), x, H - 0.035, z, false));
+      piece(mesh(box(0.04, 0.1, 0.03), colors[t], x, H - 0.1, z, false));
+      piece(mesh(new THREE.SphereGeometry(0.02, 8, 6), toon("#f1c27d"), x, H - 0.035, z, false));
     }
   });
-  g.add(mesh(new THREE.SphereGeometry(0.018, 10, 8), toon("#ffffff"), 0.05, H - 0.14, 0.1, false));
+  piece(mesh(new THREE.SphereGeometry(0.018, 10, 8), toon("#ffffff"), 0.05, H - 0.14, 0.1, false));
   return g;
 }
 
-/** Máquina arcade (el frente mira a +z). La pantalla es una ilustración, sin puntajes. */
+/** Máquina arcade (el frente mira a +z). La pantalla es un canvas: el juego o su espera con el récord real. */
 function arcadeCabinet(screen: THREE.Texture, trim: string): THREE.Group {
   const g = new THREE.Group();
   const body = toon("#2b2d42");
@@ -749,25 +781,14 @@ function dartboardCanvas() {
   return c.tex;
 }
 
-/** Pantalla de la arcade en modo demostración: marcianitos y una nave, sin números. */
-function arcadeCanvas(colors: string[]) {
-  const c = screenCanvas(256, 200);
-  const g = c.ctx;
-  g.fillStyle = "#0b1020";
-  g.fillRect(0, 0, 256, 200);
-  const invader = ["00100000100", "00010001000", "00111111100", "01101110110", "11111111111", "10111111101", "10100000101", "00011011000"];
-  for (let row = 0; row < 3; row++)
-    for (let col = 0; col < 5; col++) {
-      g.fillStyle = colors[(row + col) % colors.length];
-      invader.forEach((line, y) => [...line].forEach((px, x) => px === "1" && g.fillRect(24 + col * 44 + x * 3, 20 + row * 36 + y * 3, 3, 3)));
-    }
-  g.fillStyle = "#6ccb8f";
-  g.fillRect(118, 170, 20, 8);
-  g.fillRect(125, 163, 6, 8);
-  g.fillStyle = "#ffffff";
-  for (let i = 0; i < 18; i++) g.fillRect((i * 67) % 256, (i * 41) % 200, 1.5, 1.5);
-  c.tex.needsUpdate = true;
-  return c.tex;
+/**
+ * La pantalla de la arcade: un canvas de 512×400 que pinta "Lluvia de tokens"
+ * (games/arcade.ts) o su espera con el récord real de este navegador. Antes era
+ * una ilustración fija; ahora es un juego propio y el número es de una partida.
+ */
+function arcadeScreen(): ArcadeScreen {
+  const c = screenCanvas(512, 400);
+  return { canvas: c.ctx.canvas, ctx: c.ctx, tex: c.tex };
 }
 
 function fridge(): THREE.Group {
@@ -1681,9 +1702,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   foos.position.copy(foosAt);
   g.add(foos);
   col({ minX: foosAt.x - 0.65, maxX: foosAt.x + 0.65, minZ: foosAt.z - 0.42, maxZ: foosAt.z + 0.42, top: 0.84 });
-  const arcadeTex = arcadeCanvas(p.skins);
-  disposables.push(arcadeTex);
-  const arcade = arcadeCabinet(arcadeTex, p.accent);
+  const arcadeScr = arcadeScreen();
+  disposables.push(arcadeScr.tex);
+  const arcade = arcadeCabinet(arcadeScr.tex, p.accent);
   arcade.position.set(maxX - WALL_T / 2 - 0.42, 0, minZ + 15.2);
   arcade.rotation.y = -Math.PI / 2;
   g.add(arcade);
@@ -1872,6 +1893,28 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     rooftop: { floor: 2, x: nook.x - 2.6, z: nook.z + 0.8, facing: -Math.PI / 4, talk: { x: nook.x - 3.66, z: nook.z + 1.86 } },
   };
 
+  // Minijuegos de la azotea: dónde se para el dueño y qué esconder mientras juega.
+  const hideIn = (root: THREE.Object3D) => {
+    const out: THREE.Object3D[] = [];
+    root.traverse((o) => o.userData.gamePiece && out.push(o));
+    return out;
+  };
+  const y2 = FLOOR_Y[2];
+  const arcadeAt = arcade.position;
+  const gameSpots: Record<GameId, GameSpot> = {
+    pingpong: { id: "pingpong", floor: 2, stand: { x: gameAt.x - 1.75, z: gameAt.z, facing: E_ }, anchor: { x: gameAt.x, y: y2 + 0.785, z: gameAt.z }, hide: hideIn(pong) },
+    darts: { id: "darts", floor: 2, stand: { x: dartX + 2.4, z: gameAt.z, facing: W_ }, anchor: { x: dartX + 0.1, y: y2 + 1.75, z: gameAt.z }, hide: [] },
+    basket: {
+      id: "basket",
+      floor: 2,
+      stand: { x: basket.position.x + 2.6, z: basket.position.z, facing: W_ },
+      anchor: { x: basket.position.x, y: y2 + 0.34, z: basket.position.z },
+      hide: [],
+    },
+    foosball: { id: "foosball", floor: 2, stand: { x: foosAt.x, z: foosAt.z + 1.05, facing: N_ }, anchor: { x: foosAt.x, y: y2 + 0.68, z: foosAt.z }, hide: hideIn(foos) },
+    arcade: { id: "arcade", floor: 2, stand: { x: maxX - 1.5, z: arcadeAt.z, facing: E_ }, anchor: { x: arcadeAt.x - 0.155, y: y2 + 1.42, z: arcadeAt.z }, hide: [] },
+  };
+
   // Tableros de la pared (piso 1): issues al fondo, simétrico al cuadro; PRs y
   // servicios en el muro este, entre sus dos ventanas.
   const eastX = maxX - WALL_T / 2 - 0.04;
@@ -1923,6 +1966,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     queueSpot,
     controlSpot,
     spendSpot,
+    gameSpots,
+    arcadeScreen: arcadeScr,
     tv: { floor: 1, x: tvX, y: FLOOR_Y[1] + 1.75, z: lz, front: { x: maxX - 2.2, z: lz - 0.5 } },
     setTvVideo,
     setBoard: paintBoard,

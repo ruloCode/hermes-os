@@ -121,6 +121,8 @@ export class AmbientPlanner {
   private readonly rng: () => number;
   /** Lugar que a alguien no le dio camino: lo evita un rato. */
   private readonly avoid = new Map<string, number>();
+  /** Lugar tomado por el dueño (está jugando ahí): nadie va y quien estaba se aparta. */
+  private reserved: string | null = null;
 
   constructor(pois: readonly AmbientPoi[], seed: number) {
     for (const p of pois) if (p.slots.length) this.pois.set(p.id, p);
@@ -233,6 +235,19 @@ export class AmbientPlanner {
     p.until = now + AMBIENT_PARTNER_WAIT;
   }
 
+  /**
+   * El dueño toma un lugar (un minijuego): quien estaba ahí (o iba) lo suelta y
+   * busca otro en el próximo `tick`; nadie elige ese lugar hasta liberarlo (null).
+   * Devuelve a quiénes se les pidió que se aparten.
+   */
+  reserve(poiId: string | null, now: number): string[] {
+    this.reserved = poiId && this.pois.has(poiId) ? poiId : null;
+    if (!this.reserved) return [];
+    const moved = this.occupants(this.reserved);
+    for (const o of moved) this.release(o, now);
+    return moved.map((o) => o.id);
+  }
+
   /** No hubo camino a su lugar: lo suelta y lo evita un rato. */
   failed(id: string, now: number) {
     const p = this.people.get(id);
@@ -259,6 +274,7 @@ export class AmbientPlanner {
     for (const poi of this.pois.values()) {
       if (p.history.includes(poi.id)) continue;
       if ((this.avoid.get(poi.id) ?? 0) > now) continue;
+      if (poi.id === this.reserved) continue;
       const slot = this.freeSlot(poi);
       if (slot < 0) continue;
       let w = 1 / (1 + 0.9 * (perFloor.get(poi.floor) ?? 0));

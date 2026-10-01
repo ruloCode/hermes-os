@@ -286,6 +286,7 @@ export class OfficeCrowd {
     }
     this.poiIds = { kept: pois.map((p) => p.id), dropped: room.pois.filter((p) => !pois.some((q) => q.id === p.id)).map((p) => p.id) };
     this.planner = new AmbientPlanner(pois, this.seed);
+    this.planner.reserve(this.reservedPoi, this.t);
 
     for (const role of ["reception", "barista", "rooftop", "queue"] as const) this.addStaff(role, room.npcSpots[role]);
     const rp = room.npcSpots.reception;
@@ -362,6 +363,14 @@ export class OfficeCrowd {
       this.planner.remove(id);
       this.queue = this.queue.filter((q) => q !== id);
     }
+  }
+
+  private reservedPoi: string | null = null;
+
+  /** El dueño juega en ese lugar (un minijuego): quien estaba se aparta y nadie va hasta liberarlo. */
+  reservePoi(id: string | null): string[] {
+    this.reservedPoi = id;
+    return this.planner?.reserve(id, this.t) ?? [];
   }
 
   // ── Por frame ─────────────────────────────────────────────────────────
