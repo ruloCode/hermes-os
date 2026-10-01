@@ -152,6 +152,8 @@ declare global {
     __hermesOficinaVoices?: (catalog: { name: string; lang: string }[] | null) => unknown;
     /** QA: que una persona diga una frase fija (por su id de línea) con su voz; devuelve si sonó. */
     __hermesOficinaSay?: (id: string, line: string) => boolean;
+    /** QA visual: porcentaje de píxeles casi negros del canvas (sin HUD), arriba y en el borde. */
+    __hermesOficinaPixels?: () => unknown;
     /** QA del modo CEO: sentarse (true) o levantarse (false); devuelve si quedó sentado. */
     __hermesOficinaCeo?: (on: boolean) => boolean;
     /** QA: comparte un canvas animado en la TV (headless no tiene pantalla que capturar). */
@@ -463,12 +465,20 @@ export default function OficinaPage() {
     const seed = Number(new URLSearchParams(window.location.search).get("seed"));
     if (Number.isInteger(seed) && seed > 0) setAmbientSeed(seed);
   }, []);
-  useEffect(() => {
-    const tick = () => setDaylight(daylightAt(new Date()).label);
-    tick();
-    const id = setInterval(tick, 60_000);
-    return () => clearInterval(id);
+  /** Hora forzada por QA (__hermesOficinaHour): el HUD lo dice, nunca se disfraza de la hora real. */
+  const forcedHourRef = useRef<number | null>(null);
+  const tickDaylight = useCallback(() => {
+    const h = forcedHourRef.current;
+    if (h === null) return setDaylight(daylightAt(new Date()).label);
+    const d = new Date();
+    d.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0);
+    setDaylight(`${daylightAt(d).label} · hora forzada ${hhmm(d)}`);
   }, []);
+  useEffect(() => {
+    tickDaylight();
+    const id = setInterval(tickDaylight, 60_000);
+    return () => clearInterval(id);
+  }, [tickDaylight]);
 
   const toast = useCallback((tone: Toast["tone"], text: string) => {
     const id = Math.random();
@@ -1698,8 +1708,13 @@ export default function OficinaPage() {
       exit: () => sceneRef.current?.world()?.exitGame(),
     };
     window.__hermesOficinaAudio = () => audioRef.current?.state() ?? null;
-    window.__hermesOficinaHour = (h) => sceneRef.current?.world()?.setHour(h);
+    window.__hermesOficinaHour = (h) => {
+      forcedHourRef.current = h === null || !Number.isFinite(h) ? null : ((h % 24) + 24) % 24;
+      sceneRef.current?.world()?.setHour(h);
+      tickDaylight();
+    };
     window.__hermesOficinaSay = (id, line) => peopleVoicesRef.current?.say(id, CHAT_LINES[line] ?? line, { volume: 1, line }) ?? false;
+    window.__hermesOficinaPixels = () => sceneRef.current?.world()?.pixelStats() ?? null;
     window.__hermesOficinaVoices = (catalog) => {
       peopleVoicesRef.current?.setOverride(catalog);
       return peopleVoicesRef.current?.debug() ?? null;
@@ -1734,6 +1749,7 @@ export default function OficinaPage() {
       delete window.__hermesOficinaHour;
       delete window.__hermesOficinaVoices;
       delete window.__hermesOficinaSay;
+      delete window.__hermesOficinaPixels;
     };
   }, [live.projects, live.machine, sim, voice, setAmbient, startShare]);
 

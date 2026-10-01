@@ -222,7 +222,7 @@ function facadeTextures(): { map: THREE.CanvasTexture; glow: THREE.CanvasTexture
       if (r === 0 && col === 3) continue; // rincón liso
       const x = col * 64 + 14;
       const y = r * 64 + 16;
-      ga.fillStyle = "#2c3e50";
+      ga.fillStyle = "#4a6680"; // vidrio apagado: azul pizarra, no negro (de noche, con el tinte, quedaba en negro)
       ga.fillRect(x, y, 36, 34);
       ga.fillStyle = "rgba(255,255,255,0.18)";
       ga.fillRect(x + 3, y + 3, 12, 28);
@@ -564,7 +564,7 @@ export class Outdoor {
     const tint = new THREE.Color(0, 0, 0)
       .add(new THREE.Color("#ffffff").multiplyScalar(sky.weights.day))
       .add(new THREE.Color("#ffc7a1").multiplyScalar(sky.weights.dusk))
-      .add(new THREE.Color("#4f5d92").multiplyScalar(sky.weights.night))
+      .add(new THREE.Color("#8e9acb").multiplyScalar(sky.weights.night))
       .multiplyScalar(this.dim);
     for (const t of this.tinted) t.mat.color.copy(t.base).multiply(tint);
     this.state.tint = `#${tint.getHexString()}`;

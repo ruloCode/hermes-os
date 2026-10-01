@@ -235,6 +235,7 @@ export class OfficeWorld {
   private sky: SkyState = skyAt(hourOf(new Date()));
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
+  private readonly ambient: THREE.AmbientLight;
   private readonly confetti: Confetti;
   private readonly disposables: { dispose(): void }[] = [];
   private raf = 0;
@@ -348,6 +349,7 @@ export class OfficeWorld {
     const dark = palette.dark;
     this.hemi = new THREE.HemisphereLight("#fff5e6", new THREE.Color(palette.floor), dark ? 1.1 : 1.45);
     const ambient = new THREE.AmbientLight("#ffffff", dark ? 0.3 : 0.45);
+    this.ambient = ambient;
     const sun = new THREE.DirectionalLight("#fff1d6", dark ? 1.6 : 2.1);
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
@@ -1041,6 +1043,56 @@ export class OfficeWorld {
       sceneTextures: seen.size,
       pixelRatio: this.renderer.getPixelRatio(),
     };
+  }
+
+  /**
+   * QA visual: dibuja un frame y lee el framebuffer en el mismo turno (sin
+   * preserveDrawingBuffer). Muestrea una rejilla y cuenta ZONAS casi negras
+   * (promedio de ~26 px con max(r,g,b) < 20) arriba (donde está el cielo) y en
+   * el borde de la escena.
+   * Lee SOLO el canvas: el HUD no cuenta.
+   */
+  pixelStats(): { top: number; border: number; all: number; avg: [number, number, number]; samples: number } {
+    this.renderFrame(1 / 60);
+    const gl = this.renderer.getContext();
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let top = 0, topN = 0, border = 0, borderN = 0, all = 0, n = 0;
+    const avg: [number, number, number] = [0, 0, 0];
+    const GX = 96, GY = 60;
+    for (let gy = 0; gy < GY; gy++) {
+      for (let gx = 0; gx < GX; gx++) {
+        const x = Math.floor(((gx + 0.5) / GX) * w);
+        const yFromTop = Math.floor(((gy + 0.5) / GY) * h);
+        // Promedio de un vecindario de ~26 px (13 × 13 muestras cada 2 px): un contorno, un poste de acero o
+        // una baranda negra (2-8 px) no son un hueco; una zona negra grande (el cielo de antes) sí.
+        let r = 0, g = 0, b = 0, k = 0;
+        for (let dy = -6; dy <= 6; dy++)
+          for (let dx = -6; dx <= 6; dx++) {
+            const xx = Math.min(w - 1, Math.max(0, x + dx * 2));
+            const yy = Math.min(h - 1, Math.max(0, h - 1 - yFromTop + dy * 2)); // readPixels empieza abajo
+            const i = (yy * w + xx) * 4;
+            r += px[i];
+            g += px[i + 1];
+            b += px[i + 2];
+            k++;
+          }
+        r /= k;
+        g /= k;
+        b /= k;
+        const dark = Math.max(r, g, b) < 20;
+        avg[0] += r;
+        avg[1] += g;
+        avg[2] += b;
+        n++;
+        if (dark) all++;
+        if (gy < GY * 0.3) (topN++, dark && top++);
+        if (gx < GX * 0.06 || gx >= GX * 0.94 || gy < GY * 0.06 || gy >= GY * 0.94) (borderN++, dark && border++);
+      }
+    }
+    return { top: +(top / topN).toFixed(4), border: +(border / borderN).toFixed(4), all: +(all / n).toFixed(4), avg: avg.map((v) => Math.round(v / n)) as [number, number, number], samples: n };
   }
 
   /** Estado para QA (__hermesOficinaDebug). */
@@ -1897,12 +1949,16 @@ export class OfficeWorld {
     this.meetingScreen?.setData(this.calendar, new Date());
     const dark = this.palette.dark;
     const w = this.sky.weights;
-    this.sun.intensity = (dark ? 0.55 : 0.7) + d.day * (dark ? 1.05 : 1.4);
+    // De noche baja la luz de relleno (la azotea es exterior: ahí la noche se tiene que notar); adentro mandan las lámparas.
+    const night = this.exteriorOn ? w.night : 0;
+    this.sun.intensity = ((dark ? 0.55 : 0.7) + d.day * (dark ? 1.05 : 1.4)) * (1 - 0.45 * night);
+    this.ambient.intensity = dark ? 0.3 : 0.45;
     // Sol tibio y largo al atardecer, frío y bajo de noche (la luna), blanco cálido de día.
     this.sun.color.setRGB(0, 0, 0).add(new THREE.Color("#fff1d6").multiplyScalar(w.day)).add(new THREE.Color("#ffa864").multiplyScalar(w.dusk)).add(new THREE.Color("#a9b8ff").multiplyScalar(w.night));
-    this.hemi.intensity = (dark ? 0.8 : 1.05) + d.day * 0.4;
-    // El cielo del hemisferio es el cielo de verdad (un poco aclarado: la sala no debe verse azul).
-    this.hemi.color.set("#fff5e6").lerp(new THREE.Color(this.sky.zenith), this.exteriorOn ? 0.25 : 0);
+    // De noche el relleno es luz de luna azulada, no oscuridad: una sombra toon sobre un color oscuro
+    // terminaba en negro (el QA visual medía hasta un 28 % de píxeles negros a las 23:00).
+    this.hemi.intensity = ((dark ? 0.8 : 1.05) + d.day * 0.4) * (1 - 0.1 * night);
+    this.hemi.color.set("#fff5e6").lerp(new THREE.Color(this.sky.zenith), this.exteriorOn ? 0.25 : 0).lerp(new THREE.Color("#b8c6ff"), 0.55 * night);
     // El sol viene de donde está el sol (sobre el centro de la planta).
     if (this.room) {
       const b = this.room.bounds;
