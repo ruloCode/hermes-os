@@ -1696,8 +1696,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   on(0);
 
   const plants: [number, number, number][] = [
-    // La esquina suroeste queda libre: ahí arranca la escalera.
-    [minX + 2.6, maxZ - 0.9, 1.1],
+    // La esquina suroeste queda libre: ahí arranca la escalera. La maceta va a 3,3 m del muro:
+    // a 2,6 m tapaba con la baranda y el muro bajo la salida del pie de la escalera (huecos de 0,4 m).
+    [minX + 3.3, maxZ - 0.9, 1.1],
     [maxX - 0.8, maxZ - 0.9, 1.1],
     [cx - 10.2, minZ + 0.8, 0.9],
     [cx + 6.3, minZ + 0.8, 0.9],
