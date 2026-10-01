@@ -143,6 +143,36 @@ export class NavGrid {
   private search = 0;
   private readonly heap = new MinHeap();
 
+  /**
+   * Celdas donde se está de pie a la altura de un piso (1 = suelo libre, sin
+   * muebles ni muros). Sirve para medir el espacio vacío de cada piso.
+   */
+  floorMask(floor: number): Uint8Array {
+    const y = this.floorY[floor] ?? 0;
+    const mask = new Uint8Array(this.nx * this.nz);
+    for (let c = 0; c < mask.length; c++) {
+      for (let i = this.colStart[c]; i < this.colStart[c + 1]; i++) {
+        if (Math.abs(this.nodeH[i] - y) < 0.05) {
+          mask[c] = 1;
+          break;
+        }
+      }
+    }
+    return mask;
+  }
+
+  /** Los `k` rectángulos libres más grandes de un piso (en metros), sin solaparse. */
+  openZones(floor: number, k = 3): { minX: number; maxX: number; minZ: number; maxZ: number; area: number }[] {
+    const mask = this.floorMask(floor);
+    return largestOpenRects(mask, this.nx, this.nz, k).map((r) => ({
+      minX: +(this.minX + r.ix * this.cell).toFixed(2),
+      maxX: +(this.minX + (r.ix + r.w) * this.cell).toFixed(2),
+      minZ: +(this.minZ + r.iz * this.cell).toFixed(2),
+      maxZ: +(this.minZ + (r.iz + r.h) * this.cell).toFixed(2),
+      area: +(r.w * r.h * this.cell * this.cell).toFixed(1),
+    }));
+  }
+
   constructor(spec: NavSpec) {
     const cell = (this.cell = spec.cell ?? NAV_CELL);
     const r = spec.radius ?? NAV_RADIUS;
@@ -463,4 +493,38 @@ export class NavGrid {
     }
     return out;
   }
+}
+
+/**
+ * El rectángulo de unos más grande de una máscara (método del histograma,
+ * O(nx·nz)), repetido `k` veces borrando el anterior: las zonas vacías más
+ * grandes, sin solaparse. Coordenadas en celdas.
+ */
+export function largestOpenRects(mask: Uint8Array, nx: number, nz: number, k = 1): { ix: number; iz: number; w: number; h: number }[] {
+  const m = Uint8Array.from(mask);
+  const out: { ix: number; iz: number; w: number; h: number }[] = [];
+  for (let n = 0; n < k; n++) {
+    const heights = new Int32Array(nx);
+    let best = { ix: 0, iz: 0, w: 0, h: 0 };
+    for (let iz = 0; iz < nz; iz++) {
+      for (let ix = 0; ix < nx; ix++) heights[ix] = m[iz * nx + ix] ? heights[ix] + 1 : 0;
+      // Mayor rectángulo bajo el histograma de esta fila.
+      const stack: number[] = [];
+      for (let ix = 0; ix <= nx; ix++) {
+        const hgt = ix < nx ? heights[ix] : 0;
+        while (stack.length && heights[stack[stack.length - 1]] >= hgt) {
+          const top = stack.pop()!;
+          const hh = heights[top];
+          const left = stack.length ? stack[stack.length - 1] + 1 : 0;
+          const w = ix - left;
+          if (w * hh > best.w * best.h) best = { ix: left, iz: iz - hh + 1, w, h: hh };
+        }
+        stack.push(ix);
+      }
+    }
+    if (!best.w || !best.h) break;
+    out.push(best);
+    for (let iz = best.iz; iz < best.iz + best.h; iz++) for (let ix = best.ix; ix < best.ix + best.w; ix++) m[iz * nx + ix] = 0;
+  }
+  return out;
 }

@@ -14,7 +14,7 @@
 
 import * as THREE from "three";
 import type { AmbientPoi, GameId, NavBox, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
-import { mesh, roundedBox, toon, toonUnique } from "./toon";
+import { mergeByMaterial, mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
 
@@ -113,6 +113,21 @@ export interface CeoOffice {
   privateZone: NavBox;
 }
 
+/**
+ * Capas nuevas de la sala (interruptor "Capas" del HUD). Apagadas, la sala se
+ * arma como antes de existir: sin el rincón de datos (vuelve su ventana), sin la
+ * oficina de CEO (vuelve su maceta) y sin las zonas de los pisos 2 y 3.
+ */
+export interface RoomLayers {
+  /** Sala de control + tablero de uso (piso 1, fondo noreste) y monitores de los escritorios. */
+  data: boolean;
+  ceo: boolean;
+  /** Sala de juntas, biblioteca y cabinas de foco (café) y el lounge de la azotea. */
+  zones: boolean;
+}
+
+export const ALL_LAYERS: RoomLayers = { data: true, ceo: true, zones: true };
+
 /** La pantalla de la arcade: un canvas que pinta el juego (o su espera, con el récord real). */
 export interface ArcadeScreen {
   canvas: HTMLCanvasElement;
@@ -156,8 +171,11 @@ export interface Room {
   spendSpot: BoardSpot;
   /** La TV del lounge (piso 2): centro de la pantalla y desde dónde se usa. */
   tv: { floor: number; x: number; y: number; z: number; front: { x: number; z: number } };
-  /** La oficina de CEO del dueño (piso 1, sureste). */
-  ceo: CeoOffice;
+  /** La oficina de CEO del dueño (piso 1, sureste); null con la capa apagada. */
+  ceo: CeoOffice | null;
+  /** Pantalla de la sala de juntas (piso 2): la próxima junta del calendario. null sin la capa de zonas. */
+  meetingSpot: BoardSpot | null;
+  layers: RoomLayers;
   /** Minijuegos de la azotea: dónde se juega cada uno. */
   gameSpots: Record<GameId, GameSpot>;
   arcadeScreen: ArcadeScreen;
@@ -1106,7 +1124,7 @@ function screenCanvas(w: number, h: number) {
 
 // ── La sala ─────────────────────────────────────────────────────────────
 
-export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: string): Room {
+export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: string, layers: RoomLayers = ALL_LAYERS): Room {
   const group = new THREE.Group();
   const colliders: Collider[] = [];
   const disposables: { dispose(): void }[] = [];
@@ -1148,7 +1166,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const maxZ = Math.max(layout.floor.maxZ + 1.5, 15);
   const W = maxX - minX;
   const D = maxZ - minZ;
-  const key = [minX, maxX, minZ, maxZ].map((n) => n.toFixed(1)).join(",");
+  const key = [minX, maxX, minZ, maxZ].map((n) => n.toFixed(1)).join(",") + `|${+layers.data}${+layers.ceo}${+layers.zones}`;
 
   // Ladrillo a la vista en los muros; acero negro en marcos y rodapiés.
   const brick = brickCanvas(p.dark);
@@ -1274,7 +1292,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   const cx = (minX + maxX) / 2;
   // En el piso 1 el rincón noreste del fondo es pared: ahí van la sala de
   // control (pantallas de todos los agentes) y el tablero de gasto.
-  wall("x", minZ, minX - WALL_T / 2, maxX + WALL_T / 2, [cx - 13, cx - 7.5, cx + 7.5], 1);
+  wall("x", minZ, minX - WALL_T / 2, maxX + WALL_T / 2, layers.data ? [cx - 13, cx - 7.5, cx + 7.5] : [cx - 13, cx - 7.5, cx + 7.5, cx + 13], 1);
   wall("z", minX, minZ, maxZ, [minZ + 13, minZ + 19].filter((z) => z < maxZ - 2), 1);
   wall("z", maxX, minZ, maxZ, [minZ + 3.5, minZ + 18].filter((z) => z < maxZ - 2), -1);
   // El piso 2 repite los muros con sus ventanas; el 3 es azotea (solo antepecho).
@@ -1770,16 +1788,13 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   // Siempre libre: los pods tienen 3 columnas fijas (x ≤ 7,7) y crecen hacia el
   // frente dentro de ese ancho. Se ancla a minZ (fijo), así el ventanal del
   // muro este (minZ + 18) siempre le queda adentro.
-  on(0);
-  const ceoB = { minX: cx + 12.6, maxX: maxX - WALL_T / 2, minZ: minZ + 15.6, maxZ: minZ + 22 };
-  const ceo = ((): CeoOffice => {
-    const { minX: X0, maxX: X1, minZ: Z0, maxZ: Z1 } = ceoB;
-    const clear = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide });
-    const frost = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: p.dark ? 0.22 : 0.42, depthWrite: false, side: THREE.DoubleSide });
-    disposables.push(clear, frost);
-    const GH = 2.7;
-    /** Un tramo de vidrio con marco negro y banda esmerilada a la altura de los ojos (y su colisión). */
-    const glassRun = (axis: "x" | "z", at: number, from: number, to: number) => {
+  // Vidrio de oficina (CEO y sala de juntas): marco negro y banda esmerilada a la altura de los ojos.
+  const clear = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide });
+  const frost = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: p.dark ? 0.22 : 0.42, depthWrite: false, side: THREE.DoubleSide });
+  disposables.push(clear, frost);
+  const GH = 2.7;
+  /** Un tramo de vidrio en el piso actual (`on`), con su colisión. */
+  const glassRun = (axis: "x" | "z", at: number, from: number, to: number) => {
       const len = to - from;
       if (len < 0.05) return;
       const mid = (from + to) / 2;
@@ -1798,8 +1813,12 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
         const u = from + (len * i) / posts;
         g.add(axis === "x" ? mesh(box(0.06, GH, 0.06), frameMat, u, GH / 2, at, false) : mesh(box(0.06, GH, 0.06), frameMat, at, GH / 2, u, false));
       }
-      col(axis === "x" ? { minX: from, maxX: to, minZ: at - 0.05, maxZ: at + 0.05, top: 99 } : { minX: at - 0.05, maxX: at + 0.05, minZ: from, maxZ: to, top: 99 });
-    };
+      col(axis === "x" ? { minX: from, maxX: to, minZ: at - 0.05, maxZ: at + 0.05, top: GH + 0.2 } : { minX: at - 0.05, maxX: at + 0.05, minZ: from, maxZ: to, top: GH + 0.2 });
+  };
+  on(0);
+  const ceoB = { minX: cx + 12.6, maxX: maxX - WALL_T / 2, minZ: minZ + 15.6, maxZ: minZ + 22 };
+  const ceo = !layers.ceo ? null : ((): CeoOffice => {
+    const { minX: X0, maxX: X1, minZ: Z0, maxZ: Z1 } = ceoB;
     // Norte entero; oeste con la puerta cerca del norte (se llega desde los pods); sur solo si la sala sigue más allá.
     const door = { from: Z0 + 0.45, to: Z0 + 1.55 };
     glassRun("x", Z0, X0, X1);
@@ -1917,7 +1936,132 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     };
   })();
   // Los pies de los monitores (los pinta el mundo, con datos).
-  for (const sp of [ceo.spendSpot, ceo.inboxSpot]) g.add(mesh(box(0.22, sp.y - sp.h / 2 - 0.76, 0.1), toon("#1f2024"), sp.x, (sp.y - sp.h / 2 + 0.76) / 2, sp.z, false));
+  if (ceo) for (const sp of [ceo.spendSpot, ceo.inboxSpot]) g.add(mesh(box(0.22, sp.y - sp.h / 2 - 0.76, 0.1), toon("#1f2024"), sp.x, (sp.y - sp.h / 2 + 0.76) / 2, sp.z, false));
+
+  // ── Zonas nuevas (capa "zonas"): sala de juntas, biblioteca y cabinas de foco
+  // en el frente del café, y un lounge en el centro de la azotea. El frente del
+  // café (z 7,5–14) y el centro de la azotea estaban vacíos con cualquier
+  // número de agentes (lo midió la rejilla: GET __hermesOficinaDebug().freeZones).
+  // Muebles estáticos: se funden por material (pocos draw calls; el contorno
+  // dibuja todo dos veces).
+  const zonePois: AmbientPoi[] = [];
+  let meetingSpot: BoardSpot | null = null;
+  if (layers.zones) {
+    const fused = (n: number, build: (t: THREE.Group) => void) => {
+      on(n);
+      const t = new THREE.Group();
+      build(t);
+      g.add(mergeByMaterial(t));
+    };
+    // Sala de juntas (café, frente oeste): vidrio con puerta al norte, mesa larga y pantalla.
+    const J = { x0: cx - 10, x1: cx - 3, z0: minZ + 15.5, z1: minZ + 20.6 };
+    on(1);
+    glassRun("x", J.z0, J.x0, J.x0 + 2.6);
+    glassRun("x", J.z0, J.x0 + 3.7, J.x1);
+    glassRun("z", J.x0, J.z0, J.z1);
+    glassRun("z", J.x1, J.z0, J.z1);
+    glassRun("x", J.z1, J.x0, J.x1);
+    const tz = (J.z0 + J.z1) / 2;
+    const tx = (J.x0 + J.x1) / 2 + 0.4;
+    fused(1, (t) => {
+      t.add(mesh(roundedBox(3.4, 0.07, 1.25, 0.3), toon(p.dark ? "#8c5d3a" : "#a8754c"), tx, 0.74, tz));
+      for (const sx of [-1.3, 1.3]) t.add(mesh(box(0.1, 0.7, 0.8), toon("#1f2024"), tx + sx, 0.36, tz, false));
+      for (let i = 0; i < 3; i++)
+        for (const sz of [-1, 1]) {
+          const c = new THREE.Group();
+          c.add(mesh(roundedBox(0.48, 0.08, 0.46, 0.06), toon("#2b2d42"), 0, 0.46, 0));
+          c.add(mesh(roundedBox(0.46, 0.45, 0.07, 0.05), toon("#2b2d42"), 0, 0.72, sz * 0.21));
+          c.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.42, 6), toon("#8d99ae"), 0, 0.22, 0, false));
+          c.position.set(tx - 1.1 + i * 1.1, 0, tz + sz * 0.95);
+          t.add(c);
+        }
+      t.add(mesh(box(0.1, 1.15, 0.4), toon("#1f2024"), J.x0 + 0.45, 0.58, tz, false));
+    });
+    col({ minX: tx - 1.7, maxX: tx + 1.7, minZ: tz - 0.62, maxZ: tz + 0.62, top: 0.78 });
+    meetingSpot = { x: J.x0 + 0.5, y: FLOOR_Y[1] + 1.55, z: tz, rotY: Math.PI / 2, w: 1.7, h: 0.95, front: { x: tx - 1.6, z: tz } };
+    zonePois.push(
+      { id: "junta-1", floor: 1, activity: "sit", slots: [{ x: tx - 1.1, z: tz + 1.45, facing: Math.PI, seat: { x: tx - 1.1, y: 0.5, z: tz + 0.95 } }] },
+      { id: "junta-2", floor: 1, activity: "sit", slots: [{ x: tx + 1.1, z: tz - 1.45, facing: 0, seat: { x: tx + 1.1, y: 0.5, z: tz - 0.95 } }] },
+    );
+
+    // Biblioteca (café, frente centro-este): dos estanterías contra el balcón, sillones y una lámpara.
+    const bx = cx + 6.5;
+    const bz = minZ + 21.1;
+    fused(1, (t) => {
+      t.add(mesh(roundedBox(5.2, 0.02, 3.4, 0.4), toon(p.dark ? mix(p.bg, "#6d597a", 0.4) : mix("#6d597a", "#ffffff", 0.7)), bx + 1.2, 0.012, bz - 1.2, false));
+      for (const dx of [0, 2.4]) {
+        const sh = bookshelf();
+        sh.rotation.y = Math.PI;
+        sh.position.set(bx + dx, 0, bz);
+        t.add(sh);
+      }
+      for (const dx of [0.2, 2.2]) {
+        const ac = armchair(p.dark ? "#2f5d50" : "#3f7d6b");
+        ac.rotation.y = -Math.PI / 2;
+        ac.position.set(bx + dx, 0, bz - 2.3);
+        t.add(ac);
+      }
+      t.add(mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.05, 20), toon("#8a5a3b"), bx + 1.2, 0.45, bz - 2.3));
+      t.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.42, 8), toon("#1f2024"), bx + 1.2, 0.21, bz - 2.3, false));
+    });
+    for (const dx of [0, 2.4]) col({ minX: bx + dx - 1.1, maxX: bx + dx + 1.1, minZ: bz - 0.25, maxZ: bz + 0.25, top: 2.1 });
+    for (const dx of [0.2, 2.2]) col({ minX: bx + dx - 0.5, maxX: bx + dx + 0.5, minZ: bz - 2.8, maxZ: bz - 1.8, top: 0.6 });
+    col({ minX: bx + 0.85, maxX: bx + 1.55, minZ: bz - 2.65, maxZ: bz - 1.95, top: 0.48 });
+    zonePois.push(
+      { id: "biblioteca", floor: 1, activity: "books", slots: [{ x: bx + 1.2, z: bz - 0.8, facing: 0 }] },
+      { id: "sillon-biblioteca", floor: 1, activity: "sit", slots: [{ x: bx - 0.6, z: bz - 3.3, facing: Math.PI, seat: { x: bx + 0.2, y: 0.63, z: bz - 2.3 } }] },
+    );
+
+    // Cabinas de foco (café, frente este): dos cabinas de vidrio para llamadas y foco.
+    on(1);
+    const boothGlass2 = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
+    disposables.push(boothGlass2);
+    for (const fx of [maxX - 5.2, maxX - 3.6]) {
+      const fb = phoneBooth(boothGlass2);
+      fb.position.set(fx, 0, minZ + 19.5);
+      g.add(fb);
+      col({ minX: fx - 0.62, maxX: fx + 0.62, minZ: minZ + 18.88, maxZ: minZ + 20.12, top: 2.4 });
+    }
+
+    // Lounge de la azotea (centro): mesa baja de madera, pufs y materas altas.
+    // En el frente de la azotea: el rectángulo vacío más grande de ese piso (213 m², z 5,5–13).
+    const lx = cx + 1;
+    const lzz = minZ + 16;
+    fused(2, (t) => {
+      t.add(mesh(roundedBox(4.6, 0.02, 4.0, 0.6), toon(p.dark ? mix(p.bg, "#e9c46a", 0.25) : mix("#e9c46a", "#ffffff", 0.55)), lx, 0.012, lzz, false));
+      t.add(mesh(box(1.3, 0.08, 0.8), toon("#a86b44"), lx, 0.38, lzz));
+      for (const sx of [-0.55, 0.55]) for (const sz of [-0.3, 0.3]) t.add(mesh(box(0.06, 0.36, 0.06), toon("#5a3b28"), lx + sx, 0.18, lzz + sz, false));
+      for (const [x, z] of [
+        [lx - 2.9, lzz - 2.2],
+        [lx + 2.9, lzz + 2.2],
+      ]) {
+        t.add(mesh(box(0.8, 0.8, 0.8), toon("#8a5a3b"), x, 0.4, z));
+        t.add(mesh(new THREE.SphereGeometry(0.5, 10, 8), toon("#4f9d55"), x, 1.05, z, false));
+      }
+    });
+    col({ minX: lx - 0.68, maxX: lx + 0.68, minZ: lzz - 0.42, maxZ: lzz + 0.42, top: 0.42 });
+    for (const [x, z] of [
+      [lx - 2.9, lzz - 2.2],
+      [lx + 2.9, lzz + 2.2],
+    ])
+      col({ minX: x - 0.42, maxX: x + 0.42, minZ: z - 0.42, maxZ: z + 0.42, top: 0.8 });
+    on(2);
+    const pufs: [string, number, number][] = [
+      ["#e76f51", lx - 1.4, lzz],
+      ["#2a9d8f", lx + 1.4, lzz],
+      ["#e9c46a", lx, lzz + 1.3],
+    ];
+    for (const [c, x, z] of pufs) {
+      const bean = mesh(new THREE.SphereGeometry(0.5, 16, 10), toon(c), x, 0.3, z);
+      bean.scale.y = 0.6;
+      g.add(bean);
+      col({ minX: x - 0.42, maxX: x + 0.42, minZ: z - 0.42, maxZ: z + 0.42, top: 0.5 });
+    }
+    zonePois.push(
+      { id: "azotea-puf-oeste", floor: 2, activity: "sit", slots: [{ x: lx - 2.3, z: lzz, facing: Math.PI / 2, seat: { x: lx - 1.4, y: 0.5, z: lzz } }] },
+      { id: "azotea-puf-este", floor: 2, activity: "sit", slots: [{ x: lx + 2.3, z: lzz, facing: -Math.PI / 2, seat: { x: lx + 1.4, y: 0.5, z: lzz } }] },
+    );
+  }
 
   // ── Plantas y lámparas ─────────────────────────────────────────────────
   // Cabina telefónica de vidrio en la esquina noreste del café.
@@ -1934,7 +2078,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   for (const [x, z, drop, n] of [
     [cx - 7.5, minZ + 0.9, 0.9, 0],
     [cx + 7.5, minZ + 0.9, 0.9, 0],
-    // (La del rincón noreste del piso 1 se quitó: tapaba el tablero de uso de Claude.)
+    // La del rincón noreste del piso 1 solo sin la capa de datos: tapaba el tablero de uso de Claude.
+    ...(layers.data ? [] : ([[maxX - 1.0, minZ + 3.5, 0.8, 0]] as const)),
     [cx - 13, minZ + 0.9, 0.8, 1],
     [cx + 7.5, minZ + 0.9, 0.9, 1],
     [tableAt.x + 1.6, tableAt.z + 3.2, 0.9, 1],
@@ -1957,7 +2102,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     [cx + DOOR_HALF + 0.7, maxZ - 0.7, 0.8],
     [kitchen.maxX + 0.6, minZ + 0.9, 1.0],
   ];
-  const inCeo = (x: number, z: number) => x > ceoB.minX - 0.4 && x < ceoB.maxX + 0.4 && z > ceoB.minZ - 0.4 && z < ceoB.maxZ + 0.4;
+  const inCeo = (x: number, z: number) => !!ceo && x > ceoB.minX - 0.4 && x < ceoB.maxX + 0.4 && z > ceoB.minZ - 0.4 && z < ceoB.maxZ + 0.4;
   for (const [x, z, s] of plants) {
     // La maceta de la esquina sureste quedaba dentro de la oficina de CEO (que trae la suya).
     if (inCeo(x, z)) continue;
@@ -2061,6 +2206,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     { id: "silla-playa-2", floor: 2, activity: "sit", slots: [seat(nook.x + 1.1, nook.z + 1.55, 0, nook.x + 1.1, 0.42, nook.z + 0.45)] },
     one("vista-norte", 2, "view", cx - 4, minZ + 1.0, N_),
     one("vista-este", 2, "view", maxX - 1.0, minZ + 10, E_),
+    ...zonePois,
   ];
   const npcSpots: Record<OfficeNpcRole, NpcSpot> = {
     // Recepción, a la derecha de la entrada, con su atril entre ella y el pasillo.
@@ -2149,6 +2295,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     gameSpots,
     arcadeScreen: arcadeScr,
     ceo,
+    meetingSpot,
+    layers,
     tv: { floor: 1, x: tvX, y: FLOOR_Y[1] + 1.75, z: lz, front: { x: maxX - 2.2, z: lz - 0.5 } },
     setTvVideo,
     setBoard: paintBoard,

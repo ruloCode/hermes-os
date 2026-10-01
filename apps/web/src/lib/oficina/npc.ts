@@ -367,6 +367,11 @@ export class OfficeCrowd {
 
   private reservedPoi: string | null = null;
 
+  /** La rejilla de la gente (null con el ambiente apagado): mide el espacio vacío de cada piso. */
+  get navGrid(): NavGrid | null {
+    return this.nav;
+  }
+
   /** El dueño juega en ese lugar (un minijuego): quien estaba se aparta y nadie va hasta liberarlo. */
   reservePoi(id: string | null): string[] {
     this.reservedPoi = id;

@@ -91,7 +91,7 @@ export function StatusCard({
   );
 }
 
-function ToolButton({
+export function ToolButton({
   children,
   onClick,
   active,
@@ -134,6 +134,7 @@ export function Toolbar({
   onHermesCall,
   ambient,
   onAmbient,
+  extra,
 }: {
   mode: OfficeMode;
   onMode: (m: OfficeMode) => void;
@@ -154,6 +155,8 @@ export function Toolbar({
   /** Gente del edificio (ambiente + Recepción, Barista y Respiro). */
   ambient: boolean;
   onAmbient: () => void;
+  /** Interruptores nuevos (Capas, Sonido): van junto a Ambiente. */
+  extra?: React.ReactNode;
 }) {
   return (
     <nav className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
@@ -182,6 +185,7 @@ export function Toolbar({
       </div>
       <div className={`flex items-center gap-0.5 rounded-xl p-1 ${glass}`}>
         {mode === "aerial" ? <ToolButton onClick={onFrame}>Encuadrar</ToolButton> : null}
+        {extra}
         <ToolButton
           active={ambient}
           onClick={onAmbient}
@@ -497,5 +501,46 @@ export function Toasts({ toasts }: { toasts: Toast[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Las capas nuevas de la oficina: apagadas, la sala queda como antes de existir. Se guardan en este navegador. */
+export interface OfficeLayers {
+  data: boolean;
+  ceo: boolean;
+  zones: boolean;
+  games: boolean;
+}
+
+const LAYER_LABEL: { key: keyof OfficeLayers; label: string; hint: string }[] = [
+  { key: "data", label: "Pantallas y uso", hint: "Monitor en cada escritorio, sala de control y tablero de uso de Claude (piso 1)" },
+  { key: "ceo", label: "Oficina de CEO", hint: "Tu oficina privada en el piso 1, con el modo sentado" },
+  { key: "zones", label: "Zonas nuevas", hint: "Sala de juntas, biblioteca y cabinas (café) y el lounge de la azotea" },
+  { key: "games", label: "Minijuegos", hint: "Dardos, ping-pong, futbolín, canasta y la arcade de la azotea" },
+];
+
+export function LayersPicker({ layers, onChange, onClose }: { layers: OfficeLayers; onChange: (l: OfficeLayers) => void; onClose: () => void }) {
+  return (
+    <section role="dialog" aria-label="Capas" className={`pointer-events-auto w-72 rounded-xl p-3 ${glass}`}>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-text">Capas</h2>
+        <button type="button" onClick={onClose} className="rounded-md px-1.5 text-sm text-text-dim hover:text-text" aria-label="Cerrar">
+          ✕
+        </button>
+      </div>
+      <ul className="space-y-1.5">
+        {LAYER_LABEL.map((l) => (
+          <li key={l.key}>
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-text" title={l.hint}>
+              <input type="checkbox" className="mt-0.5 accent-accent" checked={layers[l.key]} onChange={(e) => onChange({ ...layers, [l.key]: e.target.checked })} data-layer={l.key} />
+              <span>
+                {l.label}
+                <span className="block text-xs text-text-dim">{l.hint}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

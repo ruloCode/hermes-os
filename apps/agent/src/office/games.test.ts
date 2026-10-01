@@ -17,7 +17,9 @@ import {
   stepFoos,
   stepPong,
   stepRain,
+  type FoosState,
   type GameInput,
+  type PongState,
 } from "@hermes/shared";
 
 const input = (o: Partial<GameInput> = {}): GameInput => ({ ...NO_INPUT, ...o });
@@ -84,21 +86,21 @@ describe("minijuegos de la azotea", () => {
   });
 
   it("ping-pong: el rival no se teletransporta (velocidad tope)", () => {
-    let s = { ...newPong(1), serve: 0, ball: { x: 0, z: 0.6, vx: 1, vz: 0 } };
+    let s: PongState = { ...newPong(1), serve: 0, ball: { x: 0, z: 0.6, vx: 1, vz: 0 } };
     s = stepPong(s, 0.1, input());
     assert.ok(Math.abs(s.cpu) <= PONG.cpuSpeed * 0.1 + 1e-9);
   });
 
   it("futbolín: patear con el muñeco alineado manda la pelota al arco rival", () => {
     const rod = FOOS_RODS.you[1];
-    let s = { ...newFoos(1), serve: 0, ball: { x: rod.x + 0.01, z: rod.men[1], vx: 0, vz: 0 } };
+    let s: FoosState = { ...newFoos(1), serve: 0, ball: { x: rod.x + 0.01, z: rod.men[1], vx: 0, vz: 0 } };
     s = stepFoos(s, 1 / 60, input({ pressed: true, action: true }));
     assert.equal(s.event, "kick");
     assert.ok(s.ball.vx > 0);
   });
 
   it("futbolín: entrar por la boca del arco es gol; por fuera, rebote", () => {
-    let s = { ...newFoos(1), serve: 0, ball: { x: FOOS.L / 2 - 0.03, z: 0, vx: 2, vz: 0 } };
+    let s: FoosState = { ...newFoos(1), serve: 0, ball: { x: FOOS.L / 2 - 0.03, z: 0, vx: 2, vz: 0 } };
     s = stepFoos(s, 1 / 60, input());
     assert.equal(s.event, "goal-you");
     assert.equal(s.scoreYou, 1);

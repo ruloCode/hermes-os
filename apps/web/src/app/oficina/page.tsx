@@ -86,6 +86,9 @@ import {
   ControlsHint,
   FloorPicker,
   LookPicker,
+  LayersPicker,
+  ToolButton,
+  type OfficeLayers,
   PauseTimer,
   StatusCard,
   TeamRoster,
@@ -215,6 +218,9 @@ const HERMES_SCOPE =
 const OFFICE_MODE_KEY = "hermes-office-mode";
 /** Interruptor "Ambiente" (prendido por defecto): preferencia de este navegador. */
 const AMBIENT_KEY = "hermes-oficina-ambiente";
+/** Interruptor "Capas" (todas prendidas por defecto): preferencia de este navegador. */
+const LAYERS_KEY = "hermes-oficina-capas";
+const DEFAULT_LAYERS: OfficeLayers = { data: true, ceo: true, zones: true, games: true };
 
 function hhmm(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -348,6 +354,8 @@ export default function OficinaPage() {
   gameRef.current = !!gameHud;
   // Modo CEO: sentado en la oficina privada; ←→/LB RB recorren agentes y Enter/A abre su panel.
   const [ceo, setCeo] = useState(false);
+  const [layers, setLayersState] = useState<OfficeLayers>(DEFAULT_LAYERS);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [ceoPick, setCeoPick] = useState<string | null>(null);
   const ceoRef = useRef(false);
   ceoRef.current = ceo;
@@ -388,6 +396,8 @@ export default function OficinaPage() {
       const saved = localStorage.getItem(OFFICE_MODE_KEY);
       if (isOfficeMode(saved)) setOfficeModeState(saved);
       if (localStorage.getItem(AMBIENT_KEY) === "off") setAmbientState(false);
+      const savedLayers = JSON.parse(localStorage.getItem(LAYERS_KEY) ?? "null") as Partial<OfficeLayers> | null;
+      if (savedLayers && typeof savedLayers === "object") setLayersState({ ...DEFAULT_LAYERS, ...savedLayers });
     } catch {
       /* sin storage: queda Auto y el ambiente prendido */
     }
@@ -1350,6 +1360,19 @@ export default function OficinaPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeConversation, closeNpc]);
 
+  const setLayers = (l: OfficeLayers) => {
+    setLayersState(l);
+    if (!l.data) {
+      setSpendOpen(false);
+      setControlOpen(false);
+    }
+    try {
+      localStorage.setItem(LAYERS_KEY, JSON.stringify(l));
+    } catch {
+      /* modo privado: dura la visita */
+    }
+  };
+
   const changeLook = (l: OwnerLook) => {
     setLook(l);
     saveLook(l);
@@ -1502,13 +1525,14 @@ export default function OficinaPage() {
           if (!on) setCeoPick(null);
         }}
         calendar={snapshot?.calendar ?? null}
+        layers={layers}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
         <div className="flex flex-col items-start gap-2">
           <StatusCard title={title} machine={machine} feed={feed} simulated={!!sim} total={workers.length} tally={tally} daylight={daylight} />
           <FloorPicker floor={floor} mode={mode} onPick={(f) => sceneRef.current?.world()?.setFloorView(f)} />
-          {plan?.available && plan.windows.length ? (
+          {layers.data && plan?.available && plan.windows.length ? (
             <button
               type="button"
               onClick={() => {
@@ -1564,10 +1588,16 @@ export default function OficinaPage() {
             onHermesCall={toggleCall}
             ambient={ambient}
             onAmbient={() => setAmbient(!ambient)}
+            extra={
+              <ToolButton active={layersOpen} onClick={() => setLayersOpen((v) => !v)} title="Capas nuevas: pantallas y uso, oficina de CEO, zonas y minijuegos">
+                Capas
+              </ToolButton>
+            }
           />
           {hermes.error ? <p className="pointer-events-auto rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{hermes.error}</p> : null}
           {team.error ? <p className="pointer-events-auto max-w-sm rounded-lg bg-panel px-3 py-1.5 text-xs text-red">{team.error}</p> : null}
           {lookOpen ? <LookPicker look={look} onChange={changeLook} onClose={() => setLookOpen(false)} /> : null}
+          {layersOpen ? <LayersPicker layers={layers} onChange={setLayers} onClose={() => setLayersOpen(false)} /> : null}
           {!selectedWorker && !lookOpen ? (
             <TeamRoster
               workers={workers}

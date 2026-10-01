@@ -50,10 +50,10 @@ import { QueueBoard } from "./queueboard";
 import { SpendBoard } from "./spendboard";
 import { ControlWall } from "./controlwall";
 import { DeskMonitor } from "./monitor";
-import { CeoAgenda, CeoInbox } from "./ceo-screens";
+import { CeoAgenda, CeoInbox, MeetingScreen } from "./ceo-screens";
 import { createGame, paintArcadeIdle, type GameEvent, type GameHud, type MiniGame } from "./games";
 import { PlayerController, isTyping, type Collider } from "./player";
-import { buildRoom, type BoardStat, type FeedLine, type Room, FLOOR_Y, floorAt } from "./room";
+import { ALL_LAYERS, buildRoom, type BoardStat, type FeedLine, type Room, type RoomLayers, FLOOR_Y, floorAt } from "./room";
 import { noOutline, setToonFont, toon } from "./toon";
 import type { OwnerLook } from "./look";
 import type { OfficePalette } from "./palette";
@@ -244,6 +244,10 @@ export class OfficeWorld {
   private ceoAgenda: CeoAgenda | null = null;
   private calendar: UpcomingCalendar | null = null;
   private ceoOn = false;
+  private meetingScreen: MeetingScreen | null = null;
+  /** Capas nuevas (interruptor "Capas"): datos, oficina de CEO y zonas. */
+  private layers: RoomLayers = { ...ALL_LAYERS };
+  private freeZonesCache: { key: string; zones: unknown } | null = null;
   private ceoPick: string | null = null;
   private readonly ceoLook = new THREE.Vector3();
   private gameHudAt = 0;
@@ -376,6 +380,7 @@ export class OfficeWorld {
 
   /** Entra a un minijuego: el dueño se para en su puesto y la cámara y la entrada pasan al juego. */
   startGame(id: GameId): boolean {
+    if (!this.gamesOn) return false;
     const spot = this.room?.gameSpots[id];
     if (!spot || !this.room) return false;
     this.exitGame();
@@ -559,10 +564,47 @@ export class OfficeWorld {
     this.ceoSpend?.setPlan(plan);
   }
 
-  /** La agenda real (snapshot.calendar de /dashboard) para la pantalla de la oficina de CEO. */
+  /** La agenda real (snapshot.calendar de /dashboard) para la oficina de CEO y la sala de juntas. */
   setCalendar(cal: UpcomingCalendar | null) {
     this.calendar = cal;
     this.ceoAgenda?.setData(cal, new Date());
+    this.meetingScreen?.setData(cal, new Date());
+  }
+
+  /** Prende o apaga capas: la sala se rehace (apagadas, queda como antes de existir). */
+  setLayers(layers: RoomLayers) {
+    const same = layers.data === this.layers.data && layers.ceo === this.layers.ceo && layers.zones === this.layers.zones;
+    if (same) return;
+    this.layers = { ...layers };
+    if (this.ceoOn && !layers.ceo) this.exitCeo();
+    // Los monitores de los escritorios son de la capa de datos.
+    if (!layers.data) for (const st of this.seated.values()) {
+      st.monitor?.dispose();
+      st.monitor = null;
+    }
+    if (this.layout) {
+      this.roomKey = "";
+      this.setLayout(this.layout);
+      if (layers.data) this.setWorkers(this.workerList, this.lastSeats, this.lastVoices, this.nickMap);
+    }
+  }
+  private lastSeats: ReadonlyMap<string, string> = new Map();
+  private gamesOn = true;
+
+  /** Capa "Minijuegos": apagada, los juegos de la azotea no se alcanzan con "E" (y el que corre se cierra). */
+  setGamesEnabled(on: boolean) {
+    this.gamesOn = on;
+    if (!on) this.exitGame();
+  }
+  private lastVoices: ReadonlyMap<string, string> | undefined;
+
+  /** QA (capturas y zonas nuevas): los rectángulos vacíos más grandes de cada piso, medidos en la rejilla de la gente. */
+  freeZones(): unknown {
+    const nav = this.crowd.navGrid;
+    if (!nav || !this.room) return null;
+    const key = `${this.room.key}|${this.layout?.desks.length}`;
+    if (this.freeZonesCache?.key !== key) this.freeZonesCache = { key, zones: FLOOR_Y.map((_, f) => nav.openZones(f, 3)) };
+    return this.freeZonesCache.zones;
   }
 
   /** Cómo se llama cada proyecto (slug → nombre del vault), para tableros y pantallas. */
@@ -636,7 +678,7 @@ export class OfficeWorld {
       monitors: Object.fromEntries([...this.seated].filter(([, s]) => s.monitor && !s.leaving).map(([id, s]) => [id, { lines: s.monitor!.shown(), paints: s.monitor!.paints }])),
       controlWall: this.controlWall?.debug() ?? null,
       game: this.gameState(),
-      ceo: this.room
+      ceo: this.room?.ceo
         ? {
             on: this.ceoOn,
             pick: this.ceoPick,
@@ -645,6 +687,9 @@ export class OfficeWorld {
             bounds: this.room.ceo.bounds,
           }
         : null,
+      layers: this.layers,
+      meeting: this.meetingScreen?.text ?? null,
+      freeZones: this.freeZones(),
       spend: this.spendData === undefined ? "loading" : this.spendData ? { costUsd: this.spendData.today.costUsd, runs: this.spendData.today.runs } : null,
       plan: this.planData === undefined ? "loading" : this.planData ? this.planData.windows.map((w) => ({ label: w.label, utilization: w.utilization })) : null,
     };
@@ -768,14 +813,14 @@ export class OfficeWorld {
 
     // La sala se reconstruye solo si cambia la planta (tamaño o pods: sus lámparas cuelgan sobre cada uno).
     const f = layout.floor;
-    const roomKey = `${f.minX},${f.maxX},${f.minZ},${f.maxZ}|${layout.pods.map((p) => `${p.project}:${p.desks.length}`).join(",")}`;
+    const roomKey = `${f.minX},${f.maxX},${f.minZ},${f.maxZ}|${layout.pods.map((p) => `${p.project}:${p.desks.length}`).join(",")}|${+this.layers.data}${+this.layers.ceo}${+this.layers.zones}`;
     if (!this.room || roomKey !== this.roomKey) {
       this.roomKey = roomKey;
       if (this.room) {
         this.scene.remove(this.room.group);
         this.room.dispose();
       }
-      this.room = buildRoom(layout, this.palette, this.ownerName);
+      this.room = buildRoom(layout, this.palette, this.ownerName, this.layers);
       this.shownFloor = -1;
       this.room.group.traverse((o) => {
         const m = o as THREE.Mesh;
@@ -800,17 +845,28 @@ export class OfficeWorld {
       this.queueBoard.setState(this.queueData);
       this.scene.add(this.queueBoard.group);
       this.spendBoard?.dispose();
-      this.spendBoard = new SpendBoard(this.room.spendSpot, { font: this.palette.font, mono: this.palette.mono, projectName: this.projectNamer });
-      this.spendBoard.setData(this.spendData);
-      this.spendBoard.setPlan(this.planData);
-      this.scene.add(this.spendBoard.group);
       this.controlWall?.dispose();
-      this.controlWall = new ControlWall(this.room.controlSpot, this.palette);
-      this.controlWall.setWorkers(this.workerList, this.nickMap, this.projectNamer);
-      this.scene.add(this.controlWall.group);
+      this.spendBoard = null;
+      this.controlWall = null;
+      if (this.layers.data) {
+        this.spendBoard = new SpendBoard(this.room.spendSpot, { font: this.palette.font, mono: this.palette.mono, projectName: this.projectNamer });
+        this.spendBoard.setData(this.spendData);
+        this.spendBoard.setPlan(this.planData);
+        this.scene.add(this.spendBoard.group);
+        this.controlWall = new ControlWall(this.room.controlSpot, this.palette);
+        this.controlWall.setWorkers(this.workerList, this.nickMap, this.projectNamer);
+        this.scene.add(this.controlWall.group);
+      }
       // Oficina de CEO: monitor grande de uso, bandeja y agenda.
-      for (const old of [this.ceoSpend, this.ceoInbox, this.ceoAgenda]) old?.dispose();
+      for (const old of [this.ceoSpend, this.ceoInbox, this.ceoAgenda, this.meetingScreen]) old?.dispose();
+      this.ceoSpend = this.ceoInbox = this.ceoAgenda = this.meetingScreen = null;
+      if (this.room.meetingSpot) {
+        this.meetingScreen = new MeetingScreen(this.room.meetingSpot, this.palette.font);
+        this.meetingScreen.setData(this.calendar, new Date());
+        this.scene.add(this.meetingScreen.group);
+      }
       const ceo = this.room.ceo;
+      if (ceo) {
       this.ceoSpend = new SpendBoard(ceo.spendSpot, { font: this.palette.font, mono: this.palette.mono, projectName: this.projectNamer, big: true, pxPerM: 1300 }, "#1f2024");
       this.ceoSpend.setData(this.spendData);
       this.ceoSpend.setPlan(this.planData);
@@ -819,6 +875,7 @@ export class OfficeWorld {
       this.ceoAgenda = new CeoAgenda(ceo.agendaSpot, this.palette.font);
       this.ceoAgenda.setData(this.calendar, new Date());
       this.scene.add(this.ceoSpend.group, this.ceoInbox.group, this.ceoAgenda.group);
+      }
       if (this.ceoOn) this.exitCeo();
       this.room.setFeed(this.feed);
       this.room.setBoard(this.board);
@@ -870,7 +927,7 @@ export class OfficeWorld {
       return { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z), top: 2 };
     });
     // La oficina de CEO es privada: obstáculo solo para la gente de ambiente (el dueño entra por la puerta).
-    return [...room.colliders, ...this.deskColliders, ...pods, room.ceo.privateZone, ...this.crowd.staticNavBoxes(room)];
+    return [...room.colliders, ...this.deskColliders, ...pods, ...(room.ceo ? [room.ceo.privateZone] : []), ...this.crowd.staticNavBoxes(room)];
   }
 
   /** Encuadra (vista aérea) los pods donde hay alguien trabajando; si no hay nadie, toda la planta. */
@@ -952,6 +1009,8 @@ export class OfficeWorld {
   setWorkers(workers: OfficeWorker[], seats: ReadonlyMap<string, string>, voices?: ReadonlyMap<string, string>, nicks?: ReadonlyMap<string, string>) {
     this.workerList = workers;
     this.nickMap = nicks ?? new Map();
+    this.lastSeats = seats;
+    this.lastVoices = voices;
     this.controlWall?.setWorkers(workers, this.nickMap, this.projectNamer);
     this.ceoInbox?.setData(workers, this.nickMap, this.queueData);
     const live = new Set<string>();
@@ -983,10 +1042,13 @@ export class OfficeWorld {
         desk.seatAnchor.add(s.character.root);
         desk.laptopAnchor.add(s.laptop.root);
         s.monitor?.dispose();
+        s.monitor = null;
+        s.deskId = deskId;
+      }
+      if (!s.monitor && this.layers.data) {
         s.monitor = new DeskMonitor(desk.desk, this.palette);
         noOutline(s.monitor.root);
         desk.group.add(s.monitor.root);
-        s.deskId = deskId;
       }
       s.monitor?.setWorker(w, nicks?.get(w.id) ?? "");
       if (w.status === "done" && s.status && s.status !== "done") {
@@ -1031,7 +1093,7 @@ export class OfficeWorld {
       return a ? this.project(this.tmp.set(a.x, a.y, a.z)) : null;
     }
     if (hit.kind === "ceo") {
-      const c = this.room?.ceo.chair;
+      const c = this.room?.ceo?.chair;
       return c ? this.project(this.tmp.set(c.x, 1.0, c.z)) : null;
     }
     if (hit.kind === "spend" || hit.kind === "control") {
@@ -1099,7 +1161,7 @@ export class OfficeWorld {
       if (s) best = { hit: { kind: "npc", id: s.role }, d: s.d, at: new THREE.Vector3(s.at.x, s.at.y + 2.35, s.at.z) };
       const b = floor === 0 ? this.boards?.near(this.player.pos.x, this.player.pos.z, BOARD_REACH) : null;
       if (b && (!best || b.d < best.d)) best = { hit: { kind: "board", id: b.id }, d: b.d, at: b.at };
-      if (floor === 0 && this.room) {
+      if (floor === 0 && this.room && this.layers.data) {
         for (const [kind, spot] of [
           ["spend", this.room.spendSpot],
           ["control", this.room.controlSpot],
@@ -1118,7 +1180,7 @@ export class OfficeWorld {
         const d = Math.hypot(wb.front.x - this.player.pos.x, wb.front.z - this.player.pos.z);
         if (d <= BOARD_REACH && (!best || d < best.d)) best = { hit: { kind: "whiteboard", id: "free" }, d, at: new THREE.Vector3(wb.x, wb.y + wb.h / 2 + 0.3, wb.z) };
       }
-      if (this.room && !this.game) {
+      if (this.room && !this.game && this.gamesOn) {
         for (const spot of Object.values(this.room.gameSpots)) {
           if (spot.floor !== floor) continue;
           const d = Math.hypot(spot.stand.x - this.player.pos.x, spot.stand.z - this.player.pos.z);
@@ -1364,6 +1426,7 @@ export class OfficeWorld {
     if (!this.room) return;
     const d = this.room.tick(new Date());
     this.ceoAgenda?.setData(this.calendar, new Date());
+    this.meetingScreen?.setData(this.calendar, new Date());
     const dark = this.palette.dark;
     this.sun.intensity = (dark ? 0.55 : 0.7) + d.day * (dark ? 1.05 : 1.4);
     this.sun.color.set(d.day >= 1 ? "#fff1d6" : d.day <= 0 ? "#b8c6ff" : "#ffc58a");
@@ -1378,7 +1441,7 @@ export class OfficeWorld {
       this.clockAt = now;
       this.applyDaylight();
     }
-    if (this.ceoOn && this.room) {
+    if (this.ceoOn && this.room?.ceo) {
       // Modo CEO: sentado detrás del escritorio, mirando el salón por el vidrio.
       const c = this.room.ceo.chair;
       const k = 1 - Math.exp(-dt * 4);
@@ -1453,12 +1516,12 @@ export class OfficeWorld {
     // Jugando, la cámara es la del juego: el dueño taparía la mesa o la pantalla.
     if (this.game) this.owner.root.visible = false;
     // Sentado en la silla ejecutiva; la cámara son sus ojos, así que no se dibuja.
-    if (this.ceoOn && this.room) {
+    if (this.ceoOn && this.room?.ceo) {
       const c = this.room.ceo.chair;
       this.owner.root.position.set(c.x, c.seatY - PERSON_SEAT_OFFSET, c.z);
       this.owner.root.visible = false;
     }
-    this.owner.root.rotation.y = this.ceoOn && this.room ? this.room.ceo.chair.facing : this.player.facing;
+    this.owner.root.rotation.y = this.ceoOn && this.room?.ceo ? this.room.ceo.chair.facing : this.player.facing;
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
     this.crowd.update(dt, t, this.player.pos, this.shownFloor);
 
@@ -1579,6 +1642,7 @@ export class OfficeWorld {
     this.ceoSpend?.dispose();
     this.ceoInbox?.dispose();
     this.ceoAgenda?.dispose();
+    this.meetingScreen?.dispose();
     for (const s of this.seated.values()) {
       s.character.dispose();
       s.laptop.dispose();

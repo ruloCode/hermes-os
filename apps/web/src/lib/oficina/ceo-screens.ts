@@ -155,3 +155,46 @@ export class CeoAgenda extends CanvasScreen {
     });
   }
 }
+
+/** Pantalla de la sala de juntas (café): la próxima junta del calendario real. */
+export class MeetingScreen extends CanvasScreen {
+  /** Lo que dice (QA). */
+  text = "";
+
+  setData(cal: UpcomingCalendar | null, now: Date) {
+    const next = cal?.configured ? (cal.events.find((e) => !e.allDay && e.startsInMin > -60) ?? null) : null;
+    const when = next
+      ? next.startsInMin < 0
+        ? `empezó hace ${-next.startsInMin} min`
+        : next.startsInMin < 60
+          ? `en ${next.startsInMin} min`
+          : new Date(next.start).toDateString() === now.toDateString()
+            ? `hoy a las ${hhmm(new Date(next.start))}`
+            : new Date(next.start).toLocaleDateString("es-CO", { weekday: "long", hour: "numeric", minute: "2-digit" })
+      : "";
+    this.text = !cal ? "Sin datos del dashboard." : !cal.configured ? "Calendario sin configurar." : next ? `${next.title} · ${when}` : cal.stale ? "Sin conexión con el calendario." : "Sin juntas próximas.";
+    this.repaint(JSON.stringify([this.text, next?.location ?? null]), (g, w, h) => {
+      const f = this.font;
+      g.fillStyle = "#9aa3b2";
+      g.font = `600 40px ${f}`;
+      g.fillText("Sala de juntas · próxima", 46, 64);
+      g.fillStyle = "#f4f1ea";
+      g.font = `800 64px ${f}`;
+      if (!next) {
+        g.fillStyle = "#cdd6f4";
+        g.font = `600 48px ${f}`;
+        g.fillText(this.text, 46, h / 2 + 20);
+        return;
+      }
+      g.fillText(clip(g, next.title, w - 92), 46, 200);
+      g.fillStyle = next.startsInMin < 0 ? "#6ccb8f" : "#e7b04e";
+      g.font = `600 46px ${f}`;
+      g.fillText(when, 46, 300);
+      if (next.location) {
+        g.fillStyle = "#9aa3b2";
+        g.font = `500 36px ${f}`;
+        g.fillText(clip(g, next.location, w - 92), 46, 380);
+      }
+    });
+  }
+}

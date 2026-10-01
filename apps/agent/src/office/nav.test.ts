@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { NAV_STEP, NavGrid, type NavBox, type NavPoint } from "@hermes/shared";
+import { NAV_STEP, NavGrid, largestOpenRects, type NavBox, type NavPoint } from "@hermes/shared";
 
 const FLOORS = [0, 3.6] as const;
 const ROOM = { minX: 0, maxX: 12, minZ: 0, maxZ: 10 };
@@ -152,4 +152,19 @@ describe("NavGrid", () => {
     assert.equal(grid.walkable(6, 4.5, 0.78), false);
     assert.equal(grid.walkable(6, 4.5, 0), false);
   });
+
+  it("encuentra los rectángulos vacíos más grandes de un piso, sin solaparse", () => {
+    // 5×4 celdas; un mueble ocupa la columna 2 de las filas 0-1.
+    const nx = 5;
+    const nz = 4;
+    const mask = new Uint8Array(nx * nz).fill(1);
+    mask[0 * nx + 2] = 0;
+    mask[1 * nx + 2] = 0;
+    const [a, b] = largestOpenRects(mask, nx, nz, 2);
+    assert.deepEqual(a, { ix: 0, iz: 2, w: 5, h: 2 }, "la franja libre de abajo, entera (10 celdas)");
+    assert.equal(b.w * b.h, 4, "luego uno de los bloques de arriba (2×2), sin pisar la franja");
+    assert.ok(b.iz + b.h <= 2);
+    assert.deepEqual(largestOpenRects(new Uint8Array(4), 2, 2, 3), [], "sin suelo libre no hay zonas");
+  });
 });
+
