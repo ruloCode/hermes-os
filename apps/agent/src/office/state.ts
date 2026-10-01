@@ -14,6 +14,7 @@ import {
   registerWorker,
   setWorkerApproval,
   setWorkerMode,
+  setWorkerSpend,
   tickOffice,
   type OfficeMode,
   type ApprovalOutcome,
@@ -23,6 +24,7 @@ import {
   type OfficeState,
   type OfficeUpdate,
   type OfficeWorker,
+  type WorkerSpend,
 } from "@hermes/shared";
 import { subscribe } from "../events.js";
 import { env } from "../env.js";
@@ -81,6 +83,12 @@ export function setOfficeApproval(id: string, approval: OfficeApproval | null, o
 /** El CLI reportó el modo de permisos de la sesión: la tarjeta lo muestra tal cual. */
 export function setOfficeMode(id: string, mode: OfficeMode | undefined): void {
   const w = setWorkerMode(workers, id, mode);
+  if (w) publish({ type: "worker", worker: w });
+}
+
+/** Lo que lleva gastado el personaje (tokens mientras corre; costo final del result). */
+export function setOfficeSpend(id: string, spend: WorkerSpend): void {
+  const w = setWorkerSpend(workers, id, spend);
   if (w) publish({ type: "worker", worker: w });
 }
 

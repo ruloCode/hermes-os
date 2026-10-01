@@ -28,7 +28,9 @@ import {
   type OfficeBoards,
   type OfficeLayout,
   type OfficeNpcRole,
+  type OfficeSpend,
   type OfficeWorker,
+  type PlanUsage,
 } from "@hermes/shared";
 import { buildDesk, buildPodRug, type DeskView } from "./desk";
 import { Confetti } from "./confetti";
@@ -39,6 +41,9 @@ import { OfficeCrowd } from "./npc";
 import { WallBoards } from "./boards";
 import { WallWhiteboard } from "./whiteboard";
 import { QueueBoard } from "./queueboard";
+import { SpendBoard } from "./spendboard";
+import { ControlWall } from "./controlwall";
+import { DeskMonitor } from "./monitor";
 import { PlayerController, isTyping, type Collider } from "./player";
 import { buildRoom, type BoardStat, type FeedLine, type Room, FLOOR_Y, floorAt } from "./room";
 import { noOutline, setToonFont, toon } from "./toon";
@@ -60,7 +65,9 @@ export type OfficeHit =
   | { kind: "board"; id: OfficeBoardId }
   | { kind: "tv"; id: "lounge" }
   | { kind: "whiteboard"; id: "free" }
-  | { kind: "queue"; id: "main" };
+  | { kind: "queue"; id: "main" }
+  | { kind: "spend"; id: "wall" }
+  | { kind: "control"; id: "wall" };
 export type OfficeMode = "explore" | "aerial";
 
 export interface ScreenAnchor {
@@ -96,6 +103,8 @@ interface Seated {
   status?: OfficeWorker["status"];
   character: OfficeCharacter;
   laptop: Laptop;
+  /** Monitor grande del escritorio con su stream (las líneas de /office/events). */
+  monitor: DeskMonitor | null;
   deskId: string | null;
   leaving: boolean;
 }
@@ -167,6 +176,17 @@ export class OfficeWorld {
   private queueBoard: QueueBoard | null = null;
   private queueData: QueueState | null | undefined = undefined;
   private readonly peopleBuf: Collider[] = [];
+  /** Tablero de gasto (GET /office/spend) y sala de control (pantallas de todos los agentes). */
+  private spendBoard: SpendBoard | null = null;
+  private spendData: OfficeSpend | null | undefined = undefined;
+  private planData: PlanUsage | null | undefined = undefined;
+  private controlWall: ControlWall | null = null;
+  private projectNamer: (slug: string) => string = (s) => s;
+  private workerList: OfficeWorker[] = [];
+  private nickMap: ReadonlyMap<string, string> = new Map();
+  private readonly frustum = new THREE.Frustum();
+  private readonly projScreen = new THREE.Matrix4();
+  private readonly sphere = new THREE.Sphere();
   mode: OfficeMode = "explore";
   fps = 0;
 
@@ -317,6 +337,25 @@ export class OfficeWorld {
     this.queueBoard?.setState(q);
   }
 
+  /** Gasto de tokens (GET /office/spend): undefined = cargando, null = el agente no respondió. */
+  setSpend(data: OfficeSpend | null | undefined) {
+    this.spendData = data;
+    this.spendBoard?.setData(data, this.projectNamer);
+  }
+
+  /** Uso del plan de Claude (GET /office/plan-usage): sesión, semana, límites por modelo. */
+  setPlanUsage(plan: PlanUsage | null | undefined) {
+    this.planData = plan;
+    this.spendBoard?.setPlan(plan);
+  }
+
+  /** Cómo se llama cada proyecto (slug → nombre del vault), para tableros y pantallas. */
+  setProjectNamer(fn: (slug: string) => string) {
+    this.projectNamer = fn;
+    this.spendBoard?.setData(this.spendData, fn);
+    this.controlWall?.setWorkers(this.workerList, this.nickMap, fn);
+  }
+
   /** El dibujo de la pizarra libre (data URL PNG, o null = limpia). */
   setWhiteboard(image: string | null) {
     this.whiteboardImage = image;
@@ -376,11 +415,22 @@ export class OfficeWorld {
       fps: this.fps,
       ...this.crowd.debug(),
       ambient: this.crowd.on,
+      monitors: Object.fromEntries([...this.seated].filter(([, s]) => s.monitor && !s.leaving).map(([id, s]) => [id, { lines: s.monitor!.shown(), paints: s.monitor!.paints }])),
+      controlWall: this.controlWall?.debug() ?? null,
+      spend: this.spendData === undefined ? "loading" : this.spendData ? { costUsd: this.spendData.today.costUsd, runs: this.spendData.today.runs } : null,
+      plan: this.planData === undefined ? "loading" : this.planData ? this.planData.windows.map((w) => ({ label: w.label, utilization: w.utilization })) : null,
     };
   }
 
   /** Lleva al dueño junto a un escritorio o personaje (lista del equipo en vista explorar). */
   walkTo(hit: OfficeHit) {
+    if (hit.kind === "spend" || hit.kind === "control") {
+      const spot = hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
+      if (!spot) return;
+      if (this.mode !== "explore") this.setMode("explore");
+      this.player.spawn(spot.front.x, spot.front.z, Math.atan2(spot.x - spot.front.x, spot.z - spot.front.z));
+      return;
+    }
     if (hit.kind === "whiteboard" || hit.kind === "queue") {
       const wb = hit.kind === "queue" ? this.room?.queueSpot : this.room?.whiteboardSpot;
       if (!wb) return;
@@ -444,6 +494,8 @@ export class OfficeWorld {
         if (s.deskId !== id) continue;
         s.character.root.removeFromParent();
         s.laptop.root.removeFromParent();
+        s.monitor?.dispose();
+        s.monitor = null;
         s.deskId = null;
       }
       this.scene.remove(view.group);
@@ -504,6 +556,15 @@ export class OfficeWorld {
       this.queueBoard = new QueueBoard(this.room.queueSpot, this.palette.font);
       this.queueBoard.setState(this.queueData);
       this.scene.add(this.queueBoard.group);
+      this.spendBoard?.dispose();
+      this.spendBoard = new SpendBoard(this.room.spendSpot, { font: this.palette.font, mono: this.palette.mono, projectName: this.projectNamer });
+      this.spendBoard.setData(this.spendData);
+      this.spendBoard.setPlan(this.planData);
+      this.scene.add(this.spendBoard.group);
+      this.controlWall?.dispose();
+      this.controlWall = new ControlWall(this.room.controlSpot, this.palette);
+      this.controlWall.setWorkers(this.workerList, this.nickMap, this.projectNamer);
+      this.scene.add(this.controlWall.group);
       this.room.setFeed(this.feed);
       this.room.setBoard(this.board);
       if (this.tvVideo) this.room.setTvVideo(this.tvVideo);
@@ -596,8 +657,8 @@ export class OfficeWorld {
   focus(hit: OfficeHit) {
     if (this.mode !== "aerial") return;
     if (hit.kind === "tv" || hit.kind === "whiteboard" || hit.kind === "queue") return;
-    if (hit.kind === "board") {
-      const spot = this.boards?.spot(hit.id);
+    if (hit.kind === "board" || hit.kind === "spend" || hit.kind === "control") {
+      const spot = hit.kind === "board" ? this.boards?.spot(hit.id) : hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
       if (!spot) return;
       this.aerialFloor = 0;
       const target = new THREE.Vector3(spot.x, spot.y, spot.z);
@@ -625,6 +686,9 @@ export class OfficeWorld {
   speakingProbe: (() => { id: string; level: number } | null) | null = null;
 
   setWorkers(workers: OfficeWorker[], seats: ReadonlyMap<string, string>, voices?: ReadonlyMap<string, string>, nicks?: ReadonlyMap<string, string>) {
+    this.workerList = workers;
+    this.nickMap = nicks ?? new Map();
+    this.controlWall?.setWorkers(workers, this.nickMap, this.projectNamer);
     const live = new Set<string>();
     for (const w of workers) {
       const deskId = seats.get(w.id);
@@ -638,6 +702,7 @@ export class OfficeWorld {
         s.laptop.root.removeFromParent();
         s.character.dispose();
         s.laptop.dispose();
+        s.monitor?.dispose();
         this.seated.delete(w.id);
         s = undefined;
       }
@@ -646,14 +711,19 @@ export class OfficeWorld {
         const laptop = new Laptop(this.palette);
         noOutline(character.root);
         noOutline(laptop.root);
-        s = { character, laptop, deskId: null, leaving: false };
+        s = { character, laptop, monitor: null, deskId: null, leaving: false };
         this.seated.set(w.id, s);
       }
       if (s.deskId !== deskId) {
         desk.seatAnchor.add(s.character.root);
         desk.laptopAnchor.add(s.laptop.root);
+        s.monitor?.dispose();
+        s.monitor = new DeskMonitor(desk.desk, this.palette);
+        noOutline(s.monitor.root);
+        desk.group.add(s.monitor.root);
         s.deskId = deskId;
       }
+      s.monitor?.setWorker(w, nicks?.get(w.id) ?? "");
       if (w.status === "done" && s.status && s.status !== "done") {
         const at = s.character.root.getWorldPosition(new THREE.Vector3());
         this.confetti.burst(at.x, at.y + 1.3, at.z, 140);
@@ -668,6 +738,9 @@ export class OfficeWorld {
       s.leaving = true;
       s.character.vanish();
       s.laptop.close();
+      // El monitor se apaga con su dueño: una pantalla sin agente no muestra nada.
+      s.monitor?.dispose();
+      s.monitor = null;
     }
     if (!this.framed && this.layout) {
       this.framed = true;
@@ -688,6 +761,10 @@ export class OfficeWorld {
   }
 
   screenOf(hit: OfficeHit): { x: number; y: number } | null {
+    if (hit.kind === "spend" || hit.kind === "control") {
+      const spot = hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
+      return spot ? this.project(this.tmp.set(spot.x, spot.y, spot.z)) : null;
+    }
     if (hit.kind === "tv") return this.room ? this.project(this.tmp.set(this.room.tv.x, this.room.tv.y, this.room.tv.z)) : null;
     if (hit.kind === "whiteboard" || hit.kind === "queue") {
       const wb = hit.kind === "queue" ? this.room?.queueSpot : this.room?.whiteboardSpot;
@@ -736,6 +813,15 @@ export class OfficeWorld {
       if (s) best = { hit: { kind: "npc", id: s.role }, d: s.d, at: new THREE.Vector3(s.at.x, s.at.y + 2.35, s.at.z) };
       const b = floor === 0 ? this.boards?.near(this.player.pos.x, this.player.pos.z, BOARD_REACH) : null;
       if (b && (!best || b.d < best.d)) best = { hit: { kind: "board", id: b.id }, d: b.d, at: b.at };
+      if (floor === 0 && this.room) {
+        for (const [kind, spot] of [
+          ["spend", this.room.spendSpot],
+          ["control", this.room.controlSpot],
+        ] as const) {
+          const d = Math.hypot(spot.front.x - this.player.pos.x, spot.front.z - this.player.pos.z);
+          if (d <= BOARD_REACH && (!best || d < best.d)) best = { hit: { kind, id: "wall" }, d, at: new THREE.Vector3(spot.x, spot.y + spot.h / 2 + 0.3, spot.z) };
+        }
+      }
       const qs = this.room?.queueSpot;
       if (qs && floor === 0) {
         const d = Math.hypot(qs.front.x - this.player.pos.x, qs.front.z - this.player.pos.z);
@@ -781,7 +867,20 @@ export class OfficeWorld {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     // Viendo el piso 2 o 3, la losa tapa a los agentes: nada del piso 1 se clickea a través de ella.
     if (this.shownFloor > 0) return this.npcHit();
-    return this.podHit() ?? this.boardHit() ?? this.whiteboardHit() ?? this.npcHit();
+    return this.podHit() ?? this.dataWallHit() ?? this.boardHit() ?? this.whiteboardHit() ?? this.npcHit();
+  }
+
+  /** Sala de control (clic en una pantalla = ese agente) y tablero de gasto. */
+  private dataWallHit(): OfficeHit | null {
+    if (this.controlWall) {
+      const hit = this.raycaster.intersectObject(this.controlWall.surface, false)[0];
+      if (hit) {
+        const id = hit.uv ? this.controlWall.tileAt(hit.uv) : null;
+        return id ? { kind: "worker", id } : { kind: "control", id: "wall" };
+      }
+    }
+    if (this.spendBoard && this.raycaster.intersectObject(this.spendBoard.surface, false).length) return { kind: "spend", id: "wall" };
+    return null;
   }
 
   private whiteboardHit(): OfficeHit | null {
@@ -1007,12 +1106,17 @@ export class OfficeWorld {
 
     const explore = this.mode === "explore";
     const speaking = this.speakingProbe?.() ?? null;
+    // Lo que no se ve no se repinta: monitores y sala de control solo dentro de cámara y en el piso 1.
+    this.projScreen.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.projScreen);
+    const floor1 = this.shownFloor <= 0;
     for (const [id, s] of this.seated) {
       s.character.setTalking(speaking?.id === id ? 0.35 + Math.min(1, speaking.level * 2.5) * 0.65 : 0);
       s.character.update(dt, t);
       const pos = s.character.root.getWorldPosition(this.tmp);
       const dist = pos.distanceTo(this.camera.position);
       s.laptop.update(dt, dist);
+      if (s.monitor) s.monitor.update(now, dist, floor1 && this.frustum.containsPoint(pos));
       // En explorar: tarjetas más chicas y solo las de los agentes cercanos (o el seleccionado).
       const mine = this.selected?.kind === "worker" && this.selected.id === id;
       s.character.setCard(explore ? 0.72 : 1, !explore || dist < 13 || mine);
@@ -1021,6 +1125,7 @@ export class OfficeWorld {
         s.laptop.root.removeFromParent();
         s.character.dispose();
         s.laptop.dispose();
+        s.monitor?.dispose();
         this.seated.delete(id);
         this.refreshVacancies();
       }
@@ -1037,6 +1142,12 @@ export class OfficeWorld {
       view.vacancy.scale.setScalar(hot ? 1.5 : 1);
     }
 
+    if (this.controlWall) {
+      const cw = this.controlWall;
+      this.sphere.center.set(cw.spot.x, cw.spot.y, cw.spot.z);
+      this.sphere.radius = cw.spot.w / 2;
+      cw.update(now, floor1 && this.frustum.intersectsSphere(this.sphere));
+    }
     this.room?.animate(t);
     this.confetti.update(dt);
     this.effect.render(this.scene, this.camera);
@@ -1102,9 +1213,12 @@ export class OfficeWorld {
     this.boards?.dispose();
     this.whiteboard?.dispose();
     this.queueBoard?.dispose();
+    this.spendBoard?.dispose();
+    this.controlWall?.dispose();
     for (const s of this.seated.values()) {
       s.character.dispose();
       s.laptop.dispose();
+      s.monitor?.dispose();
     }
     this.seated.clear();
     for (const view of this.desks.values()) view.dispose();

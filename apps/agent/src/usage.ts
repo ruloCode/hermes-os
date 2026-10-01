@@ -5,9 +5,9 @@
  * <repo>/.data/usage/YYYY-MM-DD.json — así el total sobrevive reinicios del
  * agente y alimenta el header del Orquestador vía GET /stats.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { DailyRunUsage, RunTokenUsage } from "@hermes/shared";
+import { lastDays, localDay as dayOf, parseSpendEntry, type DailyRunUsage, type RunTokenUsage, type SpendDay, type SpendEntry } from "@hermes/shared";
 import { REPO_ROOT } from "./env.js";
 
 const DIR = join(REPO_ROOT, ".data", "usage");
@@ -82,4 +82,75 @@ export function addRunCost(costUsd: number | undefined, usage?: RunTokenUsage): 
 export async function getDailyUsage(): Promise<DailyRunUsage> {
   await chain.catch(() => {});
   return readToday();
+}
+
+// ── Registro por run (tablero de gasto de la Oficina) ───────────────────
+// El archivo diario solo guarda el total. Para saber cuánto gastó cada
+// proyecto y cada modelo, cada run terminado deja además una línea en
+// runs-AAAA-MM-DD.jsonl. El desglose existe desde el primer archivo de estos.
+
+function ledgerFile(day: string): string {
+  return join(DIR, `runs-${day}.jsonl`);
+}
+
+/**
+ * Un run (o tarea del SDK) terminó: suma al total del día y deja su línea en
+ * el registro. Misma cadena que addRunCost: no se pisan entre sí.
+ */
+export function recordRunSpend(entry: SpendEntry): void {
+  addRunCost(entry.costUsd ?? undefined, entry.tokens ?? undefined);
+  chain = chain
+    .then(async () => {
+      await mkdir(DIR, { recursive: true });
+      await appendFile(ledgerFile(dayOf(new Date(entry.ts))), `${JSON.stringify(entry)}\n`, "utf8");
+    })
+    .catch((err) => console.error("[hermes] usage ledger", err));
+}
+
+/**
+ * Los totales diarios que existan en los últimos `n` días (archivos de esta
+ * máquina) y el primer día con archivo, aunque quede fuera de la ventana.
+ */
+export async function readUsageDays(n: number): Promise<{ days: SpendDay[]; first: string | null }> {
+  await chain.catch(() => {});
+  const want = new Set(lastDays(localDay(), n));
+  let names: string[] = [];
+  try {
+    names = await readdir(DIR);
+  } catch {
+    return { days: [], first: null };
+  }
+  const out: SpendDay[] = [];
+  let first: string | null = null;
+  for (const name of names) {
+    const m = /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name);
+    if (m && (!first || m[1] < first)) first = m[1];
+    if (!m || !want.has(m[1])) continue;
+    try {
+      const d = JSON.parse(await readFile(join(DIR, name), "utf8")) as DailyRunUsage;
+      out.push({ day: m[1], costUsd: Number(d.costUsd) || 0, runs: Number(d.runs) || 0, tokens: d.tokens });
+    } catch {
+      /* archivo roto: ese día no se muestra */
+    }
+  }
+  return { days: out.sort((a, b) => a.day.localeCompare(b.day)), first };
+}
+
+/** Las líneas del registro de los últimos `n` días. */
+export async function readSpendLedger(n: number): Promise<SpendEntry[]> {
+  await chain.catch(() => {});
+  const out: SpendEntry[] = [];
+  for (const day of lastDays(localDay(), n)) {
+    let raw: string;
+    try {
+      raw = await readFile(ledgerFile(day), "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      const e = line.trim() ? parseSpendEntry(line) : null;
+      if (e) out.push(e);
+    }
+  }
+  return out;
 }

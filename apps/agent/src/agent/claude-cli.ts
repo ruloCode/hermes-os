@@ -17,14 +17,14 @@ import { platform, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { ClaudeRunSummary, RunTokenUsage } from "@hermes/shared";
+import { addTokens, assistantUsageDelta, parseModelUsage, ZERO_TOKENS, type ClaudeRunSummary, type RunTokenUsage, type SpendModel } from "@hermes/shared";
 import { env } from "../env.js";
-import { addRunCost } from "../usage.js";
+import { recordRunSpend } from "../usage.js";
 import { notifyMac } from "../notify.js";
 import { emit } from "../events.js";
 import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
 import { childEnv } from "./child-env.js";
-import { registerOfficeWorker, setOfficeMode } from "../office/state.js";
+import { registerOfficeWorker, setOfficeMode, setOfficeSpend } from "../office/state.js";
 import { officeModeFromCli } from "@hermes/shared";
 import { closeApprovalsFor, issueRunToken, revokeRunToken } from "../office/approvals.js";
 
@@ -212,6 +212,12 @@ interface ClaudeRun {
   durationMs?: number;
   numTurns?: number;
   usage?: RunTokenUsage;
+  /** Gasto por modelo (modelUsage del result): el tablero de gasto lo desglosa. */
+  models?: SpendModel[];
+  /** Tokens que reporta cada mensaje de la API mientras corre (el costo solo llega al final). */
+  liveTokens: RunTokenUsage;
+  seenMessages: Set<string>;
+  spendPublishedAt: number;
   /** true si el run murió por killClaudeRun (para reportarlo distinto). */
   cancelled?: boolean;
   lines: ClaudeLine[];
@@ -354,6 +360,9 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
     projectSlug,
     sdkSessionId: sdk,
     persistedCount: 0,
+    liveTokens: { ...ZERO_TOKENS },
+    seenMessages: new Set(),
+    spendPublishedAt: 0,
   };
   runs.set(run.id, run);
   registerOfficeWorker({ id: run.id, source: "run", project: projectSlug, title: s.prompt, sessionId });
@@ -456,6 +465,24 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
               cacheReadTokens: Number(ev.usage.cache_read_input_tokens) || 0,
             };
           }
+          run.models = parseModelUsage(ev.modelUsage);
+          setOfficeSpend(run.id, {
+            costUsd: run.costUsd,
+            tokens: run.usage ?? run.liveTokens,
+            models: run.models.map((m) => m.model),
+            final: true,
+          });
+        } else if (ev?.type === "assistant") {
+          // Tokens reales de cada mensaje de la API (el costo lo da el CLI solo al terminar).
+          const delta = assistantUsageDelta(ev, run.seenMessages);
+          if (delta) {
+            run.liveTokens = addTokens(run.liveTokens, delta);
+            const now = Date.now();
+            if (now - run.spendPublishedAt > 1500) {
+              run.spendPublishedAt = now;
+              setOfficeSpend(run.id, { tokens: run.liveTokens, final: false });
+            }
+          }
         }
         for (const line of eventToLines(ev)) pushLine(run, line);
         emitRunActivity(run, ev);
@@ -489,8 +516,20 @@ export function startClaudeRun(opts: ClaudeExecOpts): ClaudeRun {
       kind: run.status === "done" ? "done" : "error",
       text: `proceso finalizó (código ${code ?? "?"})`,
     });
-    // Cierra el loop: suma al gasto del día y avisa aunque nadie mire el dashboard.
-    addRunCost(run.costUsd, run.usage);
+    // Cierra el loop: suma al gasto del día (y al registro por run del tablero
+    // de gasto de la Oficina) y avisa aunque nadie mire el dashboard.
+    recordRunSpend({
+      ts: new Date().toISOString(),
+      id: run.id,
+      source: "run",
+      project: run.projectSlug,
+      title: run.title,
+      costUsd: run.costUsd ?? null,
+      tokens: run.usage ?? (run.liveTokens.outputTokens ? run.liveTokens : null),
+      models: run.models ?? [],
+      durationMs: run.durationMs,
+      status: run.status === "done" ? "done" : "error",
+    });
     const meta = [
       run.costUsd != null ? `$${run.costUsd.toFixed(2)}` : null,
       run.durationMs != null ? `${Math.round(run.durationMs / 1000)}s` : null,

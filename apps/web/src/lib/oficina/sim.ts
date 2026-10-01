@@ -102,12 +102,16 @@ const SEEDS: Seed[] = [
   },
 ];
 
-/** Estado de demostración sobre los proyectos reales que ya tiene la página. */
-export function demoOfficeState(projects: OfficeProject[], machine: string): OfficeState {
+/**
+ * Estado de demostración sobre los proyectos reales que ya tiene la página.
+ * `count` (QA y capturas) recorta o repite las semillas: 0, 3, 10 personajes.
+ */
+export function demoOfficeState(projects: OfficeProject[], machine: string, count = SEEDS.length): OfficeState {
   const slugs = projects.length ? projects.map((p) => p.slug) : ["general"];
   const now = Date.now();
-  const workers: OfficeWorker[] = SEEDS.map((s, i) => {
-    const at = new Date(now - (SEEDS.length - i) * 20_000).toISOString();
+  const seeds = Array.from({ length: Math.max(0, count) }, (_, i) => SEEDS[i % SEEDS.length]);
+  const workers: OfficeWorker[] = seeds.map((s, i) => {
+    const at = new Date(now - (seeds.length - i) * 20_000).toISOString();
     const terminal = s.status === "done" || s.status === "error";
     return {
       id: `sim-${i}`,

@@ -11,7 +11,7 @@
 // con estados propios (pensando/bloqueado) y colores del tema.
 
 import * as THREE from "three";
-import { officeModeLabel, type OfficeAction, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
+import { formatUsd, officeModeLabel, type OfficeAction, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
 import { cardSprite, disposeSprite, mesh, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 
@@ -345,6 +345,9 @@ export class OfficeCharacter {
     this.paintBulb();
     // El modo va en el chip solo si no es Auto (el default): así se ve quién está en Plan o Preguntar.
     this.modeTag = w.mode && w.mode !== "auto" ? ` · ${officeModeLabel(w.mode)}` : "";
+    // El costo va en el chip solo cuando es final (el result del CLI): los tokens
+    // parciales cambian cada segundo y se ven en el monitor y en el panel.
+    if (w.spend?.final && w.spend.costUsd !== undefined) this.modeTag += ` · ${formatUsd(w.spend.costUsd)}`;
     // El apodo es cómo se llama el personaje; la tarea real va al lado.
     const name = nick ? `${nick} · ${w.name}` : w.name;
     this.drawBubble(voice ? `🎙 ${voice} · ${name}` : name, w.task.summary);

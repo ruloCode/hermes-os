@@ -106,6 +106,10 @@ export interface Room {
   whiteboardSpot: BoardSpot;
   /** El tablero de la cola de agentes (piso 1, muro oeste, junto a la pizarra). */
   queueSpot: BoardSpot;
+  /** Sala de control (piso 1, fondo noreste): la pared con la terminal de todos los agentes vivos. */
+  controlSpot: BoardSpot;
+  /** Tablero de gasto de tokens (piso 1, junto a la sala de control). */
+  spendSpot: BoardSpot;
   /** La TV del lounge (piso 2): centro de la pantalla y desde dónde se usa. */
   tv: { floor: number; x: number; y: number; z: number; front: { x: number; z: number } };
   /** Pone un video en la TV (pantalla compartida) o, con null, vuelve al feed de actividad. */
@@ -1223,7 +1227,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   };
 
   const cx = (minX + maxX) / 2;
-  wall("x", minZ, minX - WALL_T / 2, maxX + WALL_T / 2, [cx - 13, cx - 7.5, cx + 7.5, cx + 13], 1);
+  // En el piso 1 el rincón noreste del fondo es pared: ahí van la sala de
+  // control (pantallas de todos los agentes) y el tablero de gasto.
+  wall("x", minZ, minX - WALL_T / 2, maxX + WALL_T / 2, [cx - 13, cx - 7.5, cx + 7.5], 1);
   wall("z", minX, minZ, maxZ, [minZ + 13, minZ + 19].filter((z) => z < maxZ - 2), 1);
   wall("z", maxX, minZ, maxZ, [minZ + 3.5, minZ + 18].filter((z) => z < maxZ - 2), -1);
   // El piso 2 repite los muros con sus ventanas; el 3 es azotea (solo antepecho).
@@ -1730,7 +1736,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   for (const [x, z, drop, n] of [
     [cx - 7.5, minZ + 0.9, 0.9, 0],
     [cx + 7.5, minZ + 0.9, 0.9, 0],
-    [maxX - 1.0, minZ + 3.5, 0.8, 0],
+    // (La del rincón noreste del piso 1 se quitó: tapaba el tablero de uso de Claude.)
     [cx - 13, minZ + 0.9, 0.8, 1],
     [cx + 7.5, minZ + 0.9, 0.9, 1],
     [tableAt.x + 1.6, tableAt.z + 3.2, 0.9, 1],
@@ -1876,6 +1882,10 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   };
   // Pizarra libre en el muro oeste, entre el fondo y su primera ventana.
   const whiteboardSpot: BoardSpot = { x: minX + WALL_T / 2 + 0.04, y: 1.75, z: minZ + 6, rotY: Math.PI / 2, w: 2.4, h: 1.5, front: { x: minX + 1.6, z: minZ + 6 } };
+  // Rincón de datos del piso 1 (pared del fondo, a la derecha de Issues): sala de control y gasto.
+  const backZ = minZ + WALL_T / 2 + 0.05;
+  const controlSpot: BoardSpot = { x: cx + 14.0, y: 1.9, z: backZ, rotY: 0, w: 4.3, h: 2.0, front: { x: cx + 14.0, z: minZ + 1.9 } };
+  const spendSpot: BoardSpot = { x: cx + 17.8, y: 1.9, z: backZ, rotY: 0, w: 2.5, h: 2.0, front: { x: cx + 17.8, z: minZ + 1.8 } };
   const queueSpot: BoardSpot = { x: minX + WALL_T / 2 + 0.04, y: 1.8, z: minZ + 2.4, rotY: Math.PI / 2, w: 2.2, h: 1.55, front: { x: minX + 1.6, z: minZ + 2.4 } };
 
   // Pantalla compartida en la TV: una VideoTexture en vez del feed mientras dure.
@@ -1911,6 +1921,8 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     boardSpots,
     whiteboardSpot,
     queueSpot,
+    controlSpot,
+    spendSpot,
     tv: { floor: 1, x: tvX, y: FLOOR_Y[1] + 1.75, z: lz, front: { x: maxX - 2.2, z: lz - 0.5 } },
     setTvVideo,
     setBoard: paintBoard,

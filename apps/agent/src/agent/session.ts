@@ -2,9 +2,10 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import type { ChatToolStep, HermesTask } from "@hermes/shared";
-import { needsApproval, toolTarget } from "@hermes/shared";
-import { officeWatched, registerOfficeWorker } from "../office/state.js";
+import type { ChatToolStep, HermesTask, RunTokenUsage, SpendModel } from "@hermes/shared";
+import { needsApproval, parseModelUsage, tokensFromApiUsage, toolTarget } from "@hermes/shared";
+import { officeWatched, registerOfficeWorker, setOfficeSpend } from "../office/state.js";
+import { recordRunSpend } from "../usage.js";
 import { requestApproval } from "../office/approvals.js";
 import { env } from "../env.js";
 import { emit } from "../events.js";
@@ -108,6 +109,10 @@ export interface RunTurnResult {
   finalText: string;
   toolCalls: number;
   isError: boolean;
+  /** Métricas del result del SDK (costo, tokens, modelos), si llegó. */
+  costUsd?: number;
+  usage?: RunTokenUsage;
+  models?: SpendModel[];
 }
 
 export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
@@ -117,6 +122,9 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
   let toolCalls = 0;
   let isError = false;
   let deltasSeen = false;
+  let costUsd: number | undefined;
+  let usage: RunTokenUsage | undefined;
+  let models: SpendModel[] | undefined;
 
   setPresence("working", opts.prompt.slice(0, 120));
 
@@ -258,6 +266,10 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
       }
 
       if (m.type === "result") {
+        // Gasto real del turno (la Oficina lo suma al tablero cuando es una tarea).
+        if (typeof m.total_cost_usd === "number") costUsd = m.total_cost_usd;
+        usage = tokensFromApiUsage(m.usage) ?? undefined;
+        models = parseModelUsage(m.modelUsage);
         if (m.subtype === "success" && typeof m.result === "string") {
           finalText = m.result || finalText;
         } else if (m.subtype && m.subtype !== "success") {
@@ -280,7 +292,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
     setPresence("idle");
   }
 
-  return { sdkSessionId, finalText, toolCalls, isError };
+  return { sdkSessionId, finalText, toolCalls, isError, costUsd, usage, models };
 }
 
 // ── Mapeo sesión-cliente (X-Hermes-Session-Id) → sesión SDK ────────────
@@ -344,6 +356,21 @@ export function startTask(prompt: string): HermesTask {
     task.toolCalls = result.toolCalls;
     task.finishedAt = new Date().toISOString();
     if (result.isError) task.error = result.finalText;
+    // Gasto de la tarea: tarjeta del personaje y tablero de gasto de la Oficina.
+    if (result.costUsd !== undefined || result.usage) {
+      setOfficeSpend(task.id, { costUsd: result.costUsd, tokens: result.usage, models: result.models?.map((m) => m.model), final: true });
+    }
+    recordRunSpend({
+      ts: task.finishedAt ?? new Date().toISOString(),
+      id: task.id,
+      source: "task",
+      project: "general",
+      title: prompt.slice(0, 120),
+      costUsd: result.costUsd ?? null,
+      tokens: result.usage ?? null,
+      models: result.models ?? [],
+      status: result.isError ? "error" : "done",
+    });
     emit({
       kind: "task_done",
       taskId: task.id,

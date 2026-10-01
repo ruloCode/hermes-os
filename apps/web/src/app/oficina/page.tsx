@@ -51,6 +51,8 @@ import {
   type PadState,
   type ScheduledLite,
   type NewQueueItem,
+  type OfficeSpend,
+  type PlanUsage,
   type QueueState,
 } from "@hermes/shared";
 import { claudeStartRun, hermesGet, hermesPost, hermesPut, sseUrl } from "@/lib/hermes";
@@ -73,6 +75,8 @@ import { NpcDialog } from "@/components/oficina/NpcDialog";
 import { BoardPanel } from "@/components/oficina/BoardPanel";
 import { WhiteboardEditor } from "@/components/oficina/WhiteboardEditor";
 import { QueuePanel } from "@/components/oficina/QueuePanel";
+import { SpendPanel } from "@/components/oficina/SpendPanel";
+import { ControlRoomPanel } from "@/components/oficina/ControlRoomPanel";
 import {
   ControllerHelp,
   ControlsHint,
@@ -101,7 +105,8 @@ interface Live {
 
 declare global {
   interface Window {
-    __hermesOficinaSim?: (state: OfficeState | "demo" | null) => void;
+    /** Simulación sin tokens; con "demo", `count` fija cuántos personajes (capturas con 0, 3, 10). */
+    __hermesOficinaSim?: (state: OfficeState | "demo" | null, count?: number) => void;
     __hermesOficinaStair?: (i: number) => boolean;
     __hermesOficinaFloor?: (floor: number) => void;
     __hermesOficinaDebug?: () => unknown;
@@ -228,6 +233,47 @@ function useOfficeBoards(): { boards: OfficeBoards | null; refreshing: boolean; 
   return { boards, refreshing, refresh };
 }
 
+/**
+ * Gasto de tokens (GET /office/spend): poll propio de 15 s mientras la Oficina
+ * está abierta (ningún provider trae el desglose). undefined = cargando, null =
+ * el agente no respondió (el tablero lo dice).
+ */
+function useOfficeSpend(): { spend: OfficeSpend | null | undefined; plan: PlanUsage | null | undefined; refreshing: boolean; refresh: () => void } {
+  const [spend, setSpend] = useState<OfficeSpend | null | undefined>(undefined);
+  const [plan, setPlan] = useState<PlanUsage | null | undefined>(undefined);
+  const [refreshing, setRefreshing] = useState(false);
+  const load = useCallback(async (force: boolean) => {
+    try {
+      setSpend(await hermesGet<OfficeSpend>(`/office/spend${force ? "?refresh=1" : ""}`));
+    } catch {
+      setSpend(null);
+    }
+  }, []);
+  // El uso del plan arranca el CLI (~1 s, sin tokens): cada minuto basta; el agente lo cachea 60 s.
+  const loadPlan = useCallback(async (force: boolean) => {
+    try {
+      setPlan(await hermesGet<PlanUsage>(`/office/plan-usage${force ? "?refresh=1" : ""}`));
+    } catch {
+      setPlan(null);
+    }
+  }, []);
+  useEffect(() => {
+    void load(false);
+    void loadPlan(false);
+    const id = setInterval(() => void load(false), 15_000);
+    const idPlan = setInterval(() => void loadPlan(false), 60_000);
+    return () => {
+      clearInterval(id);
+      clearInterval(idPlan);
+    };
+  }, [load, loadPlan]);
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    void Promise.all([load(true), loadPlan(true)]).finally(() => setRefreshing(false));
+  }, [load, loadPlan]);
+  return { spend, plan, refreshing, refresh };
+}
+
 /** Una pregunta a un NPC: su texto y la respuesta, calculada en vivo con el estado actual. */
 interface NpcQuestion {
   id: string;
@@ -277,6 +323,12 @@ export default function OficinaPage() {
   const { snapshot } = useDashboard();
   const { boards, refreshing: boardsRefreshing, refresh: refreshBoards } = useOfficeBoards();
   const [wallBoard, setWallBoard] = useState<OfficeBoardId | null>(null);
+  // Tablero de gasto y sala de control (piso 1, rincón noreste).
+  const { spend, plan, refreshing: spendRefreshing, refresh: refreshSpend } = useOfficeSpend();
+  const [spendOpen, setSpendOpen] = useState(false);
+  const [controlOpen, setControlOpen] = useState(false);
+  const dataPanelRef = useRef(false);
+  dataPanelRef.current = spendOpen || controlOpen;
   // Pantalla compartida en la TV del lounge (todo en el navegador: getDisplayMedia → VideoTexture).
   const [sharing, setSharing] = useState<string | null>(null);
   // Pizarra libre: el dibujo vive en el agente; el editor la abre en grande.
@@ -411,6 +463,8 @@ export default function OficinaPage() {
     if (near.kind === "tv") return sharing ? "Dejar de compartir en la TV" : "Compartir pantalla en la TV";
     if (near.kind === "whiteboard") return "Dibujar en la pizarra";
     if (near.kind === "queue") return "Ver la cola de agentes";
+    if (near.kind === "spend") return "Ver el uso de Claude";
+    if (near.kind === "control") return "Abrir la sala de control";
     if (near.kind === "worker") {
       const w = workers.find((x) => x.id === near.id);
       return w ? `Hablar con ${nicks.get(w.id) ?? w.name}` : null;
@@ -913,11 +967,13 @@ export default function OficinaPage() {
       if (b === "B" || b === "MENU" || b === "A") setHelpOpen(false);
       return;
     }
-    // Panel de un tablero o de la cola: B cierra (A/X no hacen nada ahí).
-    if (boardOpenRef.current || queueOpenRef.current) {
+    // Panel de un tablero, de la cola, del gasto o de la sala de control: B cierra (A/X no hacen nada ahí).
+    if (boardOpenRef.current || queueOpenRef.current || dataPanelRef.current) {
       if (b === "B") {
         setWallBoard(null);
         setQueueOpen(false);
+        setSpendOpen(false);
+        setControlOpen(false);
       }
       return;
     }
@@ -1009,7 +1065,7 @@ export default function OficinaPage() {
       look: s.look,
       run: s.rt >= TRIGGER_ON,
       // Con un NPC abierto la cruceta es del diálogo, no del zoom.
-      zoom: npcOpenRef.current || boardOpenRef.current || queueOpenRef.current ? 0 : s.held.has("UP") ? -1 : s.held.has("DOWN") ? 1 : 0,
+      zoom: npcOpenRef.current || boardOpenRef.current || queueOpenRef.current || dataPanelRef.current ? 0 : s.held.has("UP") ? -1 : s.held.has("DOWN") ? 1 : 0,
     });
   };
 
@@ -1103,6 +1159,16 @@ export default function OficinaPage() {
         setWallBoard(null);
         return;
       }
+      if (hit.kind === "spend" || hit.kind === "control") {
+        closeConversation();
+        closeNpc();
+        setWallBoard(null);
+        if (hit.kind === "spend") {
+          setSpendOpen(true);
+          refreshSpend();
+        } else setControlOpen(true);
+        return;
+      }
       if (hit.kind === "whiteboard") {
         closeConversation();
         closeNpc();
@@ -1135,7 +1201,7 @@ export default function OficinaPage() {
       }
       sceneRef.current?.world()?.focus(hit);
     },
-    [openConversation, closeConversation, openNpc, closeNpc, startShare, stopShare],
+    [openConversation, closeConversation, openNpc, closeNpc, startShare, stopShare, refreshSpend],
   );
 
   const pickFromRoster = useCallback((w: OfficeWorker) => {
@@ -1156,6 +1222,11 @@ export default function OficinaPage() {
         setQueueOpen(false);
         return;
       }
+      if (dataPanelRef.current && e.key === "Escape") {
+        setSpendOpen(false);
+        setControlOpen(false);
+        return;
+      }
       // Diálogo con un NPC: 1-3 o ↑↓ + Enter eligen, Esc cierra.
       if (npcOpenRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey) {
         const n = npcCountRef.current;
@@ -1174,7 +1245,7 @@ export default function OficinaPage() {
         return;
       }
       // 1, 2, 3: ver ese piso desde arriba (fuera de una conversación y de un campo de texto).
-      if (!conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
+      if (!conversationOpenRef.current && !boardOpenRef.current && !wbOpenRef.current && !queueOpenRef.current && !dataPanelRef.current && !isTyping(e) && !e.metaKey && !e.ctrlKey && /^Digit[123]$/.test(e.code)) {
         sceneRef.current?.world()?.setFloorView(Number(e.code.slice(5)) - 1);
         return;
       }
@@ -1195,15 +1266,15 @@ export default function OficinaPage() {
   // Seams de QA: simular sin tokens, leer el estado, clics reales, vista, caminar y dictar.
   const teamRef = useRef(team);
   teamRef.current = team;
-  const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue });
-  debugRef.current = { workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue };
+  const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue, spend, plan, spendOpen, controlOpen });
+  debugRef.current = { workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue, spend, plan, spendOpen, controlOpen };
   useEffect(() => {
-    window.__hermesOficinaSim = (state) => setSim(state === "demo" ? demoOfficeState(live.projects, live.machine || "sim") : state);
+    window.__hermesOficinaSim = (state, count) => setSim(state === "demo" ? demoOfficeState(live.projects, live.machine || "sim", count) : state);
     window.__hermesOficinaDebug = () => {
       const d = debugRef.current;
       const world = sceneRef.current?.world();
       return {
-        workers: d.workers.map((w) => ({ id: w.id, project: w.project, status: w.status, action: w.action, name: w.name, nick: d.nicks.get(w.id), continues: w.continues, mode: w.mode })),
+        workers: d.workers.map((w) => ({ id: w.id, project: w.project, status: w.status, action: w.action, name: w.name, nick: d.nicks.get(w.id), continues: w.continues, mode: w.mode, lines: w.lines, spend: w.spend ?? null })),
         seats: Object.fromEntries(d.seats),
         selected: d.selected,
         desks: d.layout.desks.length,
@@ -1219,6 +1290,10 @@ export default function OficinaPage() {
         queue: d.queue ? { max: d.queue.max, items: d.queue.items.map((i) => ({ id: i.id, title: i.title, status: i.status, linearId: i.linearId })) } : d.queue,
         queueOpen: queueOpenRef.current,
         boardPanel: d.wallBoard,
+        spendPanel: d.spendOpen,
+        controlPanel: d.controlOpen,
+        planUsage: d.plan === undefined ? "loading" : d.plan ? { available: d.plan.available, windows: d.plan.windows.map((w) => ({ label: w.label, utilization: w.utilization, resetsAt: w.resetsAt })) } : null,
+        spendData: d.spend === undefined ? "loading" : d.spend ? { costUsd: d.spend.today.costUsd, runs: d.spend.today.runs, day: d.spend.today.day } : null,
         boards: d.boards ? { issues: d.boards.issues.items.length, prs: d.boards.prs.items.length, services: d.boards.services.items.length } : null,
         ...(world?.debug() ?? { fps: 0 }),
       };
@@ -1297,9 +1372,9 @@ export default function OficinaPage() {
         look={look}
         feed={feedLines}
         board={board}
-        nearLabel={npc || wallBoard || queueOpen ? null : nearLabel}
+        nearLabel={npc || wallBoard || queueOpen || spendOpen || controlOpen ? null : nearLabel}
         nearKey={pad.connected && usingPad ? "A" : "E"}
-        inputEnabled={!hiring && !npc && !wallBoard && !whiteboardOpen && !queueOpen}
+        inputEnabled={!hiring && !npc && !wallBoard && !whiteboardOpen && !queueOpen && !spendOpen && !controlOpen}
         onClick={onClick}
         onNear={setNear}
         onMode={setModeState}
@@ -1311,6 +1386,9 @@ export default function OficinaPage() {
         nicks={nicks}
         whiteboard={whiteboardImage}
         queue={queue}
+        spend={spend}
+        plan={plan}
+        projectName={projectName}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
@@ -1497,6 +1575,42 @@ export default function OficinaPage() {
             return true;
           }}
           onClose={() => setQueueOpen(false)}
+        />
+      ) : null}
+
+      {spendOpen ? (
+        <SpendPanel
+          data={spend}
+          plan={plan}
+          projectName={projectName}
+          nicks={nicks}
+          refreshing={spendRefreshing}
+          padConnected={pad.connected && usingPad}
+          onRefresh={refreshSpend}
+          onGoTo={(id) => {
+            setSpendOpen(false);
+            if (!workers.some((w) => w.id === id)) return;
+            const hit: OfficeHit = { kind: "worker", id };
+            const world = sceneRef.current?.world();
+            if (world?.mode === "explore") world.walkTo(hit);
+            else world?.focus(hit);
+          }}
+          onClose={() => setSpendOpen(false)}
+        />
+      ) : null}
+
+      {controlOpen ? (
+        <ControlRoomPanel
+          workers={workers}
+          nicks={nicks}
+          projectName={projectName}
+          simulated={!!sim}
+          padConnected={pad.connected && usingPad}
+          onOpen={(w) => {
+            setControlOpen(false);
+            openConversation({ kind: "worker", id: w.id });
+          }}
+          onClose={() => setControlOpen(false)}
         />
       ) : null}
 

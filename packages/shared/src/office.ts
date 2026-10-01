@@ -11,6 +11,7 @@
 import type { AgentActivityEvent } from "./types.js";
 import { FAILS_TO_DESPAIR, outputFailed, toolAction, type OfficeAction } from "./office-actions.js";
 import { PLAN_TOOL, type ApprovalOutcome, type OfficeApproval, type OfficeMode } from "./office-approvals.js";
+import type { WorkerSpend } from "./office-spend.js";
 
 export type OfficeWorkerStatus = "starting" | "working" | "thinking" | "blocked" | "needs_you" | "done" | "error";
 
@@ -58,6 +59,8 @@ export interface OfficeWorker {
   approval?: OfficeApproval;
   /** Modo de permisos REAL de la sesión, tal como lo reporta el CLI (auto, editar, plan, preguntar). */
   mode?: OfficeMode;
+  /** Lo que lleva gastado: tokens parciales mientras corre, costo y tokens finales del result. */
+  spend?: WorkerSpend;
 }
 
 export interface OfficeProject {
@@ -466,6 +469,26 @@ export function setWorkerMode(workers: Map<string, OfficeWorker>, id: string, mo
   const w = workers.get(id);
   if (!w || !mode || w.mode === mode) return null;
   w.mode = mode;
+  return w;
+}
+
+/**
+ * El gasto del personaje: parcial (tokens por mensaje) o final (el result del
+ * CLI). Uno final no se pisa con uno parcial que llegue tarde. Devuelve el
+ * personaje si cambió.
+ */
+export function setWorkerSpend(workers: Map<string, OfficeWorker>, id: string, spend: WorkerSpend): OfficeWorker | null {
+  const w = workers.get(id);
+  if (!w) return null;
+  if (w.spend?.final && !spend.final) return null;
+  const same =
+    w.spend &&
+    w.spend.final === spend.final &&
+    w.spend.costUsd === spend.costUsd &&
+    JSON.stringify(w.spend.tokens) === JSON.stringify(spend.tokens) &&
+    JSON.stringify(w.spend.models) === JSON.stringify(spend.models);
+  if (same) return null;
+  w.spend = spend;
   return w;
 }
 

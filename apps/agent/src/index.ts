@@ -96,6 +96,8 @@ import { mouseStatus } from "./input/mouse.js";
 import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
 import { officeBoards } from "./office/boards.js";
+import { officeSpend } from "./office/spend.js";
+import { planUsage } from "./office/plan-usage.js";
 import { readWhiteboard, writeWhiteboard } from "./office/whiteboard.js";
 import { cancelQueued, enqueue, queueState, setQueueSettings, startQueue } from "./office/queue.js";
 import { planQueue } from "./office/queue-plan.js";
@@ -2498,6 +2500,10 @@ startOffice();
 // servicios de desarrollo escuchando un puerto (lsof). Cada fuente con su
 // caché y su error; ?refresh=1 los vuelve a leer.
 app.get("/office/boards", async (c) => c.json(await officeBoards(c.req.query("refresh") === "1")));
+// Tablero de gasto de la Oficina: total del día, registro por run y lo que llevan los personajes.
+app.get("/office/spend", async (c) => c.json(await officeSpend(c.req.query("refresh") === "1")));
+// Uso del plan de Claude (sesión de 5 h, semana, límites por modelo): lo mismo que /usage, sin tokens.
+app.get("/office/plan-usage", async (c) => c.json(await planUsage(c.req.query("refresh") === "1")));
 
 // Cola de tareas de la Oficina: encolar (tareas o issues de Linear), cancelar
 // lo que no arrancó, tope de concurrencia y el coordinador que PROPONE tareas.

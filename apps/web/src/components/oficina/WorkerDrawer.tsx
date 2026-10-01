@@ -8,7 +8,7 @@
 // exacto) y los dos botones: el run está pausado hasta que decidas.
 
 import { useEffect, useRef, useState } from "react";
-import { PLAN_TOOL, officeModeLabel, type OfficeMode, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
+import { PLAN_TOOL, formatTokens, formatUsd, officeModeLabel, totalTokens, type OfficeMode, type OfficeWorker, type OfficeWorkerStatus } from "@hermes/shared";
 import { Markdown } from "@/components/Markdown";
 import { claudeKillRun, claudeRunStreamUrl } from "@/lib/hermes";
 import type { OfficeDictation } from "@/hooks/useOfficeDictation";
@@ -134,6 +134,9 @@ export function WorkerDrawer({
   const isRun = worker.source === "run" && !simulated;
   const stream = useRunStream(isRun ? worker.id : null);
   const [, tick] = useState(0);
+  // Pantalla completa: la terminal grande con scroll, sin perder la conversación.
+  const [expanded, setExpanded] = useState(false);
+  const [follow, setFollow] = useState(true);
   const [stopping, setStopping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const active = worker.status !== "done" && worker.status !== "error";
@@ -157,11 +160,31 @@ export function WorkerDrawer({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines.length]);
+    // Sigue el final solo si ya estabas abajo: subir a leer no te devuelve de un tirón.
+    if (el && follow) el.scrollTop = el.scrollHeight;
+  }, [lines.length, follow, expanded]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // La primera Esc sale de la pantalla completa; la página no cierra el panel.
+      e.stopImmediatePropagation();
+      setExpanded(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [expanded]);
+
+  const spend = worker.spend;
 
   return (
-    <aside className="absolute top-16 right-3 bottom-16 z-30 flex w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl">
+    <aside
+      data-expanded={expanded ? "true" : undefined}
+      className={`absolute z-30 flex flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl ${
+        expanded ? "inset-4" : "top-16 right-3 bottom-16 w-[min(460px,calc(100vw-24px))]"
+      }`}
+    >
       <header className="flex items-start gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -175,6 +198,15 @@ export function WorkerDrawer({
         </div>
         <button
           type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="rounded-md px-2 py-1 text-sm text-text-dim hover:bg-panel-2 hover:text-text"
+          aria-label={expanded ? "Salir de pantalla completa" : "Pantalla completa"}
+          title={expanded ? "Salir de pantalla completa (Esc)" : "Ver su terminal a pantalla completa"}
+        >
+          {expanded ? "⤡" : "⤢"}
+        </button>
+        <button
+          type="button"
           onClick={onClose}
           className="rounded-md px-2 py-1 text-sm text-text-dim hover:bg-panel-2 hover:text-text"
           aria-label="Cerrar"
@@ -183,7 +215,7 @@ export function WorkerDrawer({
         </button>
       </header>
 
-      <dl className="grid grid-cols-3 gap-px border-b border-line bg-line text-xs">
+      <dl className="grid grid-cols-4 gap-px border-b border-line bg-line text-xs">
         <div className="bg-panel px-4 py-2">
           <dt className="text-text-faint">Estado</dt>
           <dd className="mt-0.5 text-text">{STATUS_LABEL[worker.status]}</dd>
@@ -195,6 +227,16 @@ export function WorkerDrawer({
         <div className="bg-panel px-4 py-2">
           <dt className="text-text-faint">Tiempo</dt>
           <dd className="mt-0.5 text-text tabular-nums">{elapsed(worker.startedAt, worker.finishedAt)}</dd>
+        </div>
+        <div className="bg-panel px-4 py-2" title={spend && !spend.final ? "Tokens que reporta la API mientras corre; el costo llega al terminar" : undefined}>
+          <dt className="text-text-faint">Gasto</dt>
+          <dd className="mt-0.5 text-text tabular-nums" data-worker-spend>
+            {spend?.final && spend.costUsd !== undefined
+              ? `${formatUsd(spend.costUsd)} · ${formatTokens(totalTokens(spend.tokens))}`
+              : spend
+                ? `${formatTokens(totalTokens(spend.tokens))} tok`
+                : "—"}
+          </dd>
         </div>
       </dl>
 
@@ -245,7 +287,14 @@ export function WorkerDrawer({
         <p className="border-b border-line px-4 py-2 font-mono text-xs break-all text-text-dim">{worker.task.summary}</p>
       ) : null}
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono text-xs leading-relaxed">
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 40);
+        }}
+        className={`min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono leading-relaxed ${expanded ? "text-sm" : "text-xs"}`}
+      >
         {lines.length === 0 ? (
           <p className="text-text-faint">Sin salida todavía.</p>
         ) : (
