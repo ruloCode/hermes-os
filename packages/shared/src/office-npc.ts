@@ -9,16 +9,18 @@
 import type { DashboardSnapshot } from "./types.js";
 import { officeCounts, type OfficeWorker, type OfficeWorkerStatus } from "./office.js";
 
-export type OfficeNpcRole = "reception" | "barista" | "rooftop";
+export type OfficeNpcRole = "reception" | "barista" | "rooftop" | "queue";
 
 export const OFFICE_NPCS: Record<OfficeNpcRole, { name: string; floor: number; place: string }> = {
   reception: { name: "Recepción", floor: 0, place: "Piso 1 · Equipos" },
   barista: { name: "Barista", floor: 1, place: "Piso 2 · Café" },
   rooftop: { name: "Respiro", floor: 2, place: "Piso 3 · Azotea" },
+  // La cara del coordinador de la cola: hablarle abre el panel de la cola.
+  queue: { name: "Coordinación", floor: 0, place: "Piso 1 · Cola de agentes" },
 };
 
 export function isOfficeNpcRole(v: unknown): v is OfficeNpcRole {
-  return v === "reception" || v === "barista" || v === "rooftop";
+  return v === "reception" || v === "barista" || v === "rooftop" || v === "queue";
 }
 
 /** Una línea del diálogo. Con `workerId`, la UI ofrece ir con ese agente. */

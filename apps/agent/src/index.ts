@@ -10,6 +10,7 @@ import type {
   GoalStatus,
   HabitCadence,
   MeetingSource,
+  NewQueueItem,
   TaskState,
   TransactionKind,
 } from "@hermes/shared";
@@ -94,6 +95,10 @@ import {
 import { mouseStatus } from "./input/mouse.js";
 import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
+import { officeBoards } from "./office/boards.js";
+import { readWhiteboard, writeWhiteboard } from "./office/whiteboard.js";
+import { cancelQueued, enqueue, queueState, setQueueSettings, startQueue } from "./office/queue.js";
+import { planQueue } from "./office/queue-plan.js";
 import { listSalaAgents, officeCast, portraitPath, resolveSalaAgentId, salaCast, salaStation, salaTopic, SALA_PATH } from "./sala/store.js";
 import { departuresAt, placesAt, readStatus, routeBetween, stationList, METRO_STATUS_PATH, PLACES_PATH } from "./metro/store.js";
 import { createHandoff, readHandoff, HANDOFF_TTL_MS } from "./sala/handoff.js";
@@ -2488,6 +2493,43 @@ app.get("/projects", async (c) => c.json(await readProjects()));
 // un snapshot al conectar y luego un mensaje por personaje que cambia. Los
 // privados (Composición) no salen por el túnel, igual que en /events.
 startOffice();
+
+// Tableros de la pared de la Oficina: issues (Linear), PRs abiertos (gh) y
+// servicios de desarrollo escuchando un puerto (lsof). Cada fuente con su
+// caché y su error; ?refresh=1 los vuelve a leer.
+app.get("/office/boards", async (c) => c.json(await officeBoards(c.req.query("refresh") === "1")));
+
+// Cola de tareas de la Oficina: encolar (tareas o issues de Linear), cancelar
+// lo que no arrancó, tope de concurrencia y el coordinador que PROPONE tareas.
+startQueue();
+app.get("/office/queue", async (c) => c.json(await queueState()));
+app.post("/office/queue", async (c) => {
+  const body = await c.req.json<{ items?: NewQueueItem[] }>().catch(() => ({}) as { items?: NewQueueItem[] });
+  if (!Array.isArray(body.items) || !body.items.length) return c.json({ added: [], rejected: ["nada que encolar"] }, 400);
+  return c.json(await enqueue(body.items.slice(0, 20)));
+});
+app.post("/office/queue/:id/cancel", async (c) => {
+  const res = await cancelQueued(c.req.param("id"));
+  return c.json(res, res.ok ? 200 : 400);
+});
+app.put("/office/queue/settings", async (c) => c.json(await setQueueSettings(await c.req.json().catch(() => ({})))));
+app.post("/office/queue/plan", async (c) => {
+  const body = await c.req.json<{ text?: string; project?: string }>().catch(() => ({}) as { text?: string; project?: string });
+  const res = await planQueue(String(body.text ?? ""), body.project || undefined);
+  return c.json(res, res.ok ? 200 : 400);
+});
+
+// Pizarra libre de la Oficina (PNG compartido entre navegadores).
+app.get("/office/whiteboard", async (c) => {
+  const wb = await readWhiteboard();
+  // Un archivo vacío es una pizarra limpia.
+  return c.json(wb.image === "data:image/png;base64," ? { image: null, updatedAt: wb.updatedAt } : wb);
+});
+app.put("/office/whiteboard", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
+  const body = await c.req.json<{ image?: string | null }>().catch(() => ({}) as { image?: string | null });
+  const res = await writeWhiteboard(body.image ?? null);
+  return c.json(res, res.ok ? 200 : 400);
+});
 
 app.get("/office/state", async (c) => {
   const remote = viaTunnel((h) => c.req.header(h));

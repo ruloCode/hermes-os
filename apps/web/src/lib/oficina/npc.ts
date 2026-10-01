@@ -32,6 +32,7 @@ import { FLOOR_Y, type NpcSpot, type Room } from "./room";
 import type { Collider } from "./player";
 import { HAIR_COLORS, HAIR_STYLES, SHIRT_COLORS, SKIN_TONES, type OwnerLook } from "./look";
 import { mesh, noOutline, roundedBox, toon } from "./toon";
+import { OfficeCat } from "./pet";
 
 const WALK_SPEED = 1.6;
 /** Distancia a la que "E" alcanza a un NPC con rol (desde él o desde su punto de atención). */
@@ -76,6 +77,7 @@ const STAFF_LOOK: Record<OfficeNpcRole, OwnerLook> = {
   reception: { skin: 2, hair: 0, style: HAIR_STYLES.indexOf("Moño"), shirt: 2, beard: false, glasses: true, extras: false },
   barista: { skin: 6, hair: 1, style: HAIR_STYLES.indexOf("Cola"), shirt: 5, beard: false, glasses: false, extras: false },
   rooftop: { skin: 4, hair: 3, style: HAIR_STYLES.indexOf("Puntas"), shirt: 3, beard: true, glasses: false, extras: false },
+  queue: { skin: 7, hair: 4, style: HAIR_STYLES.indexOf("Largo"), shirt: 6, beard: false, glasses: true, extras: false },
 };
 
 type NpcState = "idle" | "walking" | "seating" | "unseating" | "at";
@@ -189,6 +191,8 @@ export class OfficeCrowd {
   private readonly people = new Map<string, Npc>();
   private readonly staff = new Map<OfficeNpcRole, Npc>();
   private props: THREE.Object3D[] = [];
+  /** La gata del piso de los equipos. */
+  private cat: OfficeCat | null = null;
   private enabled = false;
   private sessions = 0;
   private seed = 1;
@@ -256,6 +260,8 @@ export class OfficeCrowd {
       });
     }
     this.props = [];
+    this.cat?.dispose();
+    this.cat = null;
     this.planner = null;
     this.queue = [];
   }
@@ -281,7 +287,7 @@ export class OfficeCrowd {
     this.poiIds = { kept: pois.map((p) => p.id), dropped: room.pois.filter((p) => !pois.some((q) => q.id === p.id)).map((p) => p.id) };
     this.planner = new AmbientPlanner(pois, this.seed);
 
-    for (const role of ["reception", "barista", "rooftop"] as const) this.addStaff(role, room.npcSpots[role]);
+    for (const role of ["reception", "barista", "rooftop", "queue"] as const) this.addStaff(role, room.npcSpots[role]);
     const rp = room.npcSpots.reception;
     const desk = podium();
     desk.position.set(rp.x - 0.75, FLOOR_Y[0], rp.z);
@@ -289,6 +295,14 @@ export class OfficeCrowd {
     noOutline(desk);
     this.group.add(desk);
     this.props.push(desk);
+
+    // La gata arranca en algún punto del piso de los equipos.
+    const catAt = nav.snap(0, room.door.x - 3, room.door.z - 4, 3);
+    if (catAt) {
+      this.cat = new OfficeCat(mulberry32(this.seed * 31 + 7));
+      this.cat.place(catAt);
+      this.group.add(this.cat.root);
+    }
 
     // La oficina abre viva: cada uno ya está en algún lugar.
     for (let i = 0; i < ambientPopulation(this.sessions); i++) this.addPerson(true);
@@ -375,6 +389,10 @@ export class OfficeCrowd {
     }
 
     for (const n of this.people.values()) this.step(n, dt, t, owner, nav);
+    if (this.cat && this.room) {
+      this.cat.update(dt, t, nav, this.room.bounds, owner);
+      this.cat.root.visible = floorOfHeight(this.cat.pos.y + 0.05, FLOOR_Y) <= shownFloor;
+    }
     for (const [role, n] of this.staff) this.stepStaff(role, n, dt, t, owner);
 
     for (const n of [...this.people.values(), ...this.staff.values()]) {
@@ -625,7 +643,14 @@ export class OfficeCrowd {
     }));
   }
 
-  debug(): { npcs: CrowdDebug[]; floorChanges: number; seed: number; navNodes: number; pois: { kept: string[]; dropped: string[] } } {
+  debug(): {
+    npcs: CrowdDebug[];
+    cat: { x: number; z: number } | null;
+    floorChanges: number;
+    seed: number;
+    navNodes: number;
+    pois: { kept: string[]; dropped: string[] };
+  } {
     const row = (n: Npc): CrowdDebug => ({
       id: n.role ?? n.id,
       role: n.role ?? null,
@@ -638,6 +663,7 @@ export class OfficeCrowd {
     });
     return {
       npcs: this.enabled ? [...[...this.staff.values()].map(row), ...[...this.people.values()].map(row)] : [],
+      cat: this.cat ? { x: +this.cat.pos.x.toFixed(2), z: +this.cat.pos.z.toFixed(2) } : null,
       floorChanges: this.floorChanges,
       seed: this.seed,
       navNodes: this.nav?.nodes ?? 0,

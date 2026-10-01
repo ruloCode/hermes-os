@@ -337,7 +337,7 @@ export class OfficeCharacter {
   }
 
   /** Aplica el estado real del personaje (lo que dice el agente). `voice` = la voz que presta en el elenco de la oficina. */
-  setState(w: OfficeWorker, voice?: string) {
+  setState(w: OfficeWorker, voice?: string, nick?: string) {
     const was = this.status;
     this.status = w.status;
     this.nextAction = w.status === "working" ? w.action : undefined;
@@ -345,7 +345,9 @@ export class OfficeCharacter {
     this.paintBulb();
     // El modo va en el chip solo si no es Auto (el default): así se ve quién está en Plan o Preguntar.
     this.modeTag = w.mode && w.mode !== "auto" ? ` · ${officeModeLabel(w.mode)}` : "";
-    this.drawBubble(voice ? `🎙 ${voice} · ${w.name}` : w.name, w.task.summary);
+    // El apodo es cómo se llama el personaje; la tarea real va al lado.
+    const name = nick ? `${nick} · ${w.name}` : w.name;
+    this.drawBubble(voice ? `🎙 ${voice} · ${name}` : name, w.task.summary);
   }
 
   private talk = 0;

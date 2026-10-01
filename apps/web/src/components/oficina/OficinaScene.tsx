@@ -8,7 +8,7 @@
 // de la Sala).
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { OFFICE_NPCS, type OfficeLayout, type OfficeNpcRole, type OfficeWorker } from "@hermes/shared";
+import { OFFICE_NPCS, type OfficeBoards, type OfficeLayout, type OfficeNpcRole, type OfficeWorker, type QueueState } from "@hermes/shared";
 import { readOfficePalette } from "@/lib/oficina/palette";
 import { OfficeWorld, type OfficeHit, type OfficeMode, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
 import type { BoardStat, FeedLine } from "@/lib/oficina/room";
@@ -44,6 +44,14 @@ interface Props {
   speakingProbe?: () => { id: string; level: number } | null;
   /** Interruptor "Ambiente": gente del edificio; `sessions` (vivas) decide cuánta; `seed` la coreografía. */
   ambient: { on: boolean; sessions: number; seed?: number };
+  /** Datos de los tableros de pared (GET /office/boards). */
+  boards: OfficeBoards | null;
+  /** Apodo de cada personaje (assignNicknames). */
+  nicks?: ReadonlyMap<string, string>;
+  /** Dibujo de la pizarra libre (data URL PNG, o null = limpia). */
+  whiteboard?: string | null;
+  /** La cola real (undefined = cargando, null = sin respuesta del agente). */
+  queue?: QueueState | null;
 }
 
 const NPC_ROLES = Object.keys(OFFICE_NPCS) as OfficeNpcRole[];
@@ -59,7 +67,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -109,8 +117,8 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
 
   useEffect(() => {
     worldRef.current?.setLayout(layout);
-    worldRef.current?.setWorkers(workers, seats, voices);
-  }, [layout, workers, seats, voices]);
+    worldRef.current?.setWorkers(workers, seats, voices, nicks);
+  }, [layout, workers, seats, voices, nicks]);
 
   useEffect(() => {
     if (worldRef.current) worldRef.current.speakingProbe = speakingProbe ?? null;
@@ -139,6 +147,18 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   useEffect(() => {
     worldRef.current?.setAmbient(ambient.on, ambient.sessions, ambient.seed);
   }, [ambient.on, ambient.sessions, ambient.seed]);
+
+  useEffect(() => {
+    worldRef.current?.setBoardsData(boards);
+  }, [boards]);
+
+  useEffect(() => {
+    worldRef.current?.setWhiteboard(whiteboard ?? null);
+  }, [whiteboard]);
+
+  useEffect(() => {
+    worldRef.current?.setQueue(queue);
+  }, [queue]);
 
   return (
     <div ref={wrapRef} className="absolute inset-0 overflow-hidden">

@@ -211,11 +211,13 @@ export function TeamRoster({
   projectName,
   selectedId,
   onPick,
+  nicks,
 }: {
   workers: OfficeWorker[];
   projectName: (slug: string) => string;
   selectedId: string | null;
   onPick: (w: OfficeWorker) => void;
+  nicks?: ReadonlyMap<string, string>;
 }) {
   const [open, setOpen] = useState(true);
   if (!workers.length) return null;
@@ -239,7 +241,10 @@ export function TeamRoster({
               >
                 <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[w.status]} ${w.status === "working" ? "animate-pulse" : ""}`} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-text">{w.name}</span>
+                  <span className="block truncate text-sm text-text">
+                    {nicks?.get(w.id) ? <span className="font-medium">{nicks.get(w.id)} · </span> : null}
+                    {w.name}
+                  </span>
                   <span className="block truncate text-xs text-text-faint">
                     {projectName(w.project)}
                     {w.task.summary ? ` · ${w.task.summary}` : ""}

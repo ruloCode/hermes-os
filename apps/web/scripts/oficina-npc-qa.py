@@ -2,7 +2,7 @@
 
 Con la coreografía sembrada (?seed=7), en los dos temas:
   1. Con "Ambiente" prendido (default) hay gente en al menos dos pisos, más
-     Recepción, Barista y Respiro; nadie de ambiente se mete en un pod.
+     Recepción, Barista, Respiro y Coordinación; nadie de ambiente se mete en un pod.
   2. Recepción: "E" a su lado abre su diálogo y los conteos coinciden con la
      simulación (__hermesOficinaSim("demo")); sus listas nombran a los agentes
      reales de cada estado.
@@ -84,7 +84,7 @@ def main() -> int:
             check(d.get("ambient") is True, f"[{theme}] el ambiente arranca prendido")
             ambient = [n for n in d["npcs"] if not n["role"]]
             staff = {n["role"] for n in d["npcs"] if n["role"]}
-            check(staff == {"reception", "barista", "rooftop"}, f"[{theme}] Recepción, Barista y Respiro en su lugar ({sorted(staff)})")
+            check(staff == {"reception", "barista", "rooftop", "queue"}, f"[{theme}] Recepción, Barista, Respiro y Coordinación en su lugar ({sorted(staff)})")
             check(4 <= len(ambient) <= 6, f"[{theme}] 4 a 6 personas de ambiente ({len(ambient)})")
             floors = Counter(n["floor"] for n in ambient)
             check(len(floors) >= 2, f"[{theme}] gente en al menos dos pisos ({dict(floors)})")
@@ -202,7 +202,7 @@ def main() -> int:
             check(d["ambient"] is False and d["npcs"] == [], f"[{theme}] apagado se recuerda al recargar")
             page.get_by_role("button", name="Ambiente").click()
             time.sleep(1.0)
-            check(len(dbg()["npcs"]) >= 7, f"[{theme}] prendido de nuevo, vuelven")
+            check(len(dbg()["npcs"]) >= 8, f"[{theme}] prendido de nuevo, vuelven")
 
             # Una vez: la escalera, de verdad.
             if theme == "dark":

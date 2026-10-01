@@ -13,7 +13,7 @@
 // plantas, lámparas), con otra planta y colores del tema.
 
 import * as THREE from "three";
-import type { AmbientPoi, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
+import type { AmbientPoi, OfficeBoardId, OfficeLayout, OfficeNpcRole } from "@hermes/shared";
 import { mesh, roundedBox, toon, toonUnique } from "./toon";
 import type { OfficePalette } from "./palette";
 import type { Collider } from "./player";
@@ -63,6 +63,19 @@ export interface NpcSpot {
   talk: { x: number; z: number };
 }
 
+/** Dónde cuelga un tablero de pared (piso 1): centro, normal hacia adentro y desde dónde se usa. */
+export interface BoardSpot {
+  x: number;
+  y: number;
+  z: number;
+  /** Rotación Y del plano (0 = mira a +z). */
+  rotY: number;
+  w: number;
+  h: number;
+  /** Punto frente al tablero desde donde "E" lo alcanza. */
+  front: { x: number; z: number };
+}
+
 export interface Room {
   group: THREE.Group;
   colliders: Collider[];
@@ -87,6 +100,16 @@ export interface Room {
   npcSpots: Record<OfficeNpcRole, NpcSpot>;
   /** Por donde entra al edificio quien llega (la puerta del frente, piso 1). */
   door: { x: number; z: number };
+  /** Tableros de pared del piso 1 (issues, PRs, servicios): los pinta `boards.ts` con datos reales. */
+  boardSpots: Record<OfficeBoardId, BoardSpot>;
+  /** La pizarra libre (piso 1, muro oeste): se dibuja desde el navegador. */
+  whiteboardSpot: BoardSpot;
+  /** El tablero de la cola de agentes (piso 1, muro oeste, junto a la pizarra). */
+  queueSpot: BoardSpot;
+  /** La TV del lounge (piso 2): centro de la pantalla y desde dónde se usa. */
+  tv: { floor: number; x: number; y: number; z: number; front: { x: number; z: number } };
+  /** Pone un video en la TV (pantalla compartida) o, con null, vuelve al feed de actividad. */
+  setTvVideo(video: HTMLVideoElement | null): void;
   setFeed(lines: FeedLine[]): void;
   /** Pizarra con los conteos del momento (datos reales de la oficina). */
   setBoard(stats: BoardStat[]): void;
@@ -1837,8 +1860,35 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     reception: { floor: 0, x: cx + 3.6, z: maxZ - 2.4, facing: W_, talk: { x: cx + 2.0, z: maxZ - 2.4 } },
     // Barista detrás de la isla (entre la barra y la isla); se le habla desde las banquetas.
     barista: { floor: 1, x: minX + 2.5, z: tableAt.z, facing: E_, talk: { x: tableAt.x + 1.75, z: tableAt.z } },
+    // Coordinación, junto al tablero de la cola (muro oeste), mirando al salón.
+    queue: { floor: 0, x: minX + 1.0, z: minZ + 4.3, facing: Math.PI / 2 + 0.5, talk: { x: minX + 1.6, z: minZ + 2.4 } },
     // En la azotea, junto a las sillas de playa, mirando hacia donde llega la escalera.
     rooftop: { floor: 2, x: nook.x - 2.6, z: nook.z + 0.8, facing: -Math.PI / 4, talk: { x: nook.x - 3.66, z: nook.z + 1.86 } },
+  };
+
+  // Tableros de la pared (piso 1): issues al fondo, simétrico al cuadro; PRs y
+  // servicios en el muro este, entre sus dos ventanas.
+  const eastX = maxX - WALL_T / 2 - 0.04;
+  const boardSpots: Record<OfficeBoardId, BoardSpot> = {
+    issues: { x: cx + 10.25, y: 1.85, z: minZ + WALL_T / 2 + 0.04, rotY: 0, w: 2.3, h: 1.75, front: { x: cx + 10.25, z: minZ + 1.6 } },
+    prs: { x: eastX, y: 1.85, z: minZ + 8.5, rotY: -Math.PI / 2, w: 2.4, h: 1.6, front: { x: maxX - 1.6, z: minZ + 8.5 } },
+    services: { x: eastX, y: 1.85, z: minZ + 12.5, rotY: -Math.PI / 2, w: 2.0, h: 1.4, front: { x: maxX - 1.6, z: minZ + 12.5 } },
+  };
+  // Pizarra libre en el muro oeste, entre el fondo y su primera ventana.
+  const whiteboardSpot: BoardSpot = { x: minX + WALL_T / 2 + 0.04, y: 1.75, z: minZ + 6, rotY: Math.PI / 2, w: 2.4, h: 1.5, front: { x: minX + 1.6, z: minZ + 6 } };
+  const queueSpot: BoardSpot = { x: minX + WALL_T / 2 + 0.04, y: 1.8, z: minZ + 2.4, rotY: Math.PI / 2, w: 2.2, h: 1.55, front: { x: minX + 1.6, z: minZ + 2.4 } };
+
+  // Pantalla compartida en la TV: una VideoTexture en vez del feed mientras dure.
+  let tvVideoTex: THREE.VideoTexture | null = null;
+  const setTvVideo = (video: HTMLVideoElement | null) => {
+    tvVideoTex?.dispose();
+    tvVideoTex = null;
+    if (video) {
+      tvVideoTex = new THREE.VideoTexture(video);
+      tvVideoTex.colorSpace = THREE.SRGBColorSpace;
+      tvMat.map = tvVideoTex;
+    } else tvMat.map = tv.tex;
+    tvMat.needsUpdate = true;
   };
 
   let lastSky = "";
@@ -1858,6 +1908,11 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     pois,
     npcSpots,
     door: { x: cx, z: maxZ - 0.7 },
+    boardSpots,
+    whiteboardSpot,
+    queueSpot,
+    tv: { floor: 1, x: tvX, y: FLOOR_Y[1] + 1.75, z: lz, front: { x: maxX - 2.2, z: lz - 0.5 } },
+    setTvVideo,
     setBoard: paintBoard,
     setFeed(lines) {
       const same = lines.length === feed.length && lines.every((l, i) => l.text === feed[i].text && l.time === feed[i].time);
@@ -1884,6 +1939,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
       }
     },
     dispose() {
+      tvVideoTex?.dispose();
       group.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) m.geometry.dispose();

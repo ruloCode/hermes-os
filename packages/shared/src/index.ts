@@ -31,4 +31,7 @@ export * from "./office-voices.js";
 export * from "./office-nav.js";
 export * from "./office-ambient.js";
 export * from "./office-npc.js";
+export * from "./office-boards.js";
+export * from "./office-nicknames.js";
+export * from "./office-queue.js";
 export * from "./gamepad.js";
