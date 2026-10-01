@@ -310,6 +310,31 @@ Hay 6 lugares nuevos para la gente (33 en total, ninguno descartado). Los mueble
 
 **Interruptor "Capas"** (HUD, `hermes-oficina-capas`): **Pantallas y uso** (monitores, sala de control, tablero y píldora), **Oficina de CEO**, **Zonas nuevas** y **Minijuegos**. Apagadas, la sala se arma como antes: vuelven la ventana del fondo y las dos matas. La única excepción es la pantalla de la arcade, que muestra su espera en vez de la ilustración vieja.
 
+## Interacciones (capa "Interacciones")
+
+2026-10-01. La oficina se usa, no solo se mira. Con **E** (o **A**, o un clic) sobre lo que tienes al lado:
+
+| Qué | Dónde | Qué pasa |
+| --- | --- | --- |
+| **Sentarte** | Cualquier asiento: sofá, sillón, banquetas, pufs, sillas de playa, mesa de juntas, sillón de la biblioteca, pufs de la azotea, el sofá de tu oficina | Te sientas mirando hacia donde mira el asiento (en el sofá, la TV). Si alguien de ambiente estaba ahí, se levanta y busca otro lugar. **E**, **Espacio**, caminar, **A**, **B** o el stick te levantan |
+| **Café** | La cafetera del café | 4 s preparándolo (molino y vapor, barra de avance). Lo llevas en la mano unos 2½ min: caminas con él, te sientas con él (pose de taza sentado) y, con nada al lado, **E** es un sorbo |
+| **Agua** y **snack** | Dispensador y máquina de snacks del café | Un vaso de agua en la mano (1 min) o un snack (mordiscos, 3 s) |
+| **Dejarle tu café a un agente** | Con el café en la mano, háblale a un agente | La taza queda en su escritorio mientras siga ahí; el aviso dice "Dejarle tu café a…" |
+| **Acariciar a la gata** | Donde esté (piso 1) | Se sienta, te mira, suelta corazones, ronronea y te sigue un rato |
+| **Saludar** | A cualquier persona de ambiente | Se detiene, te mira, te devuelve el saludo y te dice algo **real**: cuántos agentes trabajan y en qué tool va uno, quién te espera y para qué, quién terminó, el % de la sesión de Claude, las ejecuciones de hoy, tus cafés, la hora o el clima. Sin dato, esa frase no existe |
+| **Cabina telefónica** | Café, esquina noreste | Llama al equipo (o a Hermes) por voz, igual que **Y** |
+| **Cabina de foco** | Café, frente este (capa Zonas) | Un bloque de **25 min** con su píldora "🎧 Foco"; al terminar, aviso, campanita y voz |
+| **Lámparas** | Las de pie del café y la de tu oficina | Prender y apagar (la luz queda en 0, no se quita) |
+| **Q** / **F** | Donde sea | Saludar con la mano / bailar (hasta que camines) |
+
+**Hoy y logros.** Lo que haces suma a un contador del día (`hermes-oficina-hoy`, en este navegador) que se ve en la píldora "Hoy: ☕ 2 · 🐈 1 · 🏅 3/10". Al hacerle clic se abre la lista de **logros**, que salen solo de tus acciones reales: primer café, tercer café, hidratado, amigo de la gata, sociable, recorrer los tres pisos, probar cinco asientos, bailar, dejarle café a un agente y terminar un bloque de foco. Cada uno avisa una vez por día. Lógica pura en `packages/shared/src/office-play.ts`, con tests.
+
+**Prioridad de "E" (sin cambios para lo que ya existía):** escritorio de pod > NPC con rol > tableros, TV, juegos > objetos, la gata y la gente. Excepción: la gata a tus pies le gana a un NPC con rol más lejos (le gusta echarse junto a Recepción). Con la capa apagada, nada de esto existe.
+
+> **Ojo (React en desarrollo):** el aviso de un logro se disparaba dentro del actualizador de `setState` y salía dos veces (StrictMode lo corre dos veces). Se calcula afuera, con el valor de un ref.
+>
+> **Ojo (el globo y el aviso):** mientras alguien te habla, el aviso "E · Saludar" no se dibuja, porque se encimaba con su globo.
+
 ## Sonido
 
 Todo procedural con WebAudio (`lib/oficina/audio.ts`): sin samples ni audio con derechos. El botón **Sonido** viene **apagado**. El `AudioContext` nace con ese clic (política de autoplay), se suspende con la pestaña oculta y **baja solo durante una llamada** con Hermes o el equipo. El volumen se guarda (`hermes-oficina-volumen`).
@@ -322,6 +347,7 @@ Todo procedural con WebAudio (`lib/oficina/audio.ts`): sin samples ni audio con 
 | Minijuegos | Golpe, rebote, punto, error, lanzamiento y fin de partida |
 | Pasos | Los del dueño al caminar o correr |
 | Avisos | Dos notas cuando un agente te necesita; tres cuando alguien termina (con el confeti) |
+| Lo que haces | Molino y vapor al preparar café, agua sirviéndose, mordiscos, sorbos, ronroneo de la gata, clic de lámpara, cojín al sentarte |
 
 ## La sala
 
@@ -442,6 +468,7 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | `__hermesOficinaSim("demo", n)` | La simulación con `n` personajes (capturas con 0, 3 y 10) |
 | `__hermesOficinaGame.start(id)` · `.input({x, y, action, pressed})` · `.state()` · `.exit()` | Minijuegos por código: `state().inner` trae la pelota, las varillas o los tokens para jugar de verdad |
 | `__hermesOficinaCeo(on)` | Sentarse en la silla de la oficina de CEO (true) o levantarse |
+| `__hermesOficinaWalkTo({kind: "prop", id})` · `({kind: "cat", id: "gata"})` · `({kind: "person", id})` | Junto a un objeto (`cafetera`, `agua`, `snacks`, `cabina`, `foco-0`, `lampara-0`, `sofa#0`…; la lista en `__hermesOficinaDebug().props`), a la gata o a una persona de ambiente |
 | `__hermesOficinaAudio()` | Estado del sonido (prendido, contexto, volumen, si está bajo por llamada, teclados activos, eventos) |
 | `__hermesOficinaWalkTo({kind: "spend" \| "control", id: "wall"})` · `({kind: "game", id})` · `({kind: "ceo", id: "chair"})` | Frente al tablero de uso, a la sala de control, a un minijuego o junto a la silla de CEO |
 | `__hermesOficinaDebug()` (nuevo) | `spendData`, `planUsage`, `monitors` (líneas y repintes por agente), `controlWall`, `game`, `ceo`, `layers`, `meeting`, `freeZones` y, por personaje, `lines` y `spend` |
