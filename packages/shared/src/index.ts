@@ -36,4 +36,5 @@ export * from "./office-nicknames.js";
 export * from "./office-queue.js";
 export * from "./office-spend.js";
 export * from "./office-games.js";
+export * from "./office-play.js";
 export * from "./gamepad.js";

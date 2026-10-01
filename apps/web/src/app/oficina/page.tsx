@@ -21,6 +21,13 @@ import {
   GENERAL_PROJECT,
   assignNicknames,
   OFFICE_BOARD_TITLES,
+  ACHIEVEMENTS,
+  addPlay,
+  emptyDay,
+  loadDay,
+  newAchievements,
+  type DayPlay,
+  type PlayStat,
   GAME_INFO,
   isGameId,
   OFFICE_NPCS,
@@ -102,6 +109,7 @@ import { DEFAULT_LOOK, loadLook, saveLook, type OwnerLook } from "@/lib/oficina/
 import { daylightAt, type FeedLine } from "@/lib/oficina/room";
 import { isTyping } from "@/lib/oficina/player";
 import { OfficeAudio } from "@/lib/oficina/audio";
+import type { ActivityHud, OwnerStat } from "@/lib/oficina/office-world";
 import { replyVoiceEnabled, setReplyVoice, speak, stopSpeaking } from "@/lib/oficina/speech";
 import type { OfficeHit, OfficeMode } from "@/lib/oficina/office-world";
 
@@ -228,7 +236,15 @@ const OFFICE_MODE_KEY = "hermes-office-mode";
 const AMBIENT_KEY = "hermes-oficina-ambiente-v2";
 /** Interruptor "Capas" (todas prendidas por defecto): preferencia de este navegador. */
 const LAYERS_KEY = "hermes-oficina-capas";
-const DEFAULT_LAYERS: OfficeLayers = { data: true, ceo: true, zones: true, games: true };
+const DEFAULT_LAYERS: OfficeLayers = { data: true, ceo: true, zones: true, games: true, interactions: true };
+/** Lo que el dueño hizo hoy en la oficina (cafés, gata, saludos, logros…): sus acciones reales, por día, en este navegador. */
+const DAY_KEY = "hermes-oficina-hoy";
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+/** Minutos del modo foco (cabinas de foco del café). */
+const FOCUS_MS = 25 * 60_000;
 
 function hhmm(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -368,6 +384,13 @@ export default function OficinaPage() {
   const audioRef = useRef<OfficeAudio | null>(null);
   if (!audioRef.current && typeof window !== "undefined") audioRef.current = new OfficeAudio();
   const [soundOn, setSoundOn] = useState(false);
+  // Interacciones: lo que hace el dueño, el contador del día y el modo foco.
+  const [activity, setActivity] = useState<ActivityHud | null>(null);
+  const [dayStats, setDayStats] = useState<DayPlay>(() => emptyDay(todayKey()));
+  const [playOpen, setPlayOpen] = useState(false);
+  const [focusUntil, setFocusUntil] = useState<number | null>(null);
+  /** A quién llama la cabina telefónica (se fija más abajo, cuando existe `team`). */
+  const callKindRef = useRef<"team" | "hermes" | "none">("none");
   const [volume, setVolume] = useState(0.6);
   const [ceoPick, setCeoPick] = useState<string | null>(null);
   const ceoRef = useRef(false);
@@ -410,6 +433,7 @@ export default function OficinaPage() {
       if (isOfficeMode(saved)) setOfficeModeState(saved);
       localStorage.removeItem("hermes-oficina-ambiente");
       if (localStorage.getItem(AMBIENT_KEY) === "off") setAmbientState(false);
+      setDayStats(loadDay(JSON.parse(localStorage.getItem(DAY_KEY) ?? "null"), todayKey()));
       const savedLayers = JSON.parse(localStorage.getItem(LAYERS_KEY) ?? "null") as Partial<OfficeLayers> | null;
       if (savedLayers && typeof savedLayers === "object") setLayersState({ ...DEFAULT_LAYERS, ...savedLayers });
     } catch {
@@ -513,13 +537,38 @@ export default function OficinaPage() {
     if (near.kind === "control") return "Abrir la sala de control";
     if (near.kind === "game") return `Jugar ${GAME_INFO[near.id].title}`;
     if (near.kind === "ceo") return "Sentarte en tu silla (modo CEO)";
+    if (near.kind === "cat") return "Acariciar a la gata";
+    if (near.kind === "person") return "Saludar";
+    if (near.kind === "prop") {
+      const info = sceneRef.current?.world()?.propInfo(near.id);
+      if (!info) return null;
+      switch (info.kind) {
+        case "seat":
+          return `Sentarte en ${info.name}`;
+        case "coffee":
+          return "Prepararte un café";
+        case "water":
+          return "Servirte un vaso de agua";
+        case "snack":
+          return "Sacar un snack";
+        case "phone":
+          return callKindRef.current === "team" ? "Llamar al equipo desde la cabina" : callKindRef.current === "hermes" ? "Llamar a Hermes desde la cabina" : "La cabina (la voz no está configurada)";
+        case "focus":
+          return focusUntil ? "Terminar el modo foco" : "Modo foco · 25 min";
+        case "lamp":
+          return info.off ? `Prender ${info.name}` : `Apagar ${info.name}`;
+      }
+    }
     if (near.kind === "worker") {
       const w = workers.find((x) => x.id === near.id);
-      return w ? `Hablar con ${nicks.get(w.id) ?? w.name}` : null;
+      // Con el café en la mano, hablarle se lo deja en el escritorio.
+      const gift = activity?.label.startsWith("☕") ? "Dejarle tu café a" : "Hablar con";
+      return w ? `${gift} ${nicks.get(w.id) ?? w.name}` : null;
     }
     const d = layout.desks.find((x) => x.id === near.id);
     return d ? (sim ? "Escritorio libre" : `Contratar aquí · ${projectName(d.project)}`) : null;
-  }, [near, workers, layout, projectName, sim, sharing, nicks]);
+    // focusUntil cambia el aviso de la cabina de foco (la de llamar lee callKindRef: team se declara más abajo).
+  }, [near, workers, layout, projectName, sim, sharing, nicks, focusUntil, activity]);
 
   // ── Gente del edificio: Recepción, Barista y Respiro ─────────────────
   const npcOpenRef = useRef(false);
@@ -710,10 +759,10 @@ export default function OficinaPage() {
 
   // La pausa de la azotea: cuenta regresiva real (y la hora que dicen los NPC).
   useEffect(() => {
-    if (!pauseUntil && !npc) return;
+    if (!pauseUntil && !npc && !focusUntil) return;
     const id = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [pauseUntil, npc]);
+  }, [pauseUntil, npc, focusUntil]);
 
   const controlsLines = (padOn: boolean): NpcLine[] =>
     padOn
@@ -811,6 +860,7 @@ export default function OficinaPage() {
     hire: (project, text) => hireAgentRef.current(project, text),
   });
   const inCall = hermes.connected || team.status === "on";
+  callKindRef.current = team.available ? "team" : hermes.configured ? "hermes" : "none";
   // Con una llamada activa el ambiente baja: nunca tapa la voz de Hermes ni la del equipo.
   useEffect(() => {
     audioRef.current?.setDucked(inCall);
@@ -1094,6 +1144,11 @@ export default function OficinaPage() {
       }
       if (hiring) return;
     }
+    // Sentado o preparando algo: A o B te levantan.
+    if (world?.ownerBusy && (b === "A" || b === "B")) {
+      world.standUp();
+      return;
+    }
     // Modo CEO: LB/RB recorren a los agentes, A abre su panel y B te levanta (sin caminar).
     if (ceoRef.current) {
       if (b === "LB" || b === "LEFT") ceoCycle(-1);
@@ -1147,6 +1202,8 @@ export default function OficinaPage() {
     }
     const active = s.move.x || s.move.y || s.look.x || s.look.y || s.held.size;
     if (active) markPad(true);
+    // Sentado: empujar el stick te levanta.
+    if (world.sitting && Math.hypot(s.move.x, s.move.y) > 0.6) world.standUp();
     world.setPad({
       move: s.move,
       look: s.look,
@@ -1181,6 +1238,18 @@ export default function OficinaPage() {
   npcCountRef.current = npcView?.questions.length ?? 0;
   const npcFocusRef = useRef(0);
   npcFocusRef.current = npcFocus;
+
+  // Fin del modo foco: aviso, campanita, vibración y (con respuestas en voz) lo dice.
+  useEffect(() => {
+    if (!focusUntil || clock < focusUntil) return;
+    setFocusUntil(null);
+    toast("done", "🎧 Se acabaron los 25 minutos de foco");
+    addStat("focus");
+    audioRef.current?.chime("done");
+    pad.rumble("success");
+    if (replyVoice && !inCall) speak("Se acabó el bloque de foco. Buen trabajo.");
+    // pad.rumble lee el control al llamarse.
+  }, [clock, focusUntil, toast, replyVoice, inCall]);
 
   // Fin de la pausa: aviso, vibración y (si las respuestas en voz están prendidas) lo dice.
   useEffect(() => {
@@ -1261,6 +1330,13 @@ export default function OficinaPage() {
         closeConversation();
         closeNpc();
         setWallBoard(null);
+        return;
+      }
+      if (hit.kind === "prop" || hit.kind === "cat" || hit.kind === "person") {
+        closeConversation();
+        closeNpc();
+        setWallBoard(null);
+        sceneRef.current?.world()?.use(hit);
         return;
       }
       if (hit.kind === "ceo") {
@@ -1417,6 +1493,81 @@ export default function OficinaPage() {
     setVolume(a.getVolume());
   };
 
+  /**
+   * Una acción real del dueño suma al contador del día y, si cumple un logro, lo
+   * avisa (una vez por día). Se calcula FUERA del actualizador de estado: React
+   * lo corre dos veces en desarrollo y el aviso salía repetido.
+   */
+  const addStat = (st: PlayStat | "floor", detail?: string | number) => {
+    const prev = dayStatsRef.current;
+    const base = prev.day === todayKey() ? prev : emptyDay(todayKey());
+    let next = addPlay(base, st, detail);
+    const won = newAchievements(next);
+    if (won.length) {
+      next = { ...next, unlocked: [...next.unlocked, ...won.map((a) => a.id)] };
+      for (const a of won) toast("done", `🏅 Logro: ${a.title} — ${a.how}`);
+      audioRef.current?.chime("done");
+    }
+    if (next === prev) return;
+    dayStatsRef.current = next;
+    setDayStats(next);
+    try {
+      localStorage.setItem(DAY_KEY, JSON.stringify(next));
+    } catch {
+      /* modo privado */
+    }
+  };
+
+  /** Cabinas del café: la telefónica llama (Hermes o el equipo); la de foco prende o apaga 25 minutos. */
+  const onPropAction = (kind: "phone" | "focus") => {
+    if (kind === "phone") {
+      if (team.available || hermes.configured) toggleCall();
+      else toast("error", "La voz no está configurada en este agente");
+      return;
+    }
+    if (focusUntil) {
+      setFocusUntil(null);
+      toast("done", "🎧 Terminaste el foco");
+    } else {
+      setFocusUntil(Date.now() + FOCUS_MS);
+      setClock(Date.now());
+      toast("start", "🎧 Modo foco: 25 minutos");
+    }
+  };
+
+  /**
+   * Lo que te dice la gente cuando la saludas. Cada frase sale de un dato real
+   * (agentes, permisos, uso del plan, tu contador del día, la hora, el clima);
+   * si un dato no existe, esa frase no está.
+   */
+  const chatterRef = useRef<{ last: string }>({ last: "" });
+  const chatter = (): string => {
+    const lines: string[] = [];
+    const now = new Date();
+    lines.push(`Son las ${hhmm(now)}.`);
+    const working = workers.filter((w) => w.status === "working" || w.status === "thinking" || w.status === "starting");
+    if (working.length) {
+      const w = working[Math.floor(Math.random() * working.length)];
+      lines.push(
+        `${working.length === 1 ? "Hay un agente trabajando" : `Hay ${working.length} agentes trabajando`}. ${nicks.get(w.id) ?? w.name} va por su tool ${w.toolCalls} en ${projectName(w.project)}${sim ? " (simulación)" : ""}.`,
+      );
+    } else lines.push("Ahora mismo no hay agentes trabajando.");
+    const asking = workers.find((w) => w.status === "needs_you" && w.approval);
+    if (asking) lines.push(`${nicks.get(asking.id) ?? asking.name} te está esperando: ${asking.approval!.summary}.`);
+    const done = workers.find((w) => w.status === "done");
+    if (done) lines.push(`${nicks.get(done.id) ?? done.name} terminó hace poco en ${projectName(done.project)}.`);
+    const session = plan?.available ? plan.windows.find((w) => w.key === "five_hour") : undefined;
+    if (session) lines.push(`Llevas ${Math.round(session.utilization)}% de la sesión de Claude.`);
+    if (spend && spend.today.runs) lines.push(`Hoy van ${spend.today.runs} ejecuciones de agentes.`);
+    if (dayStats.coffee) lines.push(`Llevas ${dayStats.coffee} ${dayStats.coffee === 1 ? "café" : "cafés"} hoy.`);
+    const temp = snapshot?.weather && !snapshot.weather.stale ? snapshot.weather.now.tempC : undefined;
+    if (typeof temp === "number") lines.push(`Afuera hacen ${Math.round(temp)}°.`);
+    const pool = lines.filter((l) => l !== chatterRef.current.last);
+    const pick = pool[Math.floor(Math.random() * pool.length)] ?? lines[0];
+    chatterRef.current.last = pick;
+    return pick;
+  };
+
   const changeLook = (l: OwnerLook) => {
     setLook(l);
     saveLook(l);
@@ -1425,6 +1576,12 @@ export default function OficinaPage() {
   // Seams de QA: simular sin tokens, leer el estado, clics reales, vista, caminar y dictar.
   const teamRef = useRef(team);
   teamRef.current = team;
+  const activityRef = useRef(activity);
+  activityRef.current = activity;
+  const dayStatsRef = useRef(dayStats);
+  dayStatsRef.current = dayStats;
+  const focusRef = useRef(focusUntil);
+  focusRef.current = focusUntil;
   const debugRef = useRef({ workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue, spend, plan, spendOpen, controlOpen });
   debugRef.current = { workers, seats, selected, layout, near, voice, usingPad, npc, wallBoard, boards, nicks, whiteboardImage, queue, spend, plan, spendOpen, controlOpen };
   useEffect(() => {
@@ -1450,6 +1607,9 @@ export default function OficinaPage() {
         queueOpen: queueOpenRef.current,
         boardPanel: d.wallBoard,
         spendPanel: d.spendOpen,
+        activity: activityRef.current,
+        dayStats: dayStatsRef.current,
+        focus: focusRef.current,
         controlPanel: d.controlOpen,
         planUsage: d.plan === undefined ? "loading" : d.plan ? { available: d.plan.available, windows: d.plan.windows.map((w) => ({ label: w.label, utilization: w.utilization, resetsAt: w.resetsAt })) } : null,
         spendData: d.spend === undefined ? "loading" : d.spend ? { costUsd: d.spend.today.costUsd, runs: d.spend.today.runs, day: d.spend.today.day } : null,
@@ -1554,7 +1714,11 @@ export default function OficinaPage() {
         onClick={onClick}
         onNear={setNear}
         onMode={setModeState}
-        onFloor={setFloor}
+        onFloor={(f) => {
+          setFloor(f);
+          // Un piso "pisado" cuenta solo caminando (no mirándolo desde la vista aérea).
+          if (sceneRef.current?.world()?.mode === "explore") addStat("floor", f);
+        }}
         voices={team.voiceNames}
         speakingProbe={team.speakingWorker}
         ambient={{ on: ambient, sessions: workers.length, seed: ambientSeed }}
@@ -1573,6 +1737,10 @@ export default function OficinaPage() {
         calendar={snapshot?.calendar ?? null}
         layers={layers}
         audio={audioRef.current}
+        onActivity={setActivity}
+        onStat={(st, detail) => addStat(st, detail)}
+        onPropAction={onPropAction}
+        chatter={chatter}
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3">
@@ -1599,6 +1767,59 @@ export default function OficinaPage() {
                 </span>
               ))}
             </button>
+          ) : null}
+          {focusUntil ? (
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-line bg-panel/85 px-3 py-1.5 text-sm shadow-lg backdrop-blur-md" role="timer" data-focus>
+              <span>🎧 Foco {formatCountdown(focusUntil - clock)}</span>
+              <button type="button" onClick={() => setFocusUntil(null)} className="rounded-md px-1.5 text-xs text-text-dim hover:text-text">
+                terminar
+              </button>
+            </div>
+          ) : null}
+          {layers.interactions ? (
+            <button
+              type="button"
+              onClick={() => setPlayOpen((v) => !v)}
+              className="pointer-events-auto flex items-center gap-2 rounded-xl border border-line bg-panel/85 px-3 py-1.5 text-xs text-text-dim shadow-lg backdrop-blur-md hover:text-text"
+              title="Lo que hiciste hoy en la oficina y tus logros (este navegador)"
+              data-day-stats
+            >
+              Hoy:
+              {dayStats.coffee ? <span>☕ {dayStats.coffee}</span> : null}
+              {dayStats.water ? <span>💧 {dayStats.water}</span> : null}
+              {dayStats.snack ? <span>🍪 {dayStats.snack}</span> : null}
+              {dayStats.pet ? <span>🐈 {dayStats.pet}</span> : null}
+              {dayStats.greet ? <span>👋 {dayStats.greet}</span> : null}
+              {dayStats.gift ? <span>🎁 {dayStats.gift}</span> : null}
+              <span>
+                🏅 {dayStats.unlocked.length}/{ACHIEVEMENTS.length}
+              </span>
+            </button>
+          ) : null}
+          {layers.interactions && playOpen ? (
+            <section role="dialog" aria-label="Logros de hoy" className="pointer-events-auto w-80 rounded-xl border border-line bg-panel/95 p-3 shadow-xl backdrop-blur-md">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-medium text-text">Logros de hoy</h2>
+                <button type="button" onClick={() => setPlayOpen(false)} className="rounded-md px-1.5 text-sm text-text-dim hover:text-text" aria-label="Cerrar">
+                  ✕
+                </button>
+              </div>
+              <ul className="space-y-1.5 text-sm">
+                {ACHIEVEMENTS.map((a) => {
+                  const got = dayStats.unlocked.includes(a.id);
+                  return (
+                    <li key={a.id} className={`flex items-start gap-2 ${got ? "text-text" : "text-text-dim"}`} data-achievement={a.id} data-got={got ? "true" : undefined}>
+                      <span>{got ? "🏅" : "○"}</span>
+                      <span>
+                        {a.title}
+                        <span className="block text-xs text-text-dim">{a.how}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="mt-2 text-xs text-text-dim">E en asientos, la cafetera, el agua, los snacks, la gata, la gente, las cabinas y las lámparas · Q saluda · F baila.</p>
+            </section>
           ) : null}
           {pauseUntil ? <PauseTimer left={formatCountdown(pauseUntil - clock)} onStop={() => setPauseUntil(null)} /> : null}
           {sharing ? (
@@ -1701,6 +1922,20 @@ export default function OficinaPage() {
       ) : null}
 
       <Toasts toasts={toasts} />
+
+      {activity && !gameHud && !ceo ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-16 z-20 flex justify-center px-3">
+          <div className="flex min-w-60 flex-col gap-1 rounded-xl border border-line bg-panel/90 px-4 py-2 text-sm shadow-lg backdrop-blur-md" data-activity>
+            <span className="text-text">{activity.label}</span>
+            {activity.progress !== undefined ? (
+              <span className="h-1.5 overflow-hidden rounded-full bg-panel-2">
+                <span className="block h-full rounded-full bg-accent" style={{ width: `${activity.progress * 100}%` }} />
+              </span>
+            ) : null}
+            {activity.hint ? <span className="text-xs text-text-dim">{pad.connected && usingPad ? activity.hint.replace(/^E, Espacio o caminar/, "A, B o el stick").replace(/^E con nada cerca/, "A con nada cerca").replace(/^Esc/, "B") : activity.hint}</span> : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
         {gameHud || ceo ? null : <ControlsHint mode={mode} pad={pad.connected && usingPad} padConnected={pad.connected} />}

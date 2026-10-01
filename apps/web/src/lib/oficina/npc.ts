@@ -106,6 +106,8 @@ class Npc {
   /** Solo los NPC con rol: caja invisible para el clic en vista aérea. */
   hitbox: THREE.Mesh | null = null;
   talking = false;
+  /** Saludada por el dueño: se detiene y lo mira hasta este momento (la gente de ambiente). */
+  greetUntil = 0;
   /** Barista: mira a la cafetera un rato cada tanto. */
   busyUntil = 0;
   nextBusy = 0;
@@ -367,6 +369,39 @@ export class OfficeCrowd {
 
   private reservedPoi: string | null = null;
 
+  /** La gata, si está (Ambiente prendido). */
+  get catNow(): OfficeCat | null {
+    return this.enabled ? this.cat : null;
+  }
+
+  /** La persona de ambiente más cercana al dueño en su piso (no los NPC con rol: esos tienen su diálogo). */
+  nearPerson(owner: THREE.Vector3, floor: number, reach: number): { id: string; d: number; head: THREE.Vector3 } | null {
+    if (!this.enabled) return null;
+    let best: { id: string; d: number; head: THREE.Vector3 } | null = null;
+    for (const n of this.people.values()) {
+      if (floorOfHeight(n.pos.y + 0.05, FLOOR_Y) !== floor) continue;
+      const d = Math.hypot(n.pos.x - owner.x, n.pos.z - owner.z);
+      if (d > reach || (best && d >= best.d)) continue;
+      best = { id: n.id, d, head: new THREE.Vector3(n.pos.x, n.pos.y + 2.0, n.pos.z) };
+    }
+    return best;
+  }
+
+  /** El dueño saluda a alguien: se detiene, lo mira y le devuelve el saludo. */
+  greet(id: string, seconds = 5) {
+    const n = this.people.get(id);
+    if (!n) return false;
+    n.greetUntil = this.t + seconds;
+    n.person.wave();
+    return true;
+  }
+
+  /** Dónde está la cabeza de alguien (para su globo de diálogo). */
+  headOf(id: string, out: THREE.Vector3): THREE.Vector3 | null {
+    const n = this.people.get(id);
+    return n ? out.set(n.pos.x, n.pos.y + (n.state === "at" && n.slot?.seat ? 1.55 : 2.0), n.pos.z) : null;
+  }
+
   /** La rejilla de la gente (null con el ambiente apagado): mide el espacio vacío de cada piso. */
   get navGrid(): NavGrid | null {
     return this.nav;
@@ -451,6 +486,12 @@ export class OfficeCrowd {
   }
 
   private step(n: Npc, dt: number, t: number, owner: THREE.Vector3, nav: NavGrid) {
+    // Saludada: se detiene y mira al dueño (sentada, solo voltea un poco).
+    if (n.greetUntil > t && (n.state === "walking" || (n.state === "at" && !n.slot?.seat))) {
+      n.speed *= 0.7;
+      this.turnTo(n, Math.atan2(owner.x - n.pos.x, owner.z - n.pos.z), dt, 6);
+      return;
+    }
     n.speed += ((n.state === "walking" ? 0.6 : 0) - n.speed) * Math.min(1, dt * 10);
     if (n.state === "seating" || n.state === "unseating") {
       n.seatT = Math.min(1, n.seatT + dt / SEAT_TIME);

@@ -122,7 +122,8 @@ def main() -> int:
             text = panel.first.inner_text() if panel.count() else ""
             check(usd(spend["today"]["costUsd"]) in text, f"[{theme}] el panel dice el gasto real de hoy")
             if plan.get("available"):
-                check(all(f"{round(w['utilization'])}% usado" in text for w in plan["windows"]), f"[{theme}] el panel trae cada barra del plan con su %")
+                # El % de la sesión sube en vivo mientras corre el QA: cada barra con su % (±2 de lo que dijo el agente).
+                check(all(any(f"{round(w['utilization']) + k}% usado" in text for k in (-2, -1, 0, 1, 2)) and w["label"] in text for w in plan["windows"]), f"[{theme}] el panel trae cada barra del plan con su %")
                 check("Se restablece" in text, f"[{theme}] cada barra dice cuándo se restablece")
             page.screenshot(path=str(out / f"uso-panel-{theme}.png"))
             page.keyboard.press("Escape")
@@ -275,6 +276,97 @@ def main() -> int:
             page.keyboard.press("Escape")
             time.sleep(0.8)
             check(not dbg()["ceo"]["on"] and page.locator("[data-ceo-bar]").count() == 0, f"[{theme}] la segunda Esc lo levanta")
+
+            # 8. Interacciones: café, sentarse, regalar el café, saludar, la gata, lámparas, foco, baile y logros.
+            page.evaluate("() => localStorage.removeItem('hermes-oficina-hoy')")
+            walk({"kind": "prop", "id": "cafetera"})
+            check(dbg()["near"] == {"kind": "prop", "id": "cafetera"}, f"[{theme}] junto a la cafetera, E es «prepararte un café»")
+            page.keyboard.press("e")
+            time.sleep(1.0)
+            check(page.locator("[data-activity]").count() == 1 and "Preparando" in page.locator("[data-activity]").inner_text(), f"[{theme}] preparando: la píldora muestra el avance")
+            time.sleep(4.0)
+            d = dbg()
+            check(d["owner"]["carry"] == "coffee" and d["dayStats"]["coffee"] == 1, f"[{theme}] el café queda en la mano y cuenta en el día")
+            check("primer-cafe" in d["dayStats"]["unlocked"], f"[{theme}] se desbloquea «Primer café»")
+            walk({"kind": "prop", "id": "sofa#0"})
+            page.keyboard.press("e")
+            time.sleep(1.2)
+            d = dbg()
+            check(d["owner"]["activity"] == {"kind": "sit", "prop": "sofa#0"} and "con tu café" in page.locator("[data-activity]").inner_text(), f"[{theme}] te sientas en el sofá con el café")
+            page.screenshot(path=str(out / f"sentado-cafe-{theme}.png"))
+            page.keyboard.press("w")
+            time.sleep(0.5)
+            check(dbg()["owner"]["activity"] is None and dbg()["owner"]["walking"], f"[{theme}] caminar te levanta")
+            walk({"kind": "worker", "id": "sim-2"})
+            page.keyboard.press("e")
+            time.sleep(0.8)
+            d = dbg()
+            check("sim-2" in d["gifts"] and d["owner"]["carry"] is None and "regalo" in d["dayStats"]["unlocked"], f"[{theme}] le dejas tu café a un agente («Buen jefe»)")
+            page.keyboard.press("Escape")
+            time.sleep(0.4)
+            def clean():
+                # Nada abierto entre pasos (un E que cayó en un agente o en Recepción deja su panel).
+                for _ in range(2):
+                    page.keyboard.press("Escape")
+                    time.sleep(0.2)
+
+            clean()
+            # La gente camina: se llega y se presiona E enseguida (y se reintenta con otra persona).
+            # Primero la gente de los pisos de arriba: en el piso 1, alguien junto a un pod le cede el E al escritorio (a propósito).
+            people = sorted((n for n in dbg()["npcs"] if n["id"].startswith("amb")), key=lambda n: -n["floor"])
+            for amb in (people * 2)[:6]:
+                page.evaluate("(h) => window.__hermesOficinaWalkTo(h)", {"kind": "person", "id": amb["id"]})
+                time.sleep(0.15)
+                if dbg()["near"] and dbg()["near"].get("kind") == "person":
+                    page.keyboard.press("e")
+                    time.sleep(0.6)
+                    break
+                clean()
+                time.sleep(1.0)
+            bubble = page.locator("[data-bubble]")
+            text = bubble.inner_text()
+            check(dbg()["bubble"] is not None and text and bubble.evaluate("e => getComputedStyle(e).opacity") == "1", f"[{theme}] saludar: te responde con un dato real («{text}»)")
+            page.screenshot(path=str(out / f"saludo-{theme}.png"))
+            pets = 0
+            # La gata pasea: junto a un escritorio el E es del escritorio (a propósito); se espera a que se mueva.
+            for _ in range(10):
+                clean()
+                page.evaluate("() => window.__hermesOficinaWalkTo({ kind: 'cat', id: 'gata' })")
+                time.sleep(0.15)
+                if (dbg()["near"] or {}).get("kind") != "cat":
+                    time.sleep(1.5)
+                    continue
+                page.keyboard.press("e")
+                time.sleep(0.6)
+                pets = (dbg()["cat"] or {}).get("pets", 0)
+                if pets:
+                    break
+            check(pets >= 1, f"[{theme}] acaricias a la gata ({pets})")
+            clean()
+            walk({"kind": "prop", "id": "lampara-0"})
+            page.keyboard.press("e")
+            time.sleep(0.3)
+            check(len(dbg()["lampsOff"]) == 1, f"[{theme}] E apaga la lámpara")
+            page.keyboard.press("e")
+            time.sleep(0.3)
+            check(dbg()["lampsOff"] == [], f"[{theme}] y la vuelve a prender")
+            clean()
+            walk({"kind": "prop", "id": "foco-0"})
+            page.keyboard.press("e")
+            time.sleep(0.5)
+            check(page.locator("[data-focus]").count() == 1, f"[{theme}] la cabina de foco prende 25 minutos")
+            page.keyboard.press("e")
+            time.sleep(0.5)
+            check(page.locator("[data-focus]").count() == 0, f"[{theme}] y E la termina")
+            clean()
+            page.keyboard.press("f")
+            time.sleep(0.6)
+            check(dbg()["owner"]["activity"] == {"kind": "dance", "prop": None}, f"[{theme}] F baila")
+            page.locator("[data-day-stats]").click()
+            time.sleep(0.4)
+            check(page.locator("[data-achievement][data-got='true']").count() == len(dbg()["dayStats"]["unlocked"]) >= 3, f"[{theme}] la lista de logros marca los ganados ({len(dbg()['dayStats']['unlocked'])})")
+            page.screenshot(path=str(out / f"logros-{theme}.png"))
+            page.locator("[data-day-stats]").click()
 
             # 6. Capas: pantallas fuera y de vuelta.
             page.get_by_role("button", name="Capas").click()

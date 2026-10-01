@@ -23,6 +23,13 @@ export class OfficeCat {
   private restUntil = 0;
   private phase = 0;
   private sitting = false;
+  /** Acariciada: se queda sentada mirándote, suelta corazones y después te sigue un rato. */
+  private pettedUntil = 0;
+  private followUntil = 0;
+  private hearts: { sprite: THREE.Sprite; born: number }[] = [];
+  private heartMat: THREE.SpriteMaterial | null = null;
+  /** Veces que la acariciaron en esta visita (QA). */
+  pets = 0;
 
   constructor(private readonly rng: () => number) {
     const fur = toon("#e89a4f");
@@ -73,16 +80,64 @@ export class OfficeCat {
     noOutline(this.root);
   }
 
+  /** El dueño la acaricia: se sienta, lo mira, ronronea (el sonido lo pone el mundo) y lo sigue ~25 s. */
+  pet(owner: THREE.Vector3, t: number) {
+    this.path = [];
+    this.pathI = 0;
+    this.sitting = true;
+    this.pettedUntil = t + 4;
+    this.restUntil = t + 4;
+    this.followUntil = t + 28;
+    this.facing = Math.atan2(owner.x - this.pos.x, owner.z - this.pos.z);
+    this.pets++;
+    if (!this.heartMat) {
+      const c = document.createElement("canvas");
+      c.width = c.height = 64;
+      const g = c.getContext("2d")!;
+      g.font = "48px sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillStyle = "#ef476f";
+      g.fillText("♥", 32, 36);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.heartMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    }
+    for (let i = 0; i < 3; i++) {
+      const sprite = new THREE.Sprite(this.heartMat);
+      sprite.scale.setScalar(0.16);
+      this.root.parent?.add(sprite);
+      this.hearts.push({ sprite, born: t + i * 0.45 });
+    }
+  }
+
+  get petted(): boolean {
+    return this.pettedUntil > 0;
+  }
+
   place(p: NavPoint) {
     this.pos.set(p.x, p.y, p.z);
     this.root.position.copy(this.pos);
   }
 
   update(dt: number, t: number, nav: NavGrid, bounds: { minX: number; maxX: number; minZ: number; maxZ: number }, owner: THREE.Vector3) {
+    // Corazones que suben y se desvanecen.
+    for (const h of this.hearts) {
+      const age = t - h.born;
+      h.sprite.visible = age >= 0;
+      h.sprite.position.set(this.pos.x + Math.sin(age * 3 + h.born) * 0.08, this.pos.y + 0.45 + Math.max(0, age) * 0.35, this.pos.z);
+      (h.sprite.material as THREE.SpriteMaterial).opacity = 1;
+    }
+    this.hearts = this.hearts.filter((h) => {
+      if (t - h.born < 1.6) return true;
+      h.sprite.removeFromParent();
+      return false;
+    });
     const walking = this.pathI < this.path.length;
     if (!walking && t >= this.restUntil) {
-      // Un punto al azar del piso 1; de vez en cuando, cerca del dueño (curiosa).
-      const near = this.rng() < 0.3 && Math.abs(owner.y - this.pos.y) < 1;
+      // Un punto al azar del piso 1; de vez en cuando, cerca del dueño (curiosa). Recién acariciada, siempre.
+      const following = t < this.followUntil;
+      const near = (following || this.rng() < 0.3) && Math.abs(owner.y - this.pos.y) < 1;
       const x = near ? owner.x + (this.rng() - 0.5) * 3 : bounds.minX + 2 + this.rng() * (bounds.maxX - bounds.minX - 4);
       const z = near ? owner.z + (this.rng() - 0.5) * 3 : bounds.minZ + 2 + this.rng() * (bounds.maxZ - bounds.minZ - 4);
       const goal = nav.snap(0, x, z, 1.5);
@@ -104,8 +159,8 @@ export class OfficeCat {
         this.pos.z = target.z;
         this.pathI++;
         if (this.pathI >= this.path.length) {
-          // Llegó: se sienta entre 6 y 16 s.
-          this.restUntil = t + 6 + this.rng() * 10;
+          // Llegó: se sienta entre 6 y 16 s (siguiéndote, apenas un momento).
+          this.restUntil = t + (t < this.followUntil ? 1.2 : 6 + this.rng() * 10);
           this.sitting = true;
         }
       } else {
@@ -123,13 +178,17 @@ export class OfficeCat {
     this.tail.rotation.z = Math.sin(t * (moving ? 6 : 1.6)) * 0.35;
     this.body.rotation.x = this.sitting ? -0.35 : 0;
     this.body.position.y = this.sitting ? 0.05 : 0;
-    this.head.rotation.y = this.sitting ? Math.sin(t * 0.5) * 0.6 : 0;
+    // Acariciada: la cabeza se inclina hacia la mano en vez de mirar alrededor.
+    this.head.rotation.y = t < this.pettedUntil ? Math.sin(t * 2) * 0.2 : this.sitting ? Math.sin(t * 0.5) * 0.6 : 0;
     this.head.rotation.x = this.sitting ? 0.25 : 0;
     this.root.position.copy(this.pos);
     this.root.rotation.y = this.facing;
   }
 
   dispose() {
+    for (const h of this.hearts) h.sprite.removeFromParent();
+    this.heartMat?.map?.dispose();
+    this.heartMat?.dispose();
     this.root.removeFromParent();
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;

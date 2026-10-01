@@ -22,7 +22,7 @@ export const PERSON_SEAT_OFFSET = 0.32;
  * sentado, con una taza, con la raqueta, con las manos en un juego, señalando,
  * mirando arriba, lanzando un dardo o mirando por la ventana.
  */
-export type PersonPose = "stand" | "sit" | "cup" | "paddle" | "hands" | "point" | "lookup" | "throw" | "window";
+export type PersonPose = "stand" | "sit" | "cup" | "sitcup" | "paddle" | "hands" | "point" | "lookup" | "throw" | "window" | "dance" | "eat";
 
 export class Person {
   readonly root = new THREE.Group();
@@ -199,9 +199,9 @@ export class Person {
       });
       this.prop = null;
     }
-    if (pose === "cup" || pose === "paddle") {
+    if (pose === "cup" || pose === "sitcup" || pose === "paddle") {
       const g = new THREE.Group();
-      if (pose === "cup") {
+      if (pose === "cup" || pose === "sitcup") {
         g.add(mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.11, 10), toon("#f4f1ea"), 0, -0.43, 0.07, false));
         g.add(mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.01, 10), toon("#6f4e37"), 0, -0.375, 0.07, false));
       } else {
@@ -350,6 +350,7 @@ export class Person {
     // Rebote al caminar y respiración en reposo.
     this.body.position.y = moving && !airborne ? Math.abs(Math.sin(this.walkPhase)) * 0.06 : Math.sin(t * 2) * 0.008;
     if (!moving && this.pose === "paddle") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 5)) * 0.04;
+    if (!moving && this.pose === "dance") this.body.position.y = Math.abs(Math.sin((t + this.phase) * 7)) * 0.08;
     this.head.rotation.z = moving ? Math.sin(this.walkPhase) * 0.04 : 0;
   }
 
@@ -364,6 +365,35 @@ export class Person {
         armR.rotation.set(-0.55, 0, 0.12);
         head.rotation.y = Math.sin(t * 0.4) * 0.25;
         break;
+      case "sitcup": {
+        // Sentado con la taza: piernas de "sit" y sorbos de "cup".
+        legL.rotation.x = legR.rotation.x = -1.35;
+        const k = t % 6;
+        const sip = k < 1.4 ? ease(Math.sin((k / 1.4) * Math.PI)) : 0;
+        armR.rotation.set(-1.0 - sip * 1.2, 0, 0.18 - sip * 0.1);
+        armL.rotation.set(-0.55, 0, -0.12);
+        head.rotation.x = sip * 0.2;
+        break;
+      }
+      case "dance": {
+        // Baile propio: brazos que suben por turnos y rebote con las piernas.
+        const b = t * 7;
+        armL.rotation.set(0, 0, -1.3 - Math.sin(b) * 1.1);
+        armR.rotation.set(0, 0, 1.3 - Math.sin(b + Math.PI) * 1.1);
+        legL.rotation.x = Math.max(0, Math.sin(b)) * 0.45;
+        legR.rotation.x = Math.max(0, Math.sin(b + Math.PI)) * 0.45;
+        head.rotation.z = Math.sin(b) * 0.15;
+        this.body.position.y = Math.abs(Math.sin(b)) * 0.08;
+        break;
+      }
+      case "eat": {
+        // Un snack: la mano a la boca, mordisco a mordisco.
+        const k = (t * 1.6) % 1;
+        armR.rotation.set(-1.9 + Math.sin(k * Math.PI) * 0.5, 0, 0.35);
+        armL.rotation.set(-0.5, 0, -0.1);
+        head.rotation.x = Math.sin(k * Math.PI * 2) * 0.06;
+        break;
+      }
       case "cup": {
         // Taza a la altura del pecho y, cada tanto, un sorbo.
         const k = t % 7;

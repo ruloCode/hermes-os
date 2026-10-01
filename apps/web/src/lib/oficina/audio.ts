@@ -402,6 +402,62 @@ export class OfficeAudio {
     }
   }
 
+  /** Lo que hace el dueño: café, agua, snack, sorbo, la gata, una lámpara, sentarse. */
+  fx(kind: "brew" | "pour" | "crunch" | "sip" | "purr" | "click" | "sit") {
+    if (!this.on || !this.ctx) return;
+    this.events++;
+    const t = this.ctx.currentTime;
+    const d = this.duck!;
+    switch (kind) {
+      case "brew":
+        // Molino (golpecitos rápidos) y después el vapor.
+        for (let k = 0; k < 22; k++) this.burst(d, { at: t + k * 0.045, dur: 0.05, freq: 850 + Math.random() * 300, gain: 0.14, q: 4 });
+        this.burst(d, { at: t + 1.3, dur: 2.2, freq: 4200, type: "highpass", gain: 0.1 });
+        break;
+      case "pour":
+        this.burst(d, { dur: 1.4, freq: 1400, gain: 0.12, q: 3 });
+        this.tone(320, { dur: 1.4, gain: 0.05, to: 620, type: "sine" });
+        break;
+      case "crunch":
+        for (let k = 0; k < 4; k++) this.burst(d, { at: t + k * 0.42, dur: 0.12, freq: 2200, gain: 0.2, q: 0.7 });
+        break;
+      case "sip":
+        this.burst(d, { dur: 0.35, freq: 700, type: "lowpass", gain: 0.12 });
+        break;
+      case "purr": {
+        // Ronroneo: ruido grave que late a ~24 Hz, dos segundos.
+        const ctx = this.ctx;
+        const src = ctx.createBufferSource();
+        src.buffer = this.brown;
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 180;
+        const g = ctx.createGain();
+        g.gain.value = 0;
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = 24;
+        const depth = ctx.createGain();
+        depth.gain.value = 0.25;
+        lfo.connect(depth).connect(g.gain);
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0, t);
+        env.gain.linearRampToValueAtTime(1, t + 0.3);
+        env.gain.linearRampToValueAtTime(0, t + 2.4);
+        src.connect(lp).connect(g).connect(env).connect(d);
+        src.start(t, Math.random(), 2.5);
+        lfo.start(t);
+        lfo.stop(t + 2.5);
+        break;
+      }
+      case "click":
+        this.tone(1800, { dur: 0.04, gain: 0.15, type: "square" });
+        break;
+      case "sit":
+        this.burst(d, { dur: 0.25, freq: 260, type: "lowpass", gain: 0.2 });
+        break;
+    }
+  }
+
   /** Un agente te necesita (dos notas que preguntan) o alguien terminó (tres que celebran). */
   chime(kind: "needs" | "done") {
     if (!this.on || !this.ctx) return;

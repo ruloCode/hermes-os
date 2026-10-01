@@ -128,6 +128,29 @@ export interface RoomLayers {
 
 export const ALL_LAYERS: RoomLayers = { data: true, ceo: true, zones: true };
 
+/**
+ * Algo de la sala que el dueño usa con "E" (capa "Interacciones"): sentarse,
+ * prepararse un café, un vaso de agua o un snack, la cabina telefónica, una
+ * cabina de foco o una lámpara. Solo datos: el mundo decide qué pasa.
+ */
+export interface RoomProp {
+  id: string;
+  kind: "seat" | "coffee" | "water" | "snack" | "phone" | "focus" | "lamp";
+  floor: number;
+  /** Donde se para el dueño para usarlo (y desde donde lo alcanza "E"). */
+  at: { x: number; z: number };
+  /** Hacia dónde mira mientras lo usa. */
+  facing: number;
+  /** Asiento (coordenadas del mundo en x/z; y = alto del cojín sobre su piso). */
+  seat?: { x: number; y: number; z: number };
+  /** El lugar de la gente que comparte: al sentarse, quien esté ahí se levanta. */
+  poi?: string;
+  /** Lámpara: índice en `lamps`. */
+  lamp?: number;
+  /** "el sofá", "la cafetera"… para el aviso de "E". */
+  name: string;
+}
+
 /** La pantalla de la arcade: un canvas que pinta el juego (o su espera, con el récord real). */
 export interface ArcadeScreen {
   canvas: HTMLCanvasElement;
@@ -176,6 +199,8 @@ export interface Room {
   /** Pantalla de la sala de juntas (piso 2): la próxima junta del calendario. null sin la capa de zonas. */
   meetingSpot: BoardSpot | null;
   layers: RoomLayers;
+  /** Lo que se usa con "E" (sentarse, café, agua, snack, cabinas, lámparas). */
+  props: RoomProp[];
   /** La cafetera del café (mundo): de ahí sale su sonido. */
   espresso: { x: number; y: number; z: number };
   /** Minijuegos de la azotea: dónde se juega cada uno. */
@@ -1818,6 +1843,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
       col(axis === "x" ? { minX: from, maxX: to, minZ: at - 0.05, maxZ: at + 0.05, top: GH + 0.2 } : { minX: at - 0.05, maxX: at + 0.05, minZ: from, maxZ: to, top: GH + 0.2 });
   };
   on(0);
+  let ceoLamp = -1;
   const ceoB = { minX: cx + 12.6, maxX: maxX - WALL_T / 2, minZ: minZ + 15.6, maxZ: minZ + 22 };
   const ceo = !layers.ceo ? null : ((): CeoOffice => {
     const { minX: X0, maxX: X1, minZ: Z0, maxZ: Z1 } = ceoB;
@@ -1910,6 +1936,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     col({ minX: X1 - 0.7, maxX: X1 - 0.2, minZ: Z0 + 0.2, maxZ: Z0 + 0.7, top: 1.9 });
     const lampLight = new THREE.PointLight("#ffc98a", 1, 7, 1.6);
     lampLight.position.set(X1 - 0.45, 1.75, Z0 + 0.45);
+    ceoLamp = lamps.length;
     light(lampLight);
     {
       const tex = artCanvas([p.accent, "#2a9d8f", "#e9c46a", "#264653"], 11);
@@ -1947,6 +1974,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
   // Muebles estáticos: se funden por material (pocos draw calls; el contorno
   // dibuja todo dos veces).
   const zonePois: AmbientPoi[] = [];
+  const focusAt: { x: number; z: number }[] = [];
   let meetingSpot: BoardSpot | null = null;
   if (layers.zones) {
     const fused = (n: number, build: (t: THREE.Group) => void) => {
@@ -2019,6 +2047,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     const boothGlass2 = new THREE.MeshBasicMaterial({ color: "#d6f1ff", transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
     disposables.push(boothGlass2);
     for (const fx of [maxX - 5.2, maxX - 3.6]) {
+      focusAt.push({ x: fx, z: minZ + 20.65 });
       const fb = phoneBooth(boothGlass2);
       fb.position.set(fx, 0, minZ + 19.5);
       g.add(fb);
@@ -2120,7 +2149,9 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     [maxX - 7.4, lz + 2.4, "#ffd6a5"],
     [kitchen.maxX + 0.6, minZ + 8, "#ffe8b3"],
   ];
+  const lampProps: RoomProp[] = [];
   for (const [x, z, shade] of lampSpots) {
+    lampProps.push({ id: `lampara-${lampProps.length}`, kind: "lamp", floor: 1, at: { x: x + 0.75, z }, facing: -Math.PI / 2, lamp: lamps.length, name: "la lámpara" });
     const l = floorLamp(shade);
     l.group.position.set(x, 0, z);
     g.add(l.group);
@@ -2221,6 +2252,40 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     rooftop: { floor: 2, x: nook.x - 2.6, z: nook.z + 0.8, facing: -Math.PI / 4, talk: { x: nook.x - 3.66, z: nook.z + 1.86 } },
   };
 
+  // ── Lo que se usa con "E" ─────────────────────────────────────────────
+  const SEAT_NAMES: [RegExp, string][] = [
+    [/^sofa/, "el sofá"],
+    [/^sillon-biblioteca/, "el sillón de la biblioteca"],
+    [/^sillon/, "el sillón"],
+    [/^banqueta/, "la banqueta"],
+    [/^azotea-puf|^puf/, "el puf"],
+    [/^silla-playa/, "la silla de playa"],
+    [/^junta/, "la mesa de juntas"],
+  ];
+  const props: RoomProp[] = [];
+  for (const poi of pois) {
+    poi.slots.forEach((sl, i) => {
+      if (!sl.seat) return;
+      const name = SEAT_NAMES.find(([re]) => re.test(poi.id))?.[1] ?? "el asiento";
+      props.push({ id: `${poi.id}#${i}`, kind: "seat", floor: poi.floor, at: { x: sl.x, z: sl.z }, facing: sl.facing, seat: { ...sl.seat }, poi: poi.id, name });
+    });
+  }
+  if (ceo) {
+    // El sofá de la oficina de CEO (sin lugar de la gente: es privada).
+    const sx = ceoB.minX + 2.0;
+    const sz = ceoB.maxZ - 0.8;
+    props.push({ id: "sofa-ceo", kind: "seat", floor: 0, at: { x: sx, z: sz - 0.95 }, facing: Math.PI, seat: { x: sx, y: 0.5, z: sz - 0.05 }, name: "tu sofá" });
+    if (ceoLamp >= 0) props.push({ id: "lampara-ceo", kind: "lamp", floor: 0, at: { x: ceoB.maxX - 1.1, z: ceoB.minZ + 0.6 }, facing: Math.PI / 2, lamp: ceoLamp, name: "tu lámpara" });
+  }
+  props.push(
+    { id: "cafetera", kind: "coffee", floor: 1, at: { x: kx + 1.0, z: minZ + 1.7 }, facing: W_, name: "la cafetera" },
+    { id: "agua", kind: "water", floor: 1, at: { x: kx + 0.85, z: minZ + 8.2 }, facing: W_, name: "el dispensador de agua" },
+    { id: "snacks", kind: "snack", floor: 1, at: { x: minX + 1.6, z: minZ + 9.9 }, facing: W_, name: "la máquina de snacks" },
+    { id: "cabina", kind: "phone", floor: 1, at: { x: boothAt.x - 0.2, z: boothAt.z + 1.15 }, facing: N_, name: "la cabina telefónica" },
+    ...focusAt.map((f, i): RoomProp => ({ id: `foco-${i}`, kind: "focus", floor: 1, at: f, facing: N_, name: "la cabina de foco" })),
+    ...lampProps,
+  );
+
   // Minijuegos de la azotea: dónde se para el dueño y qué esconder mientras juega.
   const hideIn = (root: THREE.Object3D) => {
     const out: THREE.Object3D[] = [];
@@ -2295,6 +2360,7 @@ export function buildRoom(layout: OfficeLayout, p: OfficePalette, ownerName: str
     controlSpot,
     spendSpot,
     gameSpots,
+    props,
     espresso: (() => {
       const v = machine.getWorldPosition(new THREE.Vector3());
       return { x: v.x, y: v.y, z: v.z };

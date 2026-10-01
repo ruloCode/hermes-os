@@ -10,7 +10,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { OFFICE_NPCS, type OfficeBoards, type OfficeLayout, type OfficeNpcRole, type OfficeSpend, type OfficeWorker, type PlanUsage, type QueueState, type UpcomingCalendar } from "@hermes/shared";
 import { readOfficePalette } from "@/lib/oficina/palette";
-import { OfficeWorld, type OfficeHit, type OfficeMode, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
+import { OfficeWorld, type ActivityHud, type OfficeHit, type OfficeMode, type OwnerStat, type PodAnchor, type ScreenAnchor } from "@/lib/oficina/office-world";
 import type { GameEvent, GameHud } from "@/lib/oficina/games";
 import type { OfficeLayers } from "./OficinaHud";
 import type { OfficeAudio } from "@/lib/oficina/audio";
@@ -73,6 +73,11 @@ interface Props {
   layers?: OfficeLayers;
   /** Sonido de ambiente (vive en la página: sobrevive a los cambios de tema). */
   audio?: OfficeAudio | null;
+  /** Interacciones del dueño: lo que hace, sus contadores, las cabinas y lo que dice la gente. */
+  onActivity?: (hud: ActivityHud | null) => void;
+  onStat?: (stat: OwnerStat, detail?: string) => void;
+  onPropAction?: (kind: "phone" | "focus") => void;
+  chatter?: () => string;
 }
 
 const NPC_ROLES = Object.keys(OFFICE_NPCS) as OfficeNpcRole[];
@@ -88,7 +93,7 @@ function place(el: HTMLElement | null, a: ScreenAnchor | null, anchor = "transla
 }
 
 export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function OficinaScene(
-  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar, layers, audio },
+  { layout, workers, seats, selected, podInfo, ownerName, look, feed, board, nearLabel, nearKey, inputEnabled, onClick, onNear, onMode, onFloor, voices, speakingProbe, ambient, boards, nicks, whiteboard, queue, spend, plan, projectName, onGame, onGameEvent, onCeo, calendar, layers, audio, onActivity, onStat, onPropAction, chatter },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -97,8 +102,10 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
   const headRef = useRef<HTMLDivElement>(null);
   const nearRef = useRef<HTMLDivElement>(null);
   const npcRefs = useRef(new Map<OfficeNpcRole, HTMLDivElement>());
-  const cb = useRef({ onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo });
-  cb.current = { onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo };
+  const cb = useRef({ onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo, onActivity, onStat, onPropAction, chatter });
+  cb.current = { onClick, onNear, onMode, onFloor, onGame, onGameEvent, onCeo, onActivity, onStat, onPropAction, chatter };
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const bubbleText = useRef("");
   const initial = useRef({ ownerName, look });
 
   useImperativeHandle(ref, () => ({ world: () => worldRef.current }), []);
@@ -125,6 +132,19 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
         onGame: (hud) => cb.current.onGame?.(hud),
         onGameEvent: (ev, at) => cb.current.onGameEvent?.(ev, at),
         onCeo: (on) => cb.current.onCeo?.(on),
+        onActivity: (hud) => cb.current.onActivity?.(hud),
+        onStat: (st, detail) => cb.current.onStat?.(st, detail),
+        onPropAction: (k) => cb.current.onPropAction?.(k),
+        // El globo se mueve por ref cada frame (sin re-render), como las etiquetas.
+        onBubble: (a, text) => {
+          const el = bubbleRef.current;
+          if (!el) return;
+          if (text !== bubbleText.current) {
+            bubbleText.current = text;
+            el.textContent = text;
+          }
+          place(el, a);
+        },
         onNpcs: (anchors) => {
           for (const role of NPC_ROLES) place(npcRefs.current.get(role) ?? null, anchors.find((a) => a.role === role) ?? null);
         },
@@ -132,6 +152,7 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
       initial.current,
     );
     worldRef.current = world;
+    world.setChatter(() => cb.current.chatter?.() ?? "¡Hola!");
     world.start();
     return () => {
       world.dispose();
@@ -208,7 +229,8 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
     if (!layers) return;
     worldRef.current?.setLayers({ data: layers.data, ceo: layers.ceo, zones: layers.zones });
     worldRef.current?.setGamesEnabled(layers.games);
-  }, [layers?.data, layers?.ceo, layers?.zones, layers?.games]);
+    worldRef.current?.setInteractionsEnabled(layers.interactions);
+  }, [layers?.data, layers?.ceo, layers?.zones, layers?.games, layers?.interactions]);
 
   return (
     <div ref={wrapRef} className="absolute inset-0 overflow-hidden">
@@ -245,6 +267,14 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
             {OFFICE_NPCS[role].name}
           </div>
         ))}
+
+        {/* Lo que te responde alguien a quien saludaste (datos reales: lo arma la página). */}
+        <div
+          ref={bubbleRef}
+          data-bubble
+          className="absolute top-0 left-0 max-w-xs rounded-2xl border border-line bg-panel/95 px-3 py-2 text-sm text-text opacity-0 shadow-lg"
+          style={{ willChange: "transform" }}
+        />
 
         {/* Nombre del dueño sobre su cabeza. */}
         <div

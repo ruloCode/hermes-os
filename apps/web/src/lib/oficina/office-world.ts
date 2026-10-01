@@ -54,8 +54,8 @@ import { CeoAgenda, CeoInbox, MeetingScreen } from "./ceo-screens";
 import type { AudioSource, OfficeAudio } from "./audio";
 import { createGame, paintArcadeIdle, type GameEvent, type GameHud, type MiniGame } from "./games";
 import { PlayerController, isTyping, type Collider } from "./player";
-import { ALL_LAYERS, buildRoom, type BoardStat, type FeedLine, type Room, type RoomLayers, FLOOR_Y, floorAt } from "./room";
-import { noOutline, setToonFont, toon } from "./toon";
+import { ALL_LAYERS, buildRoom, type BoardStat, type FeedLine, type Room, type RoomLayers, type RoomProp, FLOOR_Y, floorAt } from "./room";
+import { mesh, noOutline, setToonFont, toon } from "./toon";
 import type { OwnerLook } from "./look";
 import type { OfficePalette } from "./palette";
 
@@ -102,7 +102,33 @@ export type OfficeHit =
   | { kind: "spend"; id: "wall" }
   | { kind: "control"; id: "wall" }
   | { kind: "game"; id: GameId }
-  | { kind: "ceo"; id: "chair" };
+  | { kind: "ceo"; id: "chair" }
+  | { kind: "prop"; id: string }
+  | { kind: "cat"; id: "gata" }
+  | { kind: "person"; id: string };
+
+/** Lo que el dueño está haciendo (capa "Interacciones"). */
+export type OwnerActivity =
+  | { kind: "sit"; prop: RoomProp }
+  | { kind: "make"; what: "coffee" | "water" | "snack"; prop: RoomProp; t0: number; dur: number }
+  | { kind: "eat"; until: number }
+  | { kind: "dance"; until: number };
+
+/** Lo que el HUD muestra de esa actividad. */
+export interface ActivityHud {
+  label: string;
+  hint?: string;
+  /** 0..1 mientras prepara algo. */
+  progress?: number;
+}
+
+/** Contador del día (los muestra el HUD: son las acciones reales de esta visita y las anteriores de hoy). */
+export type OwnerStat = "coffee" | "water" | "snack" | "pet" | "greet" | "sit" | "dance" | "gift";
+
+/** Cuánto dura cada cosa (s). */
+const MAKE_SECONDS = { coffee: 4, water: 2.2, snack: 1.5 } as const;
+const CARRY_SECONDS = { coffee: 150, water: 60 } as const;
+const PROP_REACH = 1.1;
 export type OfficeMode = "explore" | "aerial";
 
 export interface ScreenAnchor {
@@ -127,6 +153,14 @@ export interface OfficeWorldHooks {
   onFloor?: (floor: number) => void;
   /** Minijuego: su HUD cuando cambia (null = se salió). */
   onGame?: (hud: GameHud | null) => void;
+  /** Lo que hace el dueño (sentado, preparando un café, con la taza en la mano…); null = nada. */
+  onActivity?: (hud: ActivityHud | null) => void;
+  /** Una acción real del dueño (para el contador del día). */
+  onStat?: (stat: OwnerStat, detail?: string) => void;
+  /** Cabina telefónica o de foco: lo resuelve la página (llamada, temporizador). */
+  onPropAction?: (kind: "phone" | "focus") => void;
+  /** Cada frame mientras alguien te habla: dónde está su globo (null = no hay). */
+  onBubble?: (anchor: ScreenAnchor | null, text: string) => void;
   /** Modo CEO: el dueño se sentó (true) o se levantó (false). */
   onCeo?: (on: boolean) => void;
   /** Algo sonó en un minijuego (golpe, punto…) y dónde. */
@@ -146,6 +180,8 @@ interface Seated {
   laptop: Laptop;
   /** Monitor grande del escritorio con su stream (las líneas de /office/events). */
   monitor: DeskMonitor | null;
+  /** El café que le dejó el dueño (se va con el agente). */
+  cup?: THREE.Group;
   deskId: string | null;
   leaving: boolean;
 }
@@ -363,7 +399,7 @@ export class OfficeWorld {
       this.frameFloor();
     } else {
       this.controls.enabled = false;
-      this.player.setEnabled(true);
+      this.syncWalk();
       // La cámara vuelve detrás del dueño desde donde esté (se desliza).
       this.player.camYaw = Math.atan2(this.camera.position.x - this.player.pos.x, this.camera.position.z - this.player.pos.z);
     }
@@ -373,7 +409,7 @@ export class OfficeWorld {
   /** Mientras hay un diálogo abierto el dueño no camina (las teclas son del diálogo). */
   setInputEnabled(on: boolean) {
     this.inputOn = on;
-    this.player.setEnabled(on && this.mode === "explore" && !this.game && !this.ceoOn);
+    this.syncWalk();
   }
   private inputOn = true;
 
@@ -382,6 +418,7 @@ export class OfficeWorld {
   /** Entra a un minijuego: el dueño se para en su puesto y la cámara y la entrada pasan al juego. */
   startGame(id: GameId): boolean {
     if (!this.gamesOn) return false;
+    this.standUp();
     const spot = this.room?.gameSpots[id];
     if (!spot || !this.room) return false;
     this.exitGame();
@@ -419,7 +456,7 @@ export class OfficeWorld {
     this.crowd.reservePoi(null);
     this.gameMoved = [];
     this.gameSynth = null;
-    this.player.setEnabled(this.inputOn && this.mode === "explore");
+    this.syncWalk();
     this.hooks.onGame?.(null);
   }
 
@@ -430,6 +467,7 @@ export class OfficeWorld {
     const c = this.room?.ceo;
     if (!c) return false;
     this.exitGame();
+    this.standUp();
     if (this.mode !== "explore") this.setMode("explore");
     this.ceoOn = true;
     this.ceoPick = null;
@@ -449,7 +487,7 @@ export class OfficeWorld {
     this.owner.setPose("stand");
     const c = this.room?.ceo;
     if (c) this.player.spawn(c.chair.reach.x, c.chair.reach.z, c.chair.facing + Math.PI, 0);
-    this.player.setEnabled(this.inputOn && this.mode === "explore");
+    this.syncWalk();
     this.setSelected(null);
     this.hooks.onCeo?.(false);
   }
@@ -591,6 +629,211 @@ export class OfficeWorld {
   }
   private lastSeats: ReadonlyMap<string, string> = new Map();
   private gamesOn = true;
+  /** Capa "Interacciones": sentarse, café, gata, saludar… */
+  private interactOn = true;
+  private activity: OwnerActivity | null = null;
+  private carry: { what: "coffee" | "water"; until: number } | null = null;
+  private activityKey = "";
+  private activityAt = 0;
+  private bubble: { id: string; text: string; until: number } | null = null;
+  /** Lo que dice la gente cuando la saludas: lo arma la página con datos reales. */
+  private chatter: (() => string) | null = null;
+  private lampOff = new Set<number>();
+  private readonly bubbleAt = new THREE.Vector3();
+
+  setInteractionsEnabled(on: boolean) {
+    this.interactOn = on;
+    if (!on) {
+      this.standUp();
+      this.activity = null;
+      this.carry = null;
+    }
+  }
+
+  setChatter(fn: (() => string) | null) {
+    this.chatter = fn;
+  }
+
+  /** ¿Puede caminar el dueño? (nada de diálogo, juego, silla de CEO ni actividad que lo ocupe). */
+  private syncWalk() {
+    const busy = this.activity && this.activity.kind !== "dance";
+    this.player.setEnabled(this.inputOn && this.mode === "explore" && !this.game && !this.ceoOn && !busy);
+  }
+
+  /** Qué es un objeto de la sala (para el aviso de "E" en la página) y si su lámpara está apagada. */
+  propInfo(id: string): { kind: RoomProp["kind"]; name: string; off?: boolean } | null {
+    const pr = this.room?.props.find((x) => x.id === id);
+    if (!pr) return null;
+    return { kind: pr.kind, name: pr.name, off: pr.lamp !== undefined ? this.lampOff.has(pr.lamp) : undefined };
+  }
+
+  get ownerBusy(): boolean {
+    return !!this.activity && this.activity.kind !== "dance";
+  }
+
+  get sitting(): boolean {
+    return this.activity?.kind === "sit";
+  }
+
+  /** Usar algo con "E": un asiento, la cafetera, el agua, los snacks, una cabina, una lámpara, la gata o alguien. */
+  use(hit: OfficeHit): boolean {
+    if (!this.interactOn || this.game || this.ceoOn) return false;
+    const t = this.t;
+    if (hit.kind === "cat") {
+      const cat = this.crowd.catNow;
+      if (!cat) return false;
+      cat.pet(this.player.pos, t);
+      this.owner.wave();
+      this.audio?.fx("purr");
+      this.hooks.onStat?.("pet");
+      return true;
+    }
+    if (hit.kind === "person") {
+      if (!this.crowd.greet(hit.id)) return false;
+      this.owner.wave();
+      this.bubble = { id: hit.id, text: this.chatter?.() ?? "¡Hola!", until: t + 6 };
+      this.hooks.onStat?.("greet");
+      return true;
+    }
+    if (hit.kind !== "prop") return false;
+    const prop = this.room?.props.find((x) => x.id === hit.id);
+    if (!prop) return false;
+    switch (prop.kind) {
+      case "seat":
+        this.sitOn(prop);
+        return true;
+      case "coffee":
+      case "water":
+      case "snack": {
+        const what = prop.kind;
+        this.player.spawn(prop.at.x, prop.at.z, prop.facing, FLOOR_Y[prop.floor]);
+        this.activity = { kind: "make", what, prop, t0: t, dur: MAKE_SECONDS[what] };
+        this.audio?.fx(what === "coffee" ? "brew" : what === "water" ? "pour" : "crunch");
+        this.syncWalk();
+        return true;
+      }
+      case "lamp":
+        if (prop.lamp === undefined) return false;
+        if (this.lampOff.has(prop.lamp)) this.lampOff.delete(prop.lamp);
+        else this.lampOff.add(prop.lamp);
+        this.applyFloorLamps();
+        this.audio?.fx("click");
+        return true;
+      case "phone":
+      case "focus":
+        this.owner.wave();
+        this.hooks.onPropAction?.(prop.kind);
+        return true;
+    }
+  }
+
+  private sitOn(prop: RoomProp) {
+    if (!prop.seat) return;
+    this.player.spawn(prop.at.x, prop.at.z, prop.facing, FLOOR_Y[prop.floor]);
+    // Quien estaba sentado ahí se levanta y busca otro lugar (y nadie lo toma mientras estés).
+    if (prop.poi) this.crowd.reservePoi(prop.poi);
+    this.activity = { kind: "sit", prop };
+    this.audio?.fx("sit");
+    this.hooks.onStat?.("sit", prop.id);
+    this.syncWalk();
+  }
+
+  /** Levantarse (o dejar lo que está haciendo). */
+  standUp() {
+    const a = this.activity;
+    if (!a) return;
+    if (a.kind === "sit" && a.prop.poi) this.crowd.reservePoi(null);
+    this.activity = null;
+    this.syncWalk();
+  }
+
+  /**
+   * Con el café en la mano, hablarle a un agente se lo deja en el escritorio:
+   * la taza queda junto a su laptop mientras siga ahí (decorado, no dato).
+   */
+  private giftCup(workerId: string): boolean {
+    if (this.carry?.what !== "coffee") return false;
+    const s = this.seated.get(workerId);
+    const view = s?.deskId ? this.desks.get(s.deskId) : undefined;
+    if (!s || !view || s.leaving || s.cup) return false;
+    const cup = new THREE.Group();
+    cup.add(mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.11, 10), toon("#f4f1ea"), 0, 0.055, 0, false));
+    cup.add(mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.01, 10), toon("#6f4e37"), 0, 0.105, 0, false));
+    cup.add(mesh(new THREE.TorusGeometry(0.03, 0.009, 5, 10), toon("#f4f1ea"), 0.06, 0.06, 0, false));
+    cup.position.set(-0.55, DESK_SIZE.height, -0.15);
+    noOutline(cup);
+    view.group.add(cup);
+    s.cup = cup;
+    this.carry = null;
+    this.audio?.fx("click");
+    this.hooks.onStat?.("gift");
+    return true;
+  }
+
+  /** Un sorbo de lo que lleva en la mano. */
+  sip(): boolean {
+    if (!this.carry) return false;
+    this.audio?.fx("sip");
+    return true;
+  }
+
+  /** Q: saludar · F: bailar (un rato, o hasta que camine). */
+  emote(kind: "wave" | "dance") {
+    if (!this.interactOn || this.game || this.ceoOn || this.mode !== "explore") return;
+    if (kind === "wave") this.owner.wave();
+    else if (!this.activity) {
+      this.activity = { kind: "dance", until: this.t + 5 };
+      this.hooks.onStat?.("dance");
+    }
+  }
+
+  /** La pose del dueño según lo que hace y lo que lleva en la mano. */
+  private ownerPose(): import("./person").PersonPose {
+    const a = this.activity;
+    if (a?.kind === "sit") return this.carry ? "sitcup" : "sit";
+    if (a?.kind === "make") return "hands";
+    if (a?.kind === "eat") return "eat";
+    if (a?.kind === "dance") return "dance";
+    return this.carry ? "cup" : "stand";
+  }
+
+  /** Avanza la actividad (cada frame) y avisa al HUD lo que hace falta. */
+  private tickActivity(now: number) {
+    const t = this.t;
+    const a = this.activity;
+    if (a?.kind === "make" && t - a.t0 >= a.dur) {
+      if (a.what === "snack") this.activity = { kind: "eat", until: t + 3 };
+      else {
+        this.activity = null;
+        this.carry = { what: a.what, until: t + CARRY_SECONDS[a.what] };
+      }
+      this.hooks.onStat?.(a.what);
+      this.syncWalk();
+    } else if ((a?.kind === "eat" || a?.kind === "dance") && t >= a.until) {
+      this.activity = null;
+      this.syncWalk();
+    }
+    // Bailar se corta al caminar.
+    if (this.activity?.kind === "dance" && this.player.speed > 0.1) this.activity = null;
+    if (this.carry && t >= this.carry.until) this.carry = null;
+    this.owner.setPose(this.ownerPose());
+    if (now - this.activityAt < 200) return;
+    this.activityAt = now;
+    const cur = this.activity;
+    let hud: ActivityHud | null = null;
+    if (cur?.kind === "sit") hud = { label: `Sentado en ${cur.prop.name}${this.carry ? (this.carry.what === "coffee" ? " con tu café" : " con tu agua") : ""}`, hint: "E, Espacio o caminar: levantarte" };
+    else if (cur?.kind === "make") hud = { label: cur.what === "coffee" ? "Preparando un café…" : cur.what === "water" ? "Sirviendo agua…" : "Sacando un snack…", progress: Math.min(1, (t - cur.t0) / cur.dur), hint: "Esc: dejarlo" };
+    else if (cur?.kind === "eat") hud = { label: "Comiendo un snack" };
+    else if (cur?.kind === "dance") hud = { label: "Bailando", hint: "camina para parar" };
+    else if (this.carry) {
+      const left = Math.max(0, Math.ceil(this.carry.until - t));
+      hud = { label: `${this.carry.what === "coffee" ? "☕ Café" : "💧 Agua"} en la mano · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`, hint: "E con nada cerca: un sorbo · siéntate donde quieras" };
+    }
+    const key = JSON.stringify(hud && { ...hud, progress: hud.progress === undefined ? undefined : Math.round(hud.progress * 20) });
+    if (key === this.activityKey) return;
+    this.activityKey = key;
+    this.hooks.onActivity?.(hud);
+  }
   /** Sonido de ambiente (lo crea la página: sobrevive a los cambios de tema). */
   private audio: OfficeAudio | null = null;
   private typists: AudioSource[] = [];
@@ -656,7 +899,14 @@ export class OfficeWorld {
   /** Lo mismo que E: habla con el agente o contrata en el escritorio al alcance. */
   interact(): boolean {
     if (this.game) return false;
+    // Ocupado (sentado, preparando algo): la acción lo levanta o lo deja.
+    if (this.ownerBusy) {
+      this.standUp();
+      return true;
+    }
+    if (this.mode === "explore" && !this.near && this.carry) return this.sip();
     if (this.mode !== "explore" || !this.near || !this.player.enabled) return false;
+    if (this.near.kind === "worker") this.giftCup(this.near.id);
     this.owner.wave();
     this.hooks.onClick?.(this.near);
     return true;
@@ -688,6 +938,12 @@ export class OfficeWorld {
       monitors: Object.fromEntries([...this.seated].filter(([, s]) => s.monitor && !s.leaving).map(([id, s]) => [id, { lines: s.monitor!.shown(), paints: s.monitor!.paints }])),
       controlWall: this.controlWall?.debug() ?? null,
       game: this.gameState(),
+      owner: { activity: this.activity ? { kind: this.activity.kind, prop: "prop" in this.activity ? this.activity.prop.id : null } : null, carry: this.carry?.what ?? null, walking: this.player.enabled },
+      props: this.room?.props.map((p) => p.id) ?? [],
+      cat: this.crowd.catNow ? { pets: this.crowd.catNow.pets, x: +this.crowd.catNow.pos.x.toFixed(2), z: +this.crowd.catNow.pos.z.toFixed(2) } : null,
+      bubble: this.bubble ? { id: this.bubble.id, text: this.bubble.text } : null,
+      lampsOff: [...this.lampOff],
+      gifts: [...this.seated].filter(([, s]) => s.cup && !s.leaving).map(([id]) => id),
       ceo: this.room?.ceo
         ? {
             on: this.ceoOn,
@@ -707,6 +963,25 @@ export class OfficeWorld {
 
   /** Lleva al dueño junto a un escritorio o personaje (lista del equipo en vista explorar). */
   walkTo(hit: OfficeHit) {
+    if (hit.kind === "prop") {
+      const pr = this.room?.props.find((x) => x.id === hit.id);
+      if (!pr) return;
+      this.standUp();
+      if (this.mode !== "explore") this.setMode("explore");
+      this.player.spawn(pr.at.x, pr.at.z, pr.facing, FLOOR_Y[pr.floor]);
+      return;
+    }
+    if (hit.kind === "cat" || hit.kind === "person") {
+      const target = hit.kind === "cat" ? this.crowd.catNow?.pos.clone() : this.crowd.headOf(hit.id, new THREE.Vector3())?.setY(0);
+      if (!target) return;
+      this.standUp();
+      if (this.mode !== "explore") this.setMode("explore");
+      const y = hit.kind === "cat" ? this.crowd.catNow!.pos.y : FLOOR_Y[floorAt((this.crowd.headOf(hit.id, new THREE.Vector3())?.y ?? 2) - 2)];
+      this.player.spawn(target.x + 1.1, target.z + 0.4, Math.atan2(-1.1, -0.4), y);
+      // Cámara sobre el hombro, como junto a un agente: la persona queda a la vista.
+      this.player.camYaw += 0.7;
+      return;
+    }
     if (hit.kind === "ceo") {
       const c = this.room?.ceo;
       if (!c) return;
@@ -987,7 +1262,7 @@ export class OfficeWorld {
   /** Acerca la cámara a un escritorio o personaje (vista aérea). */
   focus(hit: OfficeHit) {
     if (this.mode !== "aerial") return;
-    if (hit.kind === "tv" || hit.kind === "whiteboard" || hit.kind === "queue" || hit.kind === "game" || hit.kind === "ceo") return;
+    if (hit.kind === "tv" || hit.kind === "whiteboard" || hit.kind === "queue" || hit.kind === "game" || hit.kind === "ceo" || hit.kind === "prop" || hit.kind === "cat" || hit.kind === "person") return;
     if (hit.kind === "board" || hit.kind === "spend" || hit.kind === "control") {
       const spot = hit.kind === "board" ? this.boards?.spot(hit.id) : hit.kind === "spend" ? this.room?.spendSpot : this.room?.controlSpot;
       if (!spot) return;
@@ -1075,6 +1350,7 @@ export class OfficeWorld {
       s.leaving = true;
       s.character.vanish();
       s.laptop.close();
+      s.cup?.removeFromParent();
       // El monitor se apaga con su dueño: una pantalla sin agente no muestra nada.
       s.monitor?.dispose();
       s.monitor = null;
@@ -1102,6 +1378,7 @@ export class OfficeWorld {
       const a = this.room?.gameSpots[hit.id]?.anchor;
       return a ? this.project(this.tmp.set(a.x, a.y, a.z)) : null;
     }
+    if (hit.kind === "prop" || hit.kind === "cat" || hit.kind === "person") return null;
     if (hit.kind === "ceo") {
       const c = this.room?.ceo?.chair;
       return c ? this.project(this.tmp.set(c.x, 1.0, c.z)) : null;
@@ -1139,7 +1416,7 @@ export class OfficeWorld {
 
   private updateNear() {
     let best: { hit: OfficeHit; d: number; at: THREE.Vector3 } | null = null;
-    if (this.ceoOn || this.game) {
+    if (this.ceoOn || this.game || this.ownerBusy) {
       if (this.near) {
         this.near = null;
         this.hooks.onNear?.(null);
@@ -1169,6 +1446,12 @@ export class OfficeWorld {
       const floor = floorAt(this.player.pos.y);
       const s = this.crowd.nearStaff(this.player.pos, floor);
       if (s) best = { hit: { kind: "npc", id: s.role }, d: s.d, at: new THREE.Vector3(s.at.x, s.at.y + 2.35, s.at.z) };
+      // La gata a tus pies gana sobre un NPC con rol más lejos (le gusta echarse junto a Recepción).
+      const cat = this.interactOn ? this.crowd.catNow : null;
+      if (cat && floor === 0) {
+        const d = Math.hypot(cat.pos.x - this.player.pos.x, cat.pos.z - this.player.pos.z);
+        if (d <= 1.8 && (!best || d < best.d)) best = { hit: { kind: "cat", id: "gata" }, d, at: new THREE.Vector3(cat.pos.x, cat.pos.y + 0.8, cat.pos.z) };
+      }
       const b = floor === 0 ? this.boards?.near(this.player.pos.x, this.player.pos.z, BOARD_REACH) : null;
       if (b && (!best || b.d < best.d)) best = { hit: { kind: "board", id: b.id }, d: b.d, at: b.at };
       if (floor === 0 && this.room && this.layers.data) {
@@ -1203,6 +1486,27 @@ export class OfficeWorld {
         if (d <= BOARD_REACH && (!best || d < best.d)) best = { hit: { kind: "tv", id: "lounge" }, d, at: new THREE.Vector3(tv.x - 0.2, tv.y + 1.2, tv.z) };
       }
     }
+    // Lo último: objetos de la sala, la gata y la gente (escritorios, NPC con rol, tableros y juegos mandan).
+    if (!best && this.mode === "explore" && this.interactOn && this.room) {
+      const p = this.player.pos;
+      const floor = floorAt(p.y);
+      for (const pr of this.room.props) {
+        if (pr.floor !== floor) continue;
+        const d = Math.hypot(pr.at.x - p.x, pr.at.z - p.z);
+        if (d <= PROP_REACH && (!best || d < best.d)) {
+          const sx = pr.seat?.x ?? pr.at.x;
+          const sz = pr.seat?.z ?? pr.at.z;
+          best = { hit: { kind: "prop", id: pr.id }, d, at: new THREE.Vector3(sx, FLOOR_Y[pr.floor] + 1.6, sz) };
+        }
+      }
+      const cat = this.crowd.catNow;
+      if (cat && floor === 0) {
+        const d = Math.hypot(cat.pos.x - p.x, cat.pos.z - p.z);
+        if (d <= 1.8 && (!best || d < best.d)) best = { hit: { kind: "cat", id: "gata" }, d, at: new THREE.Vector3(cat.pos.x, cat.pos.y + 0.8, cat.pos.z) };
+      }
+      const person = this.crowd.nearPerson(p, floor, 2.0);
+      if (person && (!best || person.d < best.d)) best = { hit: { kind: "person", id: person.id }, d: person.d, at: person.head };
+    }
     const next = best?.hit ?? null;
     const same = next?.kind === this.near?.kind && next?.id === this.near?.id;
     if (best) this.nearAt.copy(best.at);
@@ -1232,10 +1536,23 @@ export class OfficeWorld {
       this.setMode(this.mode === "explore" ? "aerial" : "explore");
       return;
     }
+    // Sentado o preparando algo: E, Espacio, Esc o caminar lo levantan.
+    if (this.ownerBusy && /^(KeyE|Space|Escape|KeyW|KeyA|KeyS|KeyD|Arrow)/.test(e.code)) {
+      if (e.code === "Space") e.preventDefault();
+      this.standUp();
+      return;
+    }
+    if (this.mode === "explore" && this.player.enabled && this.interactOn) {
+      if (e.code === "KeyQ") return this.emote("wave");
+      if (e.code === "KeyF") return this.emote("dance");
+    }
     if (e.code === "KeyE" && this.mode === "explore" && this.near && this.player.enabled) {
+      if (this.near.kind === "worker") this.giftCup(this.near.id);
       this.owner.wave();
       this.hooks.onClick?.(this.near);
+      return;
     }
+    if (e.code === "KeyE" && this.mode === "explore" && !this.near && this.carry) this.sip();
   };
 
   private hitAt(clientX: number, clientY: number): OfficeHit | null {
@@ -1385,7 +1702,8 @@ export class OfficeWorld {
   /** Solo el piso que se ve tiene sus lámparas prendidas (las demás quedan en 0, sin quitarlas de la escena). */
   private applyFloorLamps() {
     if (!this.room) return;
-    this.room.lamps.forEach((l, i) => (l.intensity = this.room!.lampFloor[i] === this.shownFloor ? this.lampBase : 0));
+    // Las que el dueño apagó con "E" quedan en 0 (sin quitarlas: cambiar cuántas luces hay recompila shaders).
+    this.room.lamps.forEach((l, i) => (l.intensity = this.room!.lampFloor[i] === this.shownFloor && !this.lampOff.has(i) ? this.lampBase : 0));
   }
 
   /** Corte de casa de muñecas: se ven el piso actual y los de abajo. */
@@ -1526,13 +1844,20 @@ export class OfficeWorld {
     this.updateFloors();
     // Jugando, la cámara es la del juego: el dueño taparía la mesa o la pantalla.
     if (this.game) this.owner.root.visible = false;
+    this.tickActivity(now);
+    // Sentado: el cuerpo va al cojín (el controlador se queda de pie al lado, para la cámara).
+    const act = this.activity;
+    if (act?.kind === "sit" && act.prop.seat) {
+      const st = act.prop.seat;
+      this.owner.root.position.set(st.x, FLOOR_Y[act.prop.floor] + st.y - PERSON_SEAT_OFFSET, st.z);
+    }
     // Sentado en la silla ejecutiva; la cámara son sus ojos, así que no se dibuja.
     if (this.ceoOn && this.room?.ceo) {
       const c = this.room.ceo.chair;
       this.owner.root.position.set(c.x, c.seatY - PERSON_SEAT_OFFSET, c.z);
       this.owner.root.visible = false;
     }
-    this.owner.root.rotation.y = this.ceoOn && this.room?.ceo ? this.room.ceo.chair.facing : this.player.facing;
+    this.owner.root.rotation.y = this.ceoOn && this.room?.ceo ? this.room.ceo.chair.facing : act?.kind === "sit" || act?.kind === "make" ? act.prop.facing : this.player.facing;
     this.owner.update(dt, t, this.mode === "explore" ? this.player.speed : 0, !this.player.grounded);
     this.crowd.update(dt, t, this.player.pos, this.shownFloor);
 
@@ -1638,9 +1963,19 @@ export class OfficeWorld {
         }),
       );
     }
+    if (this.hooks.onBubble) {
+      const b = this.bubble;
+      if (b && this.t < b.until && this.crowd.headOf(b.id, this.bubbleAt)) this.hooks.onBubble(this.project(this.bubbleAt), b.text);
+      else if (b) {
+        this.bubble = null;
+        this.hooks.onBubble(null, "");
+      }
+    }
     if (this.hooks.onPlayer) {
       const head = this.project(this.tmp.set(this.player.pos.x, this.player.pos.y + 2.05, this.player.pos.z));
-      const near = this.near ? this.project(this.tmp.copy(this.nearAt)) : null;
+      // Mientras alguien te habla, su globo manda: el aviso "E · Saludar" no se le encima.
+      const talking = this.bubble && this.near?.kind === "person" && this.near.id === this.bubble.id;
+      const near = this.near && !talking ? this.project(this.tmp.copy(this.nearAt)) : null;
       this.hooks.onPlayer(head, near);
     }
   }

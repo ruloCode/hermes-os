@@ -305,6 +305,8 @@ export function ControlsHint({ mode, pad, padConnected }: { mode: OfficeMode; pa
           [<Key key="k">Shift</Key>, "correr"],
           [<Key key="k">Espacio</Key>, "saltar"],
           [<Key key="k">E</Key>, "interactuar"],
+          [<Key key="k">Q</Key>, "saludar"],
+          [<Key key="k">F</Key>, "bailar"],
           [<Key key="k">arrastra</Key>, "cámara"],
           [<Key key="k">V</Key>, "vista aérea"],
         ]
@@ -511,6 +513,7 @@ export interface OfficeLayers {
   ceo: boolean;
   zones: boolean;
   games: boolean;
+  interactions: boolean;
 }
 
 const LAYER_LABEL: { key: keyof OfficeLayers; label: string; hint: string }[] = [
@@ -518,6 +521,7 @@ const LAYER_LABEL: { key: keyof OfficeLayers; label: string; hint: string }[] = 
   { key: "ceo", label: "Oficina de CEO", hint: "Tu oficina privada en el piso 1, con el modo sentado" },
   { key: "zones", label: "Zonas nuevas", hint: "Sala de juntas, biblioteca y cabinas (café) y el lounge de la azotea" },
   { key: "games", label: "Minijuegos", hint: "Dardos, ping-pong, futbolín, canasta y la arcade de la azotea" },
+  { key: "interactions", label: "Interacciones", hint: "Sentarte, café, agua, snacks, la gata, saludar, cabinas, lámparas, Q saluda y F baila" },
 ];
 
 export function LayersPicker({
