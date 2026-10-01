@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/dashboard.png" alt="Dashboard de Hermes OS: orbe de voz, saludo y consola de Claude Code" width="900">
+  <img src="docs/img/readme/oficina-aerea-oscuro.jpg" alt="La Oficina de agentes de Hermes OS: un personaje por agente vivo, agrupados por proyecto, con su estado y lo que está haciendo" width="900">
 </p>
 
 Sistema operativo de IA personal, **local-first** y en español: un dashboard estilo "AGENTIC OS" con voz en tiempo real, un agente ejecutor que corre en tu máquina con el **Claude Agent SDK** (sin API key: usa tu suscripción de Claude Code) y memoria persistente en Supabase. Conoce tu vault de Obsidian, tus tareas de Linear, tus reuniones, tu calendario y tu producción de contenido — y todo lo que muestra es real.
@@ -31,10 +31,17 @@ Agent server (apps/agent, Hono :8650) ── Claude Agent SDK ── spawnea el 
 ## Mira un agente por dentro: la Oficina
 
 <p align="center">
-  <img src="docs/img/oficina-tarima/tarima-traza-dark.png" alt="Modo tarima de la Oficina: la traza del loop con dos errores corregidos, el escritorio del agente en 3D y sus tools" width="900">
+  <img src="docs/img/readme/tarima-tools-dark.jpg" alt="Modo tarima de la Oficina: la traza del loop con dos errores corregidos, el escritorio del agente en 3D y sus tools con su permiso real" width="900">
 </p>
 
 `/oficina` es una oficina 3D donde cada sesión viva del Agent SDK o run de `claude -p` es un personaje en su escritorio. Le hablas por voz o con un control de Xbox, levanta la mano cuando va a hacer algo con efectos y, con **P**, entras al **modo tarima**: la traza completa del loop (qué lee, qué tool llama, qué le devuelve, dónde se equivoca y en qué paso se corrigió), las tools que tiene con su permiso real, el system prompt exacto con el porqué de cada sección y el log completo. Una **vista pública** tapa secretos, correos, teléfonos y proyectos de clientes antes de que lleguen a la pantalla.
+
+| | |
+|---|---|
+| ![Caminando junto a un agente: su tarjeta dice qué tool usa y "E" abre su panel](docs/img/readme/oficina-cerca-claro.jpg) | ![El system prompt exacto que recibió el agente, por secciones, con el porqué de cada una](docs/img/readme/tarima-prompt-light.jpg) |
+| **Explorar**: caminas entre tus agentes (teclado o control de Xbox) y le hablas a cualquiera por voz | **System prompt**: el string exacto que recibió, por secciones y con el porqué de cada una |
+| ![El log completo del agente: cada evento con su contenido entero](docs/img/readme/tarima-log-dark.jpg) | ![El café del segundo piso con la ciudad de fondo a la hora real](docs/img/oficina-v8/despues-aerea2-dia-oscuro.jpg) |
+| **Log**: cada evento del loop con su contenido entero, descargable | **Tres pisos**: equipos, café y azotea, con gente, minijuegos y el cielo de la hora real |
 
 Probarla sin gastar tokens: abre `localhost:31415/oficina`, presiona **P** y luego **R** (repite una traza real grabada, marcada como repetición). Con agentes de verdad: `scripts/demo-proyectos.sh prepare` arma cinco proyectos de práctica con bugs reales para contratar agentes en ellos. Todo en [docs/oficina-de-agentes.md](docs/oficina-de-agentes.md).
 

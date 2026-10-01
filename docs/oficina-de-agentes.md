@@ -6,9 +6,9 @@ Una oficina 3D con estilo de caricatura donde cada sesión **viva** del Claude A
 
 Inspirada en [agent-office](https://github.com/AgentSystemLabs/agent-office) (AgentSystemLabs, MIT). De ahí se portó el **motor visual**, no la infraestructura: el look toon (`MeshToonMaterial` con rampa de 3 pasos más `OutlineEffect`), el personaje con sus poses, la laptop, el confeti y el mapeo tool → pose (`actions.ts`). Cada archivo portado lo dice en su cabecera. agent-office corre CLIs en PTYs y lee su estado con hooks de Claude Code. Hermes ya tenía el bus de actividad del SDK, así que el estado sale de ahí.
 
-![Vista aérea en simulación, tema oscuro](img/oficina-aerea-oscuro.png)
+![Vista aérea en simulación, tema oscuro](img/readme/oficina-aerea-oscuro.jpg)
 
-![Explorando junto a un agente, tema claro](img/oficina-cerca-claro.png)
+![Explorando junto a un agente, tema claro](img/readme/oficina-cerca-claro.jpg)
 
 ## Recorrer la oficina
 
@@ -451,9 +451,9 @@ Ladrillo, concreto pulido, deck, madera, tela y tiza a 1024 px y sin costura, m�
 
 2026-10-01, para la demo en tarima de la comunidad de Anthropic (cero slides: "le das la tarea y lo vemos trabajar por dentro"). Todo sale de datos reales capturados en el agente; la simulación y las repeticiones se marcan siempre en pantalla.
 
-![Modo tarima: la traza del loop con los dos errores corregidos, la oficina y las tools](img/oficina-tarima/tarima-traza-dark.png)
+![Modo tarima: la traza del loop con los dos errores corregidos, la oficina y las tools](img/readme/tarima-tools-dark.jpg)
 
-![El system prompt exacto con su porqué, tema claro](img/oficina-tarima/tarima-prompt-light.png)
+![El system prompt exacto con su porqué, tema claro](img/readme/tarima-prompt-light.jpg)
 
 **P** (o el botón **▣ Tarima**) abre una vista para un proyector de 1920 × 1080, legible a 10 metros:
 
@@ -760,7 +760,7 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 
 QA de los extras: `apps/web/scripts/oficina-extras-qa.py` compara el tablero y el panel con `GET /office/spend` y `GET /office/plan-usage` (los pide aparte), revisa monitores y sala de control con la simulación y **juega** cada minijuego con entradas sintéticas hasta sumar puntaje: sigue la pelota, alinea las varillas y atrapa tokens. También revisa la placa y el modo CEO, el sonido (apagado al cargar y prendido con un clic real), las capas y los fps, en los dos temas: 70 comprobaciones, sin tokens. `--agent` cambia la URL del agente.
 
-QA de la traza: `apps/web/scripts/oficina-traza-qa.py` repite la fixture (sin tokens) en los dos temas y revisa que la traza llegue completa y en orden, los dos errores y sus correcciones (paso 2 → 8, paso 4 → 6), el prompt byte a byte (con y sin vista pública), el inventario contra la configuración real de `session.ts`, los secretos falsos sembrados (ninguno en el DOM, y el control sin vista pública), la tarima a 1920 × 1080 con teclado y control, la vitrina que entra sola y sale con una tecla, los fps y la consola. `--agent` cambia la URL del agente; `--shots` guarda las capturas.
+QA de la traza: `apps/web/scripts/oficina-traza-qa.py` repite la fixture (sin tokens) en los dos temas y revisa que la traza llegue completa y en orden, los dos errores y sus correcciones (paso 2 → 8, paso 4 → 6), el prompt byte a byte (con y sin vista pública), el inventario contra la configuración real de `session.ts`, los secretos falsos sembrados (ninguno en el DOM, y el control sin vista pública), la tarima a 1920 × 1080 con teclado y control, la vitrina que entra sola y sale con una tecla, los fps y la consola. `--agent` cambia la URL del agente; `--shots <carpeta>` guarda las capturas (fuera del repo: llevan los secretos falsos sembrados, tapados).
 
 QA del control sin control físico: `apps/web/scripts/oficina-pad-qa.py` inyecta un Xbox simulado en `navigator.getGamepads()`, con el mismo id y mapeo que entrega Chrome, y recorre la ruta real con 26 comprobaciones.
 

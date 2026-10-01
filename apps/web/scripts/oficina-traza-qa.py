@@ -20,7 +20,7 @@ el caso 1 de la demo) con el mismo reductor y la misma UI.
      View sale), la vitrina entra sola por inactividad y sale con una tecla,
      fps ≥ 55 y sin errores de consola.
 
-  ~/.cache/hermes-pw-venv/bin/python apps/web/scripts/oficina-traza-qa.py [--url http://localhost:31998] [--agent http://localhost:8651] [--shots docs/img/oficina-tarima]
+  ~/.cache/hermes-pw-venv/bin/python apps/web/scripts/oficina-traza-qa.py [--url http://localhost:31998] [--agent http://localhost:8651] [--shots /tmp/oficina-tarima]
 """
 
 import argparse
