@@ -154,8 +154,42 @@ La oficina es un edificio de tres pisos (`FLOOR_Y` en `room.ts`: 0 · 3,6 · 7,2
 - **Colisiones con base** (`Collider.bottom` en `player.ts`): una caja estorba solo si se cruza con la franja del cuerpo (1,7 m). Por eso se camina debajo de la losa del piso 2 y los muebles de abajo no estorban arriba.
 - **Corte de casa de muñecas**: se ven el piso donde estás y los de abajo (el de llegada aparece a mitad de la escalera). Solo se encienden las lámparas de ese piso, y quedan en 0 en vez de quitarse: cambiar cuántas luces hay recompila los shaders y el juego da un tirón.
 - **Vista aérea por piso**: abre en el piso donde estás. El selector "1 · Equipos / 2 · Café / 3 · Azotea" del HUD y las teclas **1**, **2** y **3** eligen cuál ver. Viendo el 2 o el 3 no se clickea nada del 1 a través de la losa y las etiquetas de los pods se ocultan.
-- **"E" solo alcanza a los agentes en el piso 1**. "Ir con un agente" (LB/RB o la lista del equipo) te trae abajo desde cualquier piso.
+- **"E" solo alcanza a los agentes en el piso 1** (los NPC con rol, en su piso; ver abajo). "Ir con un agente" (LB/RB o la lista del equipo) te trae abajo desde cualquier piso.
 - **QA**: `__hermesOficinaStair(i)` te pone al pie de la escalera `i` mirando hacia arriba, y `__hermesOficinaFloor(n)` abre la vista aérea del piso `n`. `oficina-qa.py` sube las dos escaleras caminando y revisa las alturas, el piso que se ve y las teclas.
+
+## La gente del edificio (interruptor "Ambiente")
+
+2026-09-30. Con pocas sesiones vivas la oficina se veía vacía. Ahora hay **gente de ambiente** que va por café, se sienta en el sofá, juega ping-pong, mira por la ventana y sube y baja las escaleras, y **tres NPC con rol** a los que se les habla. Todo vive detrás del botón **Ambiente** del HUD: se guarda en el navegador (`hermes-oficina-ambiente`) y viene prendido. Apagado, no se crea nada: ni personas, ni atril, ni rejilla, ni colisiones.
+
+**No son agentes y se nota.** Los agentes son los frijoles con audífonos y antena (`worker.ts`). La gente es humana chibi (`Person`, como el dueño), con otras pieles, peinados y camisetas: nunca los rulos ni la camiseta blanca del dueño, y tampoco el peinado "Rizado", que son 70 esferas por persona. No tienen bombilla ni tarjeta, nunca se sientan en un escritorio de pod y no cuentan en el HUD, la lista del equipo ni la pizarra. La regla "una silla por sesión viva" no cambia.
+
+| Quién | Dónde | Qué dice (y de dónde sale) |
+| --- | --- | --- |
+| **Recepción** | Piso 1, a la derecha de la entrada, con su atril | "¿Qué está pasando?": cuántas sesiones vivas hay y en qué estado, con los mismos conteos del HUD (`officeCounts`), y quién te pide permiso. Preguntas: quién me necesita, quién trabaja y qué terminó, cada agente con su proyecto y un **Ir →** que te lleva a su escritorio. Sin conexión con `/office/events` dice que no sabe. En simulación lo dice |
+| **Barista** (con mandil) | Piso 2, detrás de la isla. Se le habla desde las banquetas | La hora local; las ejecuciones terminadas hoy, su costo y sus tokens (`usage` de `GET /dashboard`, que ya trae el `DashboardProvider`: cero polls nuevos); el próximo evento del calendario si está configurado; el clima si el agente lo reporta; y las próximas tareas programadas (`GET /scheduled`, una vez al abrir el diálogo) |
+| **Respiro** | Piso 3, junto a las sillas de playa | La hora, una **pausa de 5 minutos** con temporizador real (pastilla "☕ Pausa 4:59" en el HUD, aviso, vibración y voz al terminar) y la ayuda de controles (teclado o control, según lo que estés usando) |
+
+**Honestidad:** cada línea con un dato sale de `packages/shared/src/office-npc.ts` (puro, con tests). Si la fuente no existe o falla, la línea no se dice, y la pregunta que la pide no aparece: sin clima no hay "¿Qué tal el clima?" y, si `/scheduled` falla, no hay "¿Qué hay programado?". Las respuestas se recalculan en cada render, así que no se quedan viejas con el diálogo abierto.
+
+**Hablarles:** acércate (o `__hermesOficinaWalkTo({kind:"npc", id})`) y presiona **E** o **A**. El NPC te mira y saluda. Teclado: **1–3** o **↑↓** y **Enter** eligen, **Esc** cierra. Control: cruceta, **A** y **B**. Mientras el diálogo está abierto el dueño no camina, la cruceta no hace zoom y las teclas 1–3 no cambian de piso. Si **Respuestas** está prendido, la respuesta se lee en voz alta con `speak()`.
+
+**Prioridad de "E":** si hay un escritorio de pod al alcance, gana el escritorio. Un NPC solo entra cuando no hay ninguno, así que "Contratar aquí" y "Hablar con X" no cambian.
+
+### Cómo camina la gente
+
+- **Navegación por capas** (`packages/shared/src/office-nav.ts`, puro y con tests). Cada celda de 25 cm guarda las *superficies* donde se puede estar de pie: el suelo, la losa de cada piso y cada escalón. Una caja es suelo si su tope queda al alcance del paso (35 cm) y estorba si se cruza con la franja del cuerpo (1,7 m), igual que el controlador del dueño. No hay "portales" escritos a mano: la escalera es camino porque sus escalones lo son, el hueco no es camino porque ahí no hay dónde pararse, y si la escalera se mueve en `room.ts` la navegación la sigue sola. La celda es más chica que la huella de un escalón (30 cm), así que dos vecinas difieren a lo sumo un escalón. A\* usa adyacencia precalculada y una heurística ×1,4; el camino se suaviza por línea de vista. Medido: la rejilla tiene unos 37.000 nodos y tarda de 8 a 25 ms en armarse; cada camino tarda unos 4 ms (máximo 7). Se calcula **un camino por frame**.
+- **Qué estorba a la gente:** la sala, los escritorios, **cada pod con sus sillas** (nadie camina entre los agentes) y los NPC con rol. La rejilla se rehace cuando cambian la sala o los escritorios, no por frame. Si la sala se reconstruye con el mismo tamaño (llegó un pod), la gente sigue donde estaba.
+- **Quién va a dónde** (`packages/shared/src/office-ambient.ts`, puro, con RNG sembrado). La sala exporta 27 lugares con intención (`room.pois`): ventanas, pizarra y cuadro en el piso 1; barra, agua, snacks, banquetas, sofá (dos puestos), sillón, pufs, libros y ventanas en el piso 2; ping-pong y futbolín (de a dos), dardos, arcade, guirnaldas, sillas de playa y vistas en el piso 3. Cada persona elige un lugar, camina, se queda entre 5 y 32 s según la actividad (con su pose: sentada, taza con sorbos, raqueta, manos en el juego, señalando, mirando arriba, lanzando un dardo, manos atrás) y elige otro. Reglas: nunca más gente que puestos; cada piso pesa lo mismo aunque tenga más lugares; cambiar de piso pesa más que quedarse; nadie repite sus últimos lugares; un juego de a dos solo arranca con los dos presentes, y quien espera pareja se rinde a los 22 s. Si un lugar no tiene camino, se evita un minuto.
+- **Cuánta gente:** 6 con hasta 2 sesiones vivas, 5 con hasta 5 y 4 desde ahí (`ambientPopulation`). Al abrir, cada uno ya está instalado en algún lugar; los que llegan después entran por la puerta.
+- **Escaleras de verdad:** la altura sale de la rejilla escalón por escalón, no por interpolación entre pisos.
+- **Con el dueño:** si está en el camino, se detienen, lo miran y, si sigue ahí, se hacen a un lado. Si no hay a dónde (la escalera), a los 3,5 s pasan de largo. El dueño choca solo con quien está quieto en su lugar (`PlayerController.people`), nunca con quien camina, y no queda atrapado si alguien se le mete encima.
+
+> **Ojo:** la primera versión hacía que todos bloquearan al dueño. En la escalera, alguien que bajaba esperaba al dueño y el dueño no podía pasar: los dos quedaban esperándose (el QA de las escaleras lo atrapó a 1 m de altura). Quien camina es quien esquiva.
+- **Corte de pisos:** solo se ven los del piso que se ve y los de abajo. Las etiquetas de los NPC, solo en el piso que se ve.
+
+> **Ojo (lo encontró la rejilla):** el pie de la escalera 1 estaba encerrado entre la baranda, la maceta de la esquina suroeste y el muro bajo del frente. Los huecos medían 0,40 y 0,45 m y una persona necesita 0,6 m, así que el dueño solo salía saltando la maceta. El QA no lo veía porque `__hermesOficinaStair(0)` teletransporta al pie. La maceta pasó de 2,6 a 3,3 m del muro oeste.
+
+**QA:** `apps/web/scripts/oficina-npc-qa.py` revisa, en los dos temas, que haya gente en al menos dos pisos y nadie dentro de un pod; que Recepción diga los mismos conteos que la simulación y nombre a los agentes de cada estado; los diálogos de Barista y Respiro y la pausa real; que junto a un agente "E" sea del agente; el interruptor (apagado no queda nadie, se recuerda al recargar); y fps ≥ 55. Una vez, que alguien cruce de piso por la escalera y que a media altura siempre esté sobre una escalera. `?seed=N` en la URL o `__hermesOficinaAmbient({ seed })` fijan la coreografía.
 
 ## La sala
 
@@ -271,17 +305,21 @@ Los prompts de `oficina-demo.sh` terminan en 10 a 20 s. Para un demo más largo,
 | Seam | Uso |
 | --- | --- |
 | `__hermesOficinaSim(state \| "demo" \| null)` | Sustituye el estado real, siempre marcado como simulación |
-| `__hermesOficinaDebug()` | Personajes, asientos, selección, escritorios y fps |
+| `__hermesOficinaDebug()` | Personajes, asientos, selección, escritorios y fps. Con el ambiente, `npcs` (`{id, role, floor, x, y, z, activity, state}`), `ambient`, `seed`, `floorChanges`, `navNodes`, `pois` (lugares que quedaron y descartados) y `npcDialog` |
+| `__hermesOficinaAmbient({ on?, seed? })` | Prende o apaga la gente del edificio y siembra su coreografía (también `?seed=N` en la URL) |
 | `__hermesOficinaScreenOf(hit)` | Posición en pantalla de un escritorio o personaje, para clics reales |
 | `__hermesOficinaFocus(hit)` | Lleva la cámara a un escritorio o personaje (vista aérea) |
 | `__hermesOficinaMode("explore" \| "aerial")` | Cambia de vista |
-| `__hermesOficinaWalkTo(hit)` | Pone al dueño junto a un escritorio o personaje |
+| `__hermesOficinaWalkTo(hit)` | Pone al dueño junto a un escritorio, un personaje o un NPC (`{kind: "npc", id: "reception" \| "barista" \| "rooftop"}`) |
 | `__hermesOficinaDictate(text)` | Deja `text` como lo dictado, listo para enviar (QA sin micrófono) |
 | `__hermesOficinaTeam.say(text)` / `.debug()` | Le habla al equipo sin micrófono / reparto de voces, runs vigilados, cola y avisos |
 
 QA del control sin control físico: `apps/web/scripts/oficina-pad-qa.py` inyecta un Xbox simulado en `navigator.getGamepads()`, con el mismo id y mapeo que entrega Chrome, y recorre la ruta real con 26 comprobaciones.
 
 ## Pendiente (stretch)
+
+- Fase 2 de la gente: que un agente **listo** camine al café durante su gracia de 3 minutos y uno **pensando** dé unos pasos junto a su escritorio (nunca uno trabajando o que te necesita). Se dejó fuera para no arriesgar la demo: el "near" y el clic de los agentes dependen de que sigan en su silla.
+- Que la gente se aparte entre sí. Hoy solo esquiva al dueño; dos personas que se cruzan pueden atravesarse un instante.
 
 - Salida con caja por la puerta, como en agent-office. Hoy el personaje se encoge y desaparece.
 - Nombre del personaje escrito por Haiku, debounced. Hoy son las primeras palabras de la tarea.
