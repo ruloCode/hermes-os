@@ -77,6 +77,7 @@ pnpm install
 #    ESTUDIO_MEDIA_ROOT=              ← el disco de captura vive en la Mac
 #    HERMES_GESTURES=off
 #    HERMES_BROWSER_AGENT=off
+#    HERMES_JOBS=off                  ← sin esto las tareas programadas corren dos veces
 #    (HERMES_PORT, HERMES_API_KEY y todo Supabase quedan IGUALES)
 
 # 5. Arrancar solo el agente (el dashboard lo sirve la Mac)
@@ -90,6 +91,27 @@ el agente arranca sin él (los gestos ya están apagados por env).
 Autostart cuando ya funcione a mano: `systemd` de usuario dentro de WSL
 (`systemctl --user`) o una tarea del Programador de tareas de Windows que
 ejecute `wsl -d Ubuntu -- bash -lc 'cd ~/dev/hermes-os && ./hermes agent'`.
+
+## Segunda Mac (p. ej. un MacBook)
+
+Igual que arriba, pero en macOS no hace falta WSL y puede servir su propio
+dashboard en `localhost:31415`. Del `.env` de la principal cambian:
+
+```
+MACHINE_NAME=macbook-pro     # distinto
+VAULT_PATH=                  # solo-ejecución: no escribe notas
+HERMES_JOBS=off              # tareas programadas y rescates solo en la principal
+HERMES_TUNNEL=off            # la app móvil sigue apuntando a la principal
+ESTUDIO_MEDIA_ROOT=          # cae a ~/Movies/estudio/<pieza>
+COMPOSICION_MEDIA_ROOT=
+RUVIEW_PATH=
+HERMES_LIGHTS_HOST=          # o déjalo si el MacBook está en la misma red
+```
+
+Con `HERMES_JOBS=off` tampoco late la presencia, así que el MacBook no aparece
+en el selector de máquinas de la principal: se usa desde su propio dashboard.
+No correr `./hermes setup` (republica los agentes de ElevenLabs) ni
+`supabase db push` (las migraciones ya están en el proyecto compartido).
 
 ## Verificación
 

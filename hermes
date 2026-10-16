@@ -107,12 +107,19 @@ cmd_doctor() {
   echo
   say "  ${B}Autostart (launchd)${R}"
   local l
+  local tunnel_off=""
+  [[ "$(env_get HERMES_TUNNEL)" == "off" ]] && tunnel_off=1
   for l in "$PLIST_AGENT" "$PLIST_WEB" "$PLIST_OPEN" "$PLIST_TUNNEL"; do
+    [[ -n "$tunnel_off" && "$l" == "$PLIST_TUNNEL" ]] && continue
     if svc_loaded "$l"; then ok "$l cargado"; else warn "$l no cargado ${DIM}(./hermes install)${R}"; fi
   done
-  local tun_host
-  tun_host="$(curl -sf --max-time 2 "http://127.0.0.1:8654/quicktunnel" 2>/dev/null | sed -E 's/.*"hostname":"([^"]*)".*/\1/')"
-  if [[ -n "$tun_host" ]]; then ok "túnel público: https://$tun_host"; else warn "túnel cloudflared no responde (app móvil solo por LAN)"; fi
+  if [[ -n "$tunnel_off" ]]; then
+    ok "túnel apagado en esta máquina (HERMES_TUNNEL=off)"
+  else
+    local tun_host
+    tun_host="$(curl -sf --max-time 2 "http://127.0.0.1:8654/quicktunnel" 2>/dev/null | sed -E 's/.*"hostname":"([^"]*)".*/\1/')"
+    if [[ -n "$tun_host" ]]; then ok "túnel público: https://$tun_host"; else warn "túnel cloudflared no responde (app móvil solo por LAN)"; fi
+  fi
   echo
   say "  ${B}Salud${R}"
   if curl -sf -o /dev/null --max-time 2 "http://localhost:$AGENT_PORT/health"; then
@@ -252,13 +259,20 @@ cmd_install() {
   write_plist "$PLIST_AGENT"  yes agent  "$pnpm_bin" --filter @hermes/agent start
   write_plist "$PLIST_WEB"    yes web    "$pnpm_bin" --filter @hermes/web start
   write_plist "$PLIST_OPEN"   no  open   /bin/bash "$ROOT/scripts/hermes-open.sh"
-  write_plist "$PLIST_TUNNEL" yes tunnel /bin/bash "$ROOT/scripts/hermes-tunnel.sh"
 
   local u; u="$(id -u)"
   launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_AGENT.plist"  && ok "agente arriba (:$AGENT_PORT)"
   launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_WEB.plist"    && ok "web arriba (:$WEB_PORT)"
   launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_OPEN.plist"   && ok "dashboard se abrirá al estar sano"
-  launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_TUNNEL.plist" && ok "túnel público del agente (URL en Supabase remote_config)"
+  # El túnel publica SU URL en remote_config: en una segunda máquina que
+  # comparte Supabase le quitaría la app móvil a la principal.
+  if [[ "$(env_get HERMES_TUNNEL)" == "off" ]]; then
+    rm -f "$LA_DIR/$PLIST_TUNNEL.plist"
+    ok "túnel apagado en esta máquina (HERMES_TUNNEL=off)"
+  else
+    write_plist "$PLIST_TUNNEL" yes tunnel /bin/bash "$ROOT/scripts/hermes-tunnel.sh"
+    launchctl bootstrap "gui/$u" "$LA_DIR/$PLIST_TUNNEL.plist" && ok "túnel público del agente (URL en Supabase remote_config)"
+  fi
   echo
   say "  ${GREEN}Listo:${R} Hermes arranca solo en cada login."
   say "  ${DIM}Logs: $LOG_DIR · Para desarrollo: ./hermes uninstall && ./hermes dev${R}"
