@@ -17,6 +17,8 @@ export function EnglishStats({
   live,
   onPractice,
   onStop,
+  classBusy,
+  onClass,
 }: {
   sessions: EnglishSession[];
   vocab: VocabEntry[];
@@ -27,6 +29,10 @@ export function EnglishStats({
   live: boolean;
   onPractice: () => void;
   onStop: () => void;
+  /** Hay clase (o junta) en vivo: el control vive en su vista, aquí no se ofrece nada. */
+  classBusy: boolean;
+  /** Arranca la compañera de clase (Google Meet). */
+  onClass: () => void;
 }) {
   const totalSec = sessions.reduce((a, s) => a + (s.duration_sec ?? 0), 0);
   const totalMin = Math.round(totalSec / 60);
@@ -42,7 +48,7 @@ export function EnglishStats({
   return (
     <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
       {streak != null && streak > 0 && (
-        <StatBlock label="Racha" value={`🔥 ${streak}`} unit="días" size="lg" tone="amber" />
+        <StatBlock label="Racha" value={streak} unit="días" size="lg" tone="amber" />
       )}
       <StatBlock label="Sesiones" value={sessions.length} size="lg" />
       {totalMin > 0 && (
@@ -78,16 +84,25 @@ export function EnglishStats({
           />
         </div>
       )}
-      {live ? (
+      {classBusy ? null : live ? (
         <button
           type="button"
           onClick={onStop}
           title="Cuelga la llamada — la sesión se guarda y el coach genera el reporte"
-          className="ml-auto self-center rounded-sm border border-red/50 bg-red/5 px-3 py-1.5 text-xs tracking-label text-red uppercase transition-colors hover:border-red"
+          className="ml-auto self-center rounded-sm border border-red/50 bg-red/5 px-3 py-1.5 text-xs text-red transition-colors hover:border-red"
         >
           ◼ Terminar práctica
         </button>
       ) : (
+        <span className="ml-auto flex items-center gap-2 self-center">
+        <button
+          type="button"
+          onClick={onClass}
+          title="Abre la compañera para tu clase de Google Meet: comparte la pestaña de Meet y te corrige, te ayuda a responder y arma el reporte"
+          className="rounded-sm border border-accent/50 bg-accent/5 px-3 py-1.5 text-xs text-accent transition-colors hover:border-accent"
+        >
+          ● Clase en vivo
+        </button>
         <button
           type="button"
           onClick={onPractice}
@@ -97,10 +112,11 @@ export function EnglishStats({
               ? "Conecta la voz con el tutor de inglés"
               : "Falta NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID (pnpm setup:elevenlabs)"
           }
-          className="ml-auto self-center rounded-sm border border-green/50 bg-green/5 px-3 py-1.5 text-xs tracking-label text-green uppercase transition-colors hover:border-green disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-sm border border-green/50 bg-green/5 px-3 py-1.5 text-xs text-green transition-colors hover:border-green disabled:cursor-not-allowed disabled:opacity-40"
         >
           ▶ Practicar ahora
         </button>
+        </span>
       )}
     </div>
   );

@@ -16,14 +16,33 @@
  *   ingesta al próximo boot en vez de perderla.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { WSContext } from "hono/ws";
+import {
+  CLASS_COACH_MODE,
+  classSpeakerNames,
+  computeClassMetrics,
+  conceptKey,
+  conceptText,
+  conceptMentioned,
+  correctionText,
+  foldText,
+  parseConcepts,
+  parseContribution,
+  parseCorrection,
+  parseStrategic,
+  TEAM_COACH_MODE,
+  teamReviewMarkdown,
+} from "@hermes/shared";
 import type {
+  AutoHelpMode,
   LiveAudioMode,
+  LiveClientKind,
   LiveClientMessage,
+  LiveHelpIntent,
   LiveCoachMetrics,
   LiveMeetingSnapshot,
   LiveMeetingStatus,
@@ -38,19 +57,49 @@ import { env } from "../env.js";
 import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
 import { searchKnowledge, knowledgeToText } from "../knowledge.js";
-import { getProjectBriefing, readProjects } from "../vault/projects.js";
+import { readProjects } from "../vault/projects.js";
 import { ingestMeeting } from "./ingest.js";
 import { computeCoachMetrics } from "./live-coach.js";
 import {
   buildFastSystemPrompt,
   COACH_MODES,
   createFastCopilot,
+  createFastEngine,
   resolveCoachMode,
   type FastCopilot,
   type FastCopilotEvent,
+  type FastEngine,
 } from "./live-copilot.js";
 import { getLiveSttProvider, type LiveSttConnection, type NormalizedTurn } from "./live-stt.js";
-import { OWNER } from "../owner.js";
+import { clientsChanged, LiveClientSet, type LiveClientInfo } from "./live-clients.js";
+import { recordLiveOutcome } from "./live-index.js";
+import { OWNER, soulSection } from "../owner.js";
+import {
+  loadMeetingContext,
+  meetingContextBlocks,
+  type MeetingContext,
+} from "./meeting-context.js";
+import {
+  buildTeamConceptsPrompt,
+  buildTeamHelpPrompt,
+  CONCEPT_ID_PREFIX,
+  TEAM_HELP_KINDS,
+  TeamCopilotController,
+} from "./live-team.js";
+import {
+  buildCorrectionSystemPrompt,
+  buildHelpSystemPrompt,
+  ClassCompanionController,
+  CORRECTION_ID_PREFIX,
+} from "../english/class-companion.js";
+import { ingestClass } from "../english/class-ingest.js";
+import {
+  ArticulationCoach,
+  buildPolishSystemPrompt,
+  POLISH_ID_PREFIX,
+} from "./live-articulation.js";
+import { loadCompanionKnowledge } from "../english/companion-knowledge.js";
+import { isAutoHelp } from "../english/practice-companion.js";
 
 // ── Constantes de cadencia y umbrales ──────────────────────────────────
 
@@ -60,6 +109,12 @@ const SNAPSHOT_EVERY_TICKS = 3; // 15 s
 const SUGGEST_MIN_INTERVAL_MS = 20_000;
 const SUGGEST_MIN_NEW_CHARS = 250;
 const SUGGEST_MAX_INTERVAL_MS = 45_000;
+// Equipo: una ventana para aportar despierta al loop estratégico, pero no más
+// seguido que esto (cada corrida es un proceso CLI aparte).
+const STRATEGIC_WINDOW_FLOOR_MS = 15_000;
+// RAG por corrida: si los embeddings tardan más que esto, la sugerencia sale sin él.
+const KNOWLEDGE_TIMEOUT_MS = 800;
+const DEEP_ID_PREFIX = "deep-";
 const SUGGEST_TIMEOUT_MS = 30_000;
 const TRANSCRIPT_WINDOW_CHARS = 6_000;
 const KNOWLEDGE_QUERY_CHARS = 400;
@@ -93,7 +148,10 @@ interface LiveSession {
   stt: LiveSttConnection | null;
   sttName: string;
   sttState: LiveSttState;
-  clients: Set<WSContext>;
+  /** Conexiones WS con rol (un dueño del audio + viewers). */
+  clients: LiveClientSet<WSContext>;
+  /** Quién arrancó la junta (dashboard o Hermes Phone): va al acta. */
+  client: LiveClientKind;
   ticker: NodeJS.Timeout | null;
   heartbeat: NodeJS.Timeout | null;
   ticks: number;
@@ -120,10 +178,33 @@ interface LiveSession {
    *  para que ningún writeFile en vuelo recree el archivo tras el unlink. */
   snapshotChain: Promise<void>;
   meetingId?: string;
+  /** Clase de inglés terminada → sesión de english_sessions. */
+  englishSessionId?: number;
+  /** Clase: qué ayuda sale sola cuando te preguntan (la elige el browser). */
+  autoHelp: AutoHelpMode;
+  /** Equipo: conceptos ya explicados (clave plegada) — ninguno sale dos veces. */
+  explained: Set<string>;
+  /** Nota + tareas + actas anteriores del proyecto (local; se carga una vez al arrancar). */
+  context: Promise<MeetingContext>;
+  /** Loop estratégico como sesión persistente (null = desactivado → camino viejo por query()). */
+  deepEngine: FastEngine | null;
+  /** "Dilo más claro" sobre tus intervenciones (null = clase, apagado o sin copiloto). */
+  articulation: ArticulationCoach | null;
+  /** Segmentos finales que el motor estratégico ya vio (le va solo lo nuevo). */
+  deepSeen: Set<string>;
+  /** Epoch de la sesión del motor cuando se le mandó lo último (si cambia, va todo). */
+  deepEpoch: number;
+  deepSeq: number;
+  deepStartedAt?: number;
   error?: string;
 }
 
 const sessions = new Map<string, LiveSession>();
+
+/** Clase de inglés: otro controller, sin loop estratégico y otro cierre. */
+const isClass = (s: Pick<LiveSession, "coachMode">) => s.coachMode === CLASS_COACH_MODE;
+/** Reunión de equipo: aportar + entender en lugar del soplo de respuestas. */
+const isTeam = (s: Pick<LiveSession, "coachMode">) => s.coachMode === TEAM_COACH_MODE;
 
 /** Segundo start con una junta viva: el 409 lleva el snapshot para reanudarla. */
 export class LiveConflictError extends Error {
@@ -150,6 +231,9 @@ export async function startLiveMeeting(input: {
   languages?: string[];
   suggestionLang?: LiveSuggestionLang;
   coachMode?: string;
+  autoHelp?: AutoHelpMode;
+  /** Quién arranca la junta (default "web"). */
+  client?: LiveClientKind;
 }): Promise<LiveMeetingSnapshot> {
   // readProjects va ANTES del guard de sesión única: entre el find de activas
   // y el sessions.set no puede colarse ningún await, o dos POST start
@@ -177,7 +261,8 @@ export async function startLiveMeeting(input: {
     stt: null,
     sttName: provider.name,
     sttState: "connected",
-    clients: new Set(),
+    clients: new LiveClientSet<WSContext>(),
+    client: input.client ?? "web",
     ticker: null,
     heartbeat: null,
     ticks: 0,
@@ -193,6 +278,15 @@ export async function startLiveMeeting(input: {
     suggestionLang: input.suggestionLang ?? "auto",
     coachMode: resolveCoachMode(input.coachMode),
     coachMetrics: null,
+    autoHelp: input.autoHelp ?? "full",
+    explained: new Set(),
+    // En paralelo con el handshake del STT: cuando llega la primera frase ya está.
+    context: loadMeetingContext(project?.slug ?? input.project),
+    deepEngine: null,
+    articulation: null,
+    deepSeen: new Set(),
+    deepEpoch: -1,
+    deepSeq: 0,
     snapshotsDisabled: false,
     snapshotChain: Promise.resolve(),
   };
@@ -256,7 +350,7 @@ export async function startLiveMeeting(input: {
   emit({
     kind: "meeting_live",
     taskId: session.id,
-    detail: `🔴 junta en vivo: ${session.projectName ?? session.project}`,
+    detail: `🔴 junta en vivo: ${session.projectName ?? session.project}${session.client === "phone" ? " (desde el teléfono)" : ""}`,
   });
   return toSnapshot(session);
 }
@@ -287,7 +381,10 @@ export function renameSpeaker(
   return toSnapshot(s);
 }
 
-export function requestSuggestions(id: string): {
+export function requestSuggestions(
+  id: string,
+  intent?: LiveHelpIntent,
+): {
   ok: boolean;
   reason?: "in_flight" | "not_live";
 } {
@@ -296,9 +393,11 @@ export function requestSuggestions(id: string): {
   // Con capa rápida activa, "Soplar ahora" responde en segundos por esa vía
   // (streaming); el loop estratégico sigue con su cadencia propia.
   if (s.fastCopilot) {
-    s.fastCopilot.triggerNow();
+    s.fastCopilot.triggerNow(undefined, intent);
     return { ok: true };
   }
+  // La clase nunca cae al loop estratégico (es de juntas, en español).
+  if (isClass(s)) return { ok: false, reason: "not_live" };
   if (s.suggesting) return { ok: false, reason: "in_flight" };
   void generateSuggestions(s, true);
   return { ok: true };
@@ -327,6 +426,10 @@ export async function stopLiveMeeting(id: string): Promise<LiveMeetingSnapshot |
   // La capa rápida muere aquí: ni los Turns del drain ni el cierre disparan soplos.
   s.fastCopilot?.destroy();
   s.fastCopilot = null;
+  s.deepEngine?.destroy();
+  s.deepEngine = null;
+  s.articulation?.destroy();
+  s.articulation = null;
 
   // Drena el STT: Terminate flushea los Turns finales y la SpeakerRevision
   // retroactiva (mejora la diarización del .md gratis).
@@ -356,7 +459,13 @@ export async function stopLiveMeeting(id: string): Promise<LiveMeetingSnapshot |
   // señal terminal inmediata sin tocar apps/web es el mismo patrón del
   // auto-cierre: error{fatal} con mensaje claro y limpieza SIN dotfile.
   if (s.finalChars < MIN_INGEST_CHARS) {
-    failSession(s, "junta demasiado corta — no se generó acta", { keepSnapshotFile: false });
+    failSession(
+      s,
+      isClass(s)
+        ? "clase demasiado corta — no se guardó la sesión"
+        : "junta demasiado corta — no se generó acta",
+      { keepSnapshotFile: false },
+    );
     return toSnapshot(s);
   }
 
@@ -367,37 +476,59 @@ export async function stopLiveMeeting(id: string): Promise<LiveMeetingSnapshot |
   return toSnapshot(s);
 }
 
-/** false = sesión inexistente (el caller cierra el WS con 4404). */
-export function attachClient(id: string, ws: WSContext): boolean {
+/**
+ * false = sesión inexistente (el caller cierra el WS con 4404). Un `audio`
+ * nuevo desplaza SOLO al audio anterior (4001: "la junta se abrió en otra
+ * pestaña/dispositivo"); un `viewer` nunca desplaza a nadie.
+ */
+export function attachClient(
+  id: string,
+  ws: WSContext,
+  info: LiveClientInfo = { role: "audio", client: "web" },
+): boolean {
   const s = sessions.get(id);
   if (!s) return false;
-  // Un solo dueño del mic: la conexión nueva desplaza a las anteriores (el
-  // front muestra "la junta se abrió en otra pestaña" al recibir el 4001).
-  for (const old of s.clients) {
+  const before = s.clients.summary();
+  const displaced = s.clients.add(ws, info);
+  for (const old of displaced) {
     try {
-      old.close(4001, "otra pestaña tomó la junta");
+      old.close(
+        4001,
+        info.client === "phone" ? "el teléfono tomó el audio de la junta" : "otra pestaña tomó la junta",
+      );
     } catch {
       /* ya estaba muerto */
     }
   }
-  s.clients.clear();
-  s.clients.add(ws);
   s.lastClientAt = Date.now();
   send(ws, { type: "hello", session: toSnapshot(s) });
+  announceClients(s, before);
   return true;
 }
 
 export function detachClient(id: string, ws: WSContext): void {
   const s = sessions.get(id);
   if (!s) return;
-  s.clients.delete(ws);
-  // Desde aquí corre el timeout "sin navegador": tolera reloads, corta zombies.
+  const before = s.clients.summary();
+  if (!s.clients.remove(ws)) return; // un desplazado ya había salido del set
+  // Desde aquí corre el timeout "sin clientes" (cualquier rol): tolera
+  // reloads, corta zombies.
   if (s.clients.size === 0) s.lastClientAt = Date.now();
+  announceClients(s, before);
 }
 
-export function pushAudio(id: string, chunk: ArrayBuffer): void {
+/** Evento `clients` solo si cambió el dueño del audio o el número de viewers. */
+function announceClients(s: LiveSession, before: ReturnType<LiveClientSet<WSContext>["summary"]>): void {
+  const now = s.clients.summary();
+  if (!clientsChanged(before, now)) return;
+  broadcast(s, { type: "clients", audioClient: now.audioClient, viewers: now.viewers });
+}
+
+/** `ws` = quien manda: solo el dueño vigente del audio alimenta el STT (un viewer se ignora). */
+export function pushAudio(id: string, chunk: ArrayBuffer, ws?: WSContext): void {
   const s = sessions.get(id);
   if (!s || s.status !== "live" || !s.stt) return;
+  if (ws && !s.clients.canSendAudio(ws)) return;
   s.lastAudioAt = Date.now();
   s.stt.sendAudio(new Uint8Array(chunk));
 }
@@ -413,8 +544,22 @@ export function handleClientMessage(id: string, raw: string): void {
   if (msg.type === "stop") void stopLiveMeeting(id);
   else if (msg.type === "rename" && typeof msg.speaker === "string" && typeof msg.name === "string")
     renameSpeaker(id, msg.speaker, msg.name);
-  else if (msg.type === "suggest_now") requestSuggestions(id);
+  else if (msg.type === "suggest_now") requestSuggestions(id, parseHelpIntent(msg.intent));
   else if (msg.type === "mark_self" && typeof msg.speaker === "string") markSelf(id, msg.speaker);
+  else if (msg.type === "auto_help" && isAutoHelp(msg.mode)) setAutoHelp(id, msg.mode);
+}
+
+/** Clase: cambia en caliente qué ayuda sale sola cuando te preguntan. */
+export function setAutoHelp(id: string, mode: AutoHelpMode): LiveMeetingSnapshot | undefined {
+  const s = sessions.get(id);
+  if (!s) return undefined;
+  s.autoHelp = mode;
+  if (s.fastCopilot instanceof ClassCompanionController) s.fastCopilot.setAutoHelp(mode);
+  return toSnapshot(s);
+}
+
+export function parseHelpIntent(v: unknown): LiveHelpIntent | undefined {
+  return v === "scaffold" || v === "explain" || v === "full" || v === "question" ? v : undefined;
 }
 
 // ── Transcript final ───────────────────────────────────────────────────
@@ -479,7 +624,10 @@ function handleTurn(s: LiveSession, turn: NormalizedTurn): void {
   // Capa rápida: el gatillo vive en cada turno (parciales incluidos — el
   // end_of_turn crudo llega antes que el final formateado). Solo en vivo:
   // los Turns que flushea el Terminate del stop ya no ameritan soplo.
-  if (s.status === "live") s.fastCopilot?.onTurn(turn, s.selfSpeaker);
+  if (s.status === "live") {
+    s.fastCopilot?.onTurn(turn, s.selfSpeaker);
+    s.articulation?.onTurn(turn, s.selfSpeaker);
+  }
 }
 
 function applySpeakerRevision(
@@ -527,11 +675,11 @@ async function tick(s: LiveSession): Promise<void> {
 
   // Coach: métricas puras del transcript (barato; solo si hay finales).
   if (s.finalChars > 0) {
-    s.coachMetrics = computeCoachMetrics(s.segments, s.selfSpeaker, now - s.startedAt);
+    s.coachMetrics = coachMetricsOf(s, now - s.startedAt);
     broadcast(s, { type: "coach_metrics", metrics: s.coachMetrics });
   }
 
-  if (s.suggesting) return;
+  if (isClass(s) || s.suggesting) return;
   const newChars = s.finalChars - s.charsAtLastGen;
   const since = now - s.lastGenAt;
   if (
@@ -551,10 +699,12 @@ async function tick(s: LiveSession): Promise<void> {
  */
 async function initFastCopilot(s: LiveSession): Promise<void> {
   if (env.COPILOT_PROVIDER === "off") return;
+  if (isClass(s)) return initClassCompanion(s);
+  initArticulation(s);
+  if (isTeam(s)) return initTeamCopilot(s);
   try {
-    const [briefing, projects, hits] = await Promise.all([
-      getProjectBriefing(s.project),
-      readProjects(),
+    const [context, hits] = await Promise.all([
+      s.context,
       searchKnowledge(`${s.title ?? ""} ${s.projectName ?? s.project}`.trim(), {
         project: s.project,
         limit: 4,
@@ -562,13 +712,10 @@ async function initFastCopilot(s: LiveSession): Promise<void> {
     ]);
     // Un stop pudo llegar durante los awaits: no arrancar un proceso huérfano.
     if (s.status !== "live" || sessions.get(s.id) !== s) return;
-    const project = projects.find((p) => p.slug.toLowerCase() === s.project.toLowerCase());
     const systemStatic = buildFastSystemPrompt({
       slug: s.project,
-      name: project?.name ?? s.projectName,
-      briefing,
-      estadoActual: project?.estado_actual,
-      knowledge: hits.length ? knowledgeToText(hits) : "",
+      name: context.name ?? s.projectName,
+      contextBlocks: meetingContextBlocks(context, hits.length ? knowledgeToText(hits) : ""),
       suggestionLang: s.suggestionLang,
       coachMode: s.coachMode,
     });
@@ -577,14 +724,275 @@ async function initFastCopilot(s: LiveSession): Promise<void> {
       getWindow: () => buildRecentWindow(s),
       onEvent: (ev) => handleFastEvent(s, ev),
     });
+    initDeepEngine(s, context, hits.length ? knowledgeToText(hits) : "");
   } catch (err) {
     console.error("[copilot] init:", String(err).slice(0, 200));
   }
 }
 
+/**
+ * "Dilo más claro" (junta y equipo): motor en COLA que reescribe tus
+ * intervenciones con el punto primero. La clase no lo usa: su corrector ya
+ * corrige articulación además de gramática.
+ */
+function initArticulation(s: LiveSession): void {
+  if (env.ARTICULATION === "off" || s.articulation) return;
+  const engine = createFastEngine(buildPolishSystemPrompt(), (ev) => handleFastEvent(s, ev), {
+    interrupt: false,
+    maxQueue: 1,
+    warmup: 'Reunión iniciada. Responde únicamente "—".',
+  });
+  if (!engine) return;
+  s.articulation = new ArticulationCoach(engine, {
+    nameOf: (label) => s.speakerNames[label]?.trim() || `Hablante ${label}`,
+  });
+}
+
+/**
+ * Clase de inglés: dos motores con su propio prompt — correcciones en cola
+ * (sin interrumpir) y ayuda interrumpible — priorizando los errores que ya se
+ * repiten en las sesiones anteriores.
+ */
+async function initClassCompanion(s: LiveSession): Promise<void> {
+  try {
+    const knowledge = await loadCompanionKnowledge();
+    if (s.status !== "live" || sessions.get(s.id) !== s) return;
+    const onEvent = (ev: FastCopilotEvent) => handleFastEvent(s, ev);
+    const correct = createFastEngine(buildCorrectionSystemPrompt(knowledge), onEvent, {
+      interrupt: false,
+      maxQueue: 2,
+      warmup: 'Clase iniciada. Responde únicamente "—".',
+    });
+    const help = createFastEngine(buildHelpSystemPrompt(knowledge), onEvent, {
+      warmup: 'Clase iniciada. Responde únicamente "OK".',
+    });
+    if (!correct || !help) {
+      correct?.destroy();
+      help?.destroy();
+      return;
+    }
+    s.fastCopilot = new ClassCompanionController(correct, help, {
+      autoHelp: s.autoHelp,
+      otherName: "Profe",
+    });
+  } catch (err) {
+    console.error("[clase] init:", String(err).slice(0, 200));
+  }
+}
+
+/**
+ * Reunión de equipo: motor de aportes (interrumpible: la ventana más reciente
+ * gana) + glosario en cola. Ambos con el proyecto, sus tareas, el historial
+ * relevante y quién eres (SOUL "Quién soy") congelados al arrancar.
+ */
+async function initTeamCopilot(s: LiveSession): Promise<void> {
+  try {
+    const [context, hits] = await Promise.all([
+      s.context,
+      searchKnowledge(`${s.title ?? ""} ${s.projectName ?? s.project}`.trim(), {
+        project: s.project,
+        limit: 5,
+      }).catch(() => []),
+    ]);
+    if (s.status !== "live" || sessions.get(s.id) !== s) return;
+    const ctx = {
+      slug: s.project,
+      name: context.name ?? s.projectName,
+      about: soulSection("Quién soy"),
+      context,
+      knowledge: hits.length ? knowledgeToText(hits) : "",
+      suggestionLang: s.suggestionLang,
+    };
+    const onEvent = (ev: FastCopilotEvent) => handleFastEvent(s, ev);
+    // El warm-up NO es "—": la sesión recuerda su primer turno, y uno que
+    // practica el silencio dejaba callado al motor en las primeras ventanas.
+    const help = createFastEngine(buildTeamHelpPrompt(ctx), onEvent, {
+      model: env.COPILOT_TEAM_MODEL,
+      warmup: 'Reunión iniciada; aún no hay conversación. Responde únicamente "OK".',
+    });
+    if (!help) return;
+    // Sin glosario el aporte sigue: el concepto es un extra, no un requisito.
+    const concepts = createFastEngine(buildTeamConceptsPrompt(ctx), onEvent, {
+      interrupt: false,
+      maxQueue: 2,
+      warmup: 'Reunión iniciada; aún no hay conversación. Responde únicamente "OK".',
+    });
+    s.fastCopilot = new TeamCopilotController(help, concepts, {
+      nameOf: (label) => s.speakerNames[label]?.trim() || `Hablante ${label}`,
+      ownerNames: [OWNER, ...env.OWNER_ALIASES],
+      // Cada ventana también despierta al loop estratégico (dato/rumbo con RAG
+      // fresco) en vez de esperar su cadencia de 20-45 s.
+      onWindow: () => kickStrategic(s),
+    });
+    initDeepEngine(s, context, ctx.knowledge);
+  } catch (err) {
+    console.error("[equipo] init:", String(err).slice(0, 200));
+  }
+}
+
+/**
+ * Loop estratégico como sesión persistente del Agent SDK (como la capa
+ * rápida): el CLI vive toda la junta, cada corrida manda solo lo nuevo y la
+ * respuesta es texto «tipo | sugerencia | por qué». Con query() + tool cada
+ * corrida era un proceso nuevo más dos vueltas del modelo: 11-16 s.
+ */
+function initDeepEngine(s: LiveSession, context: MeetingContext, knowledge: string): void {
+  if (s.status !== "live" || s.deepEngine) return;
+  s.deepEngine = createFastEngine(
+    buildCoachPrompt({
+      slug: s.project,
+      name: context.name ?? s.projectName,
+      contextBlocks: meetingContextBlocks(context, knowledge),
+      previous: [],
+      fastLayerActive: s.fastCopilot != null,
+      coachMode: s.coachMode,
+      format: "text",
+    }),
+    (ev) => handleFastEvent(s, ev),
+    {
+      model: env.COPILOT_DEEP_MODEL,
+      warmup: 'Junta iniciada; aún no hay conversación. Responde únicamente "OK".',
+    },
+  );
+  console.log(`[live] estratégico persistente ${s.deepEngine ? `listo (${env.COPILOT_DEEP_MODEL})` : "apagado"}`);
+}
+
+/** Lo que el motor estratégico aún no vio (todo, si su sesión es nueva). */
+function deepDelta(s: LiveSession, engine: FastEngine): string {
+  const epoch = engine.epoch?.() ?? 0;
+  const fresh = epoch !== s.deepEpoch;
+  s.deepEpoch = epoch;
+  if (fresh) s.deepSeen.clear();
+  const names = displayNames(s);
+  const finals = s.segments
+    .filter((seg) => seg.final && seg.text.trim() && !s.deepSeen.has(seg.id))
+    .sort((a, b) => a.startMs - b.startMs);
+  for (const seg of finals) s.deepSeen.add(seg.id);
+  const lines = finals.map(
+    (seg) =>
+      `${seg.speaker === s.selfSpeaker ? `${OWNER} (yo)` : names[seg.speaker]?.trim() || `Hablante ${seg.speaker}`}: ${seg.text.trim()}`,
+  );
+  let body = lines.join("\n");
+  if (body.length > TRANSCRIPT_WINDOW_CHARS) body = body.slice(-TRANSCRIPT_WINDOW_CHARS);
+  if (!body) return "(Sin líneas nuevas desde tu último mensaje.)";
+  return fresh
+    ? `Transcripción hasta ahora (el final es lo que se está diciendo):\n"""\n${body}\n"""`
+    : `Líneas nuevas desde tu último mensaje:\n"""\n${body}\n"""`;
+}
+
+/** RAG fresco para el momento, con tope: si los embeddings no responden, se sigue sin él. */
+async function momentKnowledge(s: LiveSession): Promise<string> {
+  const text = s.segments
+    .filter((seg) => seg.final)
+    .slice(-6)
+    .map((seg) => seg.text)
+    .join(" ")
+    .slice(-KNOWLEDGE_QUERY_CHARS);
+  if (!text.trim()) return "";
+  const hits = await Promise.race([
+    searchKnowledge(text, { project: s.project, limit: 3 }).catch(() => []),
+    new Promise<[]>((resolve) => setTimeout(() => resolve([]), KNOWLEDGE_TIMEOUT_MS).unref()),
+  ]);
+  return hits.length ? knowledgeToText(hits) : "";
+}
+
+/** Una corrida del loop estratégico por la sesión persistente. */
+async function generateViaEngine(s: LiveSession, engine: FastEngine, manual: boolean): Promise<void> {
+  s.suggesting = true;
+  s.deepStartedAt = Date.now();
+  broadcast(s, { type: "suggesting", inFlight: true });
+  const knowledge = await momentKnowledge(s);
+  if (s.status !== "live" || s.deepEngine !== engine) return finishDeep(s);
+  // Lo que otras capas ya soplaron (la sesión solo recuerda lo suyo).
+  const others = s.suggestions
+    .filter((x) => x.source === "fast")
+    .slice(-4)
+    .map((x) => `- [${x.kind}] ${x.text.replace(/\n+/g, " ")}`)
+    .join("\n");
+  s.deepSeq += 1;
+  engine.generate({
+    id: `${DEEP_ID_PREFIX}${s.deepSeq}`,
+    trigger: manual ? "manual" : "estratégico",
+    manual,
+    kind: "dato",
+    prompt: [
+      deepDelta(s, engine),
+      knowledge ? `Conocimiento relevante para este momento:\n${knowledge}` : "",
+      others ? `Ya se le sopló a ${OWNER} (no lo repitas):\n${others}` : "",
+      manual
+        ? `${OWNER} pidió apoyo AHORA: da al menos una sugerencia.`
+        : "Evalúa el momento actual. Formato: una línea por sugerencia «tipo | sugerencia | por qué», o — si no hay nada valioso.",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+}
+
+function finishDeep(s: LiveSession): void {
+  s.lastGenAt = Date.now();
+  s.charsAtLastGen = s.finalChars;
+  s.suggesting = false;
+  broadcast(s, { type: "suggesting", inFlight: false });
+}
+
+/** Respuesta del motor estratégico: tarjetas enteras (sin streaming), o nada. */
+function handleDeepEvent(s: LiveSession, ev: FastCopilotEvent): void {
+  if (ev.type === "done") {
+    const items = parseStrategic(ev.text);
+    const elapsed = s.deepStartedAt ? Date.now() - s.deepStartedAt : ev.elapsedMs;
+    console.log(`[live] estratégico en ${elapsed}ms (modelo ${ev.elapsedMs}ms) → ${items.length} sugerencia(s)`);
+    const atMs = Date.now() - s.startedAt;
+    for (const it of items) {
+      const suggestion: LiveSuggestion = {
+        id: randomUUID().slice(0, 8),
+        kind: it.kind,
+        text: it.text,
+        why: it.why,
+        atMs,
+        manual: ev.manual || undefined,
+      };
+      s.suggestions.push(suggestion);
+      broadcast(s, { type: "suggestion", suggestion });
+    }
+    if (items.length)
+      emit({
+        kind: "meeting_live",
+        taskId: s.id,
+        detail: `💡 sugerencia [${items[0].kind}]: ${items[0].text.slice(0, 100)}`,
+      });
+    finishDeep(s);
+  } else if (ev.type === "aborted") {
+    finishDeep(s);
+  }
+}
+
+/** Equipo: una ventana dispara el loop estratégico si está libre y pasó el piso. */
+function kickStrategic(s: LiveSession): void {
+  if (s.status !== "live" || s.suggesting) return;
+  if (Date.now() - s.lastGenAt < STRATEGIC_WINDOW_FLOOR_MS) return;
+  void generateSuggestions(s, false);
+}
+
+/** Métricas del coach; en clase: muletillas solo en inglés + métricas de speaking. */
+function coachMetricsOf(s: LiveSession, atMs: number): LiveCoachMetrics {
+  if (!isClass(s)) return computeCoachMetrics(s.segments, s.selfSpeaker, atMs);
+  const metrics = computeCoachMetrics(s.segments, s.selfSpeaker, atMs, { fillers: "en" });
+  const corrections = s.suggestions.filter((x) => x.kind === "corregir").length;
+  const cls = computeClassMetrics(s.segments, s.selfSpeaker, corrections);
+  return cls ? { ...metrics, class: cls } : metrics;
+}
+
+/** Nombres visibles: en clase, tú = "Yo" y el resto = "Profe" (salvo nombre puesto a mano). */
+function displayNames(s: Pick<LiveSession, "coachMode" | "segments" | "selfSpeaker" | "speakerNames">) {
+  return isClass(s)
+    ? classSpeakerNames(s.segments, s.selfSpeaker, s.speakerNames)
+    : s.speakerNames;
+}
+
 /** Ventana para la capa rápida: últimos turnos CON parciales (lo que se está diciendo). */
 function buildRecentWindow(s: LiveSession): string {
-  const named = (label: string) => s.speakerNames[label]?.trim() || `Hablante ${label}`;
+  const names = displayNames(s);
+  const named = (label: string) => names[label]?.trim() || `Hablante ${label}`;
   const parts: string[] = [];
   for (const seg of s.segments.slice(-30)) {
     const text = seg.text.trim();
@@ -597,11 +1005,29 @@ function buildRecentWindow(s: LiveSession): string {
 function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
   // Guard contra callbacks tardíos (stream que termina después del stop).
   if (s.status !== "live") return;
+  // Correcciones de la clase: SIN streaming (corren en paralelo con la ayuda
+  // y la UI tiene un solo carril de streaming) — llegan enteras al final.
+  if ("id" in ev && ev.id.startsWith(CORRECTION_ID_PREFIX)) {
+    if (ev.type === "done") handleCorrection(s, ev.id, ev.text, ev.elapsedMs, ev.trigger);
+    return;
+  }
+  // "Dilo más claro": igual que las correcciones — entero, sin streaming.
+  if ("id" in ev && ev.id.startsWith(POLISH_ID_PREFIX)) {
+    if (ev.type === "done") handlePolish(s, ev.id, ev.text, ev.elapsedMs, ev.trigger);
+    return;
+  }
+  // Loop estratégico persistente: tarjetas enteras, sin streaming.
+  if ("id" in ev && ev.id.startsWith(DEEP_ID_PREFIX)) return handleDeepEvent(s, ev);
+  // Conceptos de la reunión de equipo: igual, enteros y sin streaming.
+  if ("id" in ev && ev.id.startsWith(CONCEPT_ID_PREFIX)) {
+    if (ev.type === "done") handleConcepts(s, ev.id, ev.text, ev.elapsedMs);
+    return;
+  }
   if (ev.type === "start") {
     broadcast(s, {
       type: "suggestion_start",
       id: ev.id,
-      kind: "decir",
+      kind: ev.kind ?? "decir",
       trigger: ev.trigger,
       atMs: Date.now() - s.startedAt,
     });
@@ -617,14 +1043,23 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
       broadcast(s, { type: "suggestion_aborted", id: ev.id });
       return;
     }
+    // Aporte de equipo: «ángulo ⏎ frase». Sin frase legible = silencio.
+    const team = isTeam(s) && ev.kind && TEAM_HELP_KINDS.has(ev.kind) && ev.kind !== "entender";
+    const contribution = team ? parseContribution(text) : null;
+    if (team && !contribution) {
+      console.log(`[equipo] silencio del modelo en ${ev.elapsedMs}ms (${ev.trigger})`);
+      broadcast(s, { type: "suggestion_aborted", id: ev.id });
+      return;
+    }
     const suggestion: LiveSuggestion = {
       id: ev.id,
-      kind: "decir",
-      text,
+      kind: ev.kind ?? "decir",
+      text: contribution?.text ?? text,
       why: ev.trigger,
       atMs: Date.now() - s.startedAt,
       manual: ev.manual || undefined,
       source: "fast",
+      ...(contribution?.angle ? { angle: contribution.angle } : {}),
     };
     s.suggestions.push(suggestion);
     broadcast(s, { type: "suggestion_done", suggestion });
@@ -635,9 +1070,91 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
   }
 }
 
+/** Glosario de la reunión: una tarjeta por concepto nuevo (los repetidos se callan). */
+function handleConcepts(s: LiveSession, id: string, raw: string, elapsedMs: number): void {
+  // Solo lo que se DIJO: el modelo a veces "explica" un término que sacó del
+  // contexto del proyecto y que nadie mencionó (ruido en plena reunión).
+  const said = foldText(
+    s.segments
+      .slice(-40)
+      .map((seg) => seg.text)
+      .join(" "),
+  );
+  const fresh = parseConcepts(raw).filter(
+    (c) => !s.explained.has(conceptKey(c.term)) && conceptMentioned(c.term, said),
+  );
+  if (!fresh.length) {
+    console.log(`[equipo] sin conceptos nuevos en ${elapsedMs}ms`);
+    return;
+  }
+  const atMs = Date.now() - s.startedAt;
+  fresh.forEach((c, i) => {
+    s.explained.add(conceptKey(c.term));
+    const suggestion: LiveSuggestion = {
+      id: `${id}-${i}`,
+      kind: "entender",
+      text: conceptText(c),
+      why: "acaba de salir en la reunión",
+      atMs,
+      source: "fast",
+    };
+    s.suggestions.push(suggestion);
+    broadcast(s, { type: "suggestion", suggestion });
+  });
+  console.log(`[equipo] ${fresh.length} concepto(s) en ${elapsedMs}ms: ${fresh.map((c) => c.term).join(", ")}`);
+}
+
+/** Una corrección del motor en cola: parsea «dijo → mejor | regla» o la descarta. */
+function handleCorrection(
+  s: LiveSession,
+  id: string,
+  raw: string,
+  elapsedMs: number,
+  said: string,
+): void {
+  const e = parseCorrection(raw, said);
+  if (!e) {
+    console.log(`[clase] sin corrección en ${elapsedMs}ms: ${raw.slice(0, 160).replace(/\n/g, " ⏎ ")}`);
+    return;
+  }
+  const suggestion: LiveSuggestion = {
+    id,
+    kind: "corregir",
+    text: correctionText(e),
+    why: e.note_es ?? "",
+    atMs: Date.now() - s.startedAt,
+    source: "fast",
+  };
+  s.suggestions.push(suggestion);
+  broadcast(s, { type: "suggestion", suggestion });
+  console.log(`[clase] corrección en ${elapsedMs}ms: ${suggestion.text.slice(0, 100)}`);
+}
+
+/** Tu intervención dicha más claro: «fragmento → mejor | principio» (mismo formato que la clase). */
+function handlePolish(s: LiveSession, id: string, raw: string, elapsedMs: number, said: string): void {
+  const e = parseCorrection(raw, said);
+  if (!e) {
+    console.log(`[articulación] ya estaba claro (${elapsedMs}ms)`);
+    return;
+  }
+  const suggestion: LiveSuggestion = {
+    id,
+    kind: "pulir",
+    text: correctionText(e),
+    why: e.note_es ?? "",
+    atMs: Date.now() - s.startedAt,
+    source: "fast",
+  };
+  s.suggestions.push(suggestion);
+  broadcast(s, { type: "suggestion", suggestion });
+  console.log(`[articulación] en ${elapsedMs}ms: ${suggestion.text.slice(0, 100)}`);
+}
+
 // ── Loop de sugerencias (Agent SDK + tool acotada, patrón ingest.ts) ────
 
 async function generateSuggestions(s: LiveSession, manual: boolean): Promise<void> {
+  if (s.deepEngine) return generateViaEngine(s, s.deepEngine, manual);
+  // Respaldo (HERMES_COPILOT=off): una corrida de query() con tool acotada.
   // La bandera ES el candado anti-concurrencia (y lo que deshabilita el botón).
   s.suggesting = true;
   broadcast(s, { type: "suggesting", inFlight: true });
@@ -677,9 +1194,9 @@ async function generateSuggestions(s: LiveSession, manual: boolean): Promise<voi
     );
     const server = createSdkMcpServer({ name: "livecoach", version: "0.1.0", tools: [recordTool] });
 
-    const [briefing, projects, hits] = await Promise.all([
-      getProjectBriefing(s.project),
-      readProjects(), // cache 60 s: gratis
+    const startedAt = Date.now();
+    const [context, hits] = await Promise.all([
+      s.context,
       searchKnowledge(windowText.slice(-KNOWLEDGE_QUERY_CHARS), {
         project: s.project,
         limit: 4,
@@ -689,14 +1206,10 @@ async function generateSuggestions(s: LiveSession, manual: boolean): Promise<voi
     // de arrancar un query que nadie va a interrumpir (activeQuery se asigna
     // recién después de crearlo).
     if (s.status !== "live") return;
-    const project = projects.find((p) => p.slug.toLowerCase() === s.project.toLowerCase());
     const systemPrompt = buildCoachPrompt({
       slug: s.project,
-      name: project?.name,
-      briefing,
-      estadoActual: project?.estado_actual,
-      tareas: project?.tareas_pendientes,
-      knowledge: hits.length ? knowledgeToText(hits) : "",
+      name: context.name,
+      contextBlocks: meetingContextBlocks(context, hits.length ? knowledgeToText(hits) : ""),
       previous: s.suggestions.slice(-PREVIOUS_SUGGESTIONS),
       fastLayerActive: s.fastCopilot != null,
       coachMode: s.coachMode,
@@ -715,7 +1228,9 @@ Evalúa el momento actual y llama a record_live_suggestions.`,
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt,
-        model: process.env.HERMES_MODEL || undefined,
+        model: env.COPILOT_DEEP_MODEL,
+        // Sin razonamiento extendido: una sugerencia que llega tarde ya no sirve.
+        thinking: { type: "disabled" },
         maxTurns: 3,
         settingSources: [],
         mcpServers: { livecoach: server },
@@ -736,6 +1251,9 @@ Evalúa el momento actual y llama a record_live_suggestions.`,
 
     // Sin fallback JSON: si no llamó la tool, esta vuelta no sopla nada
     // (best-effort; la transcripción nunca se ve afectada).
+    console.log(
+      `[live] estratégico en ${Date.now() - startedAt}ms → ${captured.length} sugerencia(s)${manual ? " (manual)" : ""}`,
+    );
     if (captured.length && s.status === "live") {
       const batch = captured.slice(0, 3);
       const atMs = Date.now() - s.startedAt;
@@ -770,14 +1288,14 @@ Evalúa el momento actual y llama a record_live_suggestions.`,
 function buildCoachPrompt(p: {
   slug: string;
   name?: string;
-  briefing?: string;
-  estadoActual?: string;
-  tareas?: string[];
-  knowledge?: string;
+  /** Nota, tareas, actas anteriores e historial (meetingContextBlocks). */
+  contextBlocks: string[];
   previous: LiveSuggestion[];
   /** true = la capa rápida ya cubre el "qué responder" inmediato. */
   fastLayerActive?: boolean;
   coachMode?: string;
+  /** "text" = sesión persistente (líneas «tipo | texto | por qué») · default "tool". */
+  format?: "tool" | "text";
 }): string {
   const parts = [
     `# Hermes — Copiloto de junta EN VIVO
@@ -798,35 +1316,36 @@ Eres un coach de junta, no un acta: no resumas, no narres lo que ya pasó. Cada 
     );
   const deepExtra = p.coachMode ? COACH_MODES[resolveCoachMode(p.coachMode)]?.deepExtra : undefined;
   if (deepExtra) parts.push(deepExtra);
-  if (p.briefing?.trim()) parts.push(`## Briefing del proyecto (síguelo)\n${p.briefing.trim()}`);
-  if (p.estadoActual?.trim())
-    parts.push(`## Estado actual del proyecto\n${p.estadoActual.slice(0, 800)}`);
-  if (p.tareas?.length)
-    parts.push(
-      `## Tareas ya pendientes\n${p.tareas.slice(0, 6).map((t) => `- ${t}`).join("\n")}`,
-    );
-  if (p.knowledge?.trim())
-    parts.push(`## Conocimiento relevante del historial de Hermes\n${p.knowledge.trim()}`);
+  parts.push(...p.contextBlocks);
   if (p.previous.length)
     parts.push(
       `## Sugerencias que ya diste (NO las repitas ni las reformules)\n${p.previous
         .map((x) => `- [${x.kind}] ${x.text}`)
         .join("\n")}`,
     );
+  const text = p.format === "text";
   parts.push(`## Reglas
-- Sugerencias en español, 1-2 frases, listas para decirse en voz alta tal cual. \`why\` en una línea.
+- Sugerencias en español, 1-2 frases, listas para decirse en voz alta tal cual. El porqué en una línea.
+- \`decir\` y \`preguntar\` siguen la articulación: el punto o la pregunta en la primera frase, verbo firme, sin pedir permiso ni disculparse, sin "pero" que borre lo anterior, sin "obviamente".
 - El tema vivo es el FINAL de la transcripción: sugiere para ese momento, no para el principio.
-- El silencio vale más que el ruido: si no hay nada valioso que soplar, llama la tool con \`suggestions: []\`. No inventes por llenar.
-- No repitas lo que ya se dijo en la junta ni tus sugerencias previas.
+- El silencio vale más que el ruido: si no hay nada valioso que soplar, ${text ? "responde EXACTAMENTE: —" : "llama la tool con `suggestions: []`"}. No inventes por llenar.
+- No repitas lo que ya se dijo en la junta ni lo que ya se sopló.
 - No inventes datos: cifras, fechas y decisiones solo si salen del contexto o del conocimiento de arriba.
+- Lo más valioso suele ser la CONTINUIDAD: lo que se decidió o quedó pendiente en las reuniones anteriores y las tareas abiertas, cuando la conversación lo toca.
 - Máximo 3 sugerencias; normalmente 1-2. Calidad sobre cantidad.
-- Responde SIEMPRE llamando a la tool \`record_live_suggestions\` UNA sola vez. No escribas texto libre.`);
+${
+  text
+    ? `- Formato: una línea por sugerencia, EXACTAMENTE «tipo | sugerencia | por qué», con tipo = decir · preguntar · dato · rumbo. Nada más (sin markdown ni preámbulo). Ejemplo literal:
+dato | El 7 de octubre quedó pendiente validar el backfill antes de tocar los constraints. | están decidiendo el orden sin ese pendiente`
+    : "- Responde SIEMPRE llamando a la tool `record_live_suggestions` UNA sola vez. No escribas texto libre."
+}`);
   return parts.join("\n\n");
 }
 
 // ── Cierre e ingesta ───────────────────────────────────────────────────
 
 async function ingestSession(s: LiveSession): Promise<void> {
+  if (isClass(s)) return ingestClassSession(s);
   try {
     const transcript = buildFinalTranscript(s.segments, s.speakerNames);
     const maxEndMs = s.segments.reduce((m, seg) => Math.max(m, seg.endMs), 0);
@@ -839,14 +1358,24 @@ async function ingestSession(s: LiveSession): Promise<void> {
       durationSec: Math.round((maxEndMs || Date.now() - s.startedAt) / 1000),
       taskId: s.id,
       liveSuggestions: s.suggestions,
+      review: isTeam(s) ? teamReviewMarkdown(s.suggestions, s.segments, s.selfSpeaker) : undefined,
       // Foto final del coach (los Turns del drain ya entraron a segments).
       coachMetrics: s.finalChars
         ? computeCoachMetrics(s.segments, s.selfSpeaker, Date.now() - s.startedAt)
         : s.coachMetrics,
+      client: s.client,
     });
     s.status = "done";
     s.meetingId = meeting.id;
     s.title = meeting.title;
+    // Antes del done: el teléfono que suba el archivo completo encuentra el acta.
+    await recordLiveOutcome(s.id, {
+      status: "done",
+      meetingId: meeting.id,
+      project: meeting.project_slug,
+      coachMode: s.coachMode,
+      client: s.client,
+    });
     broadcast(s, { type: "status", status: "done" });
     broadcast(s, { type: "done", meetingId: meeting.id, title: meeting.title });
     notifyMac("junta en vivo", `✅ ${meeting.title}: ${meeting.actionables.length} accionables`);
@@ -859,6 +1388,47 @@ async function ingestSession(s: LiveSession): Promise<void> {
   }
 }
 
+/** Clase de inglés: english_sessions + reporte, no acta de junta. */
+async function ingestClassSession(s: LiveSession): Promise<void> {
+  try {
+    const maxEndMs = s.segments.reduce((m, seg) => Math.max(m, seg.endMs), 0);
+    const session = await ingestClass({
+      startedAt: new Date(s.startedAt).toISOString(),
+      durationSec: Math.round((maxEndMs || Date.now() - s.startedAt) / 1000),
+      transcript: buildFinalTranscript(s.segments, displayNames(s)),
+      segments: s.segments,
+      selfSpeaker: s.selfSpeaker,
+      suggestions: s.suggestions,
+    });
+    s.status = "done";
+    s.englishSessionId = session.id;
+    // El front resuelve el cierre con done+meetingId: aquí va la sesión de inglés.
+    s.meetingId = `english-${session.id}`;
+    s.title = s.title ?? "Clase de inglés";
+    await recordLiveOutcome(s.id, {
+      status: "done",
+      meetingId: s.meetingId,
+      project: s.project,
+      coachMode: s.coachMode,
+      client: s.client,
+    });
+    broadcast(s, { type: "status", status: "done" });
+    broadcast(s, {
+      type: "done",
+      meetingId: s.meetingId,
+      title: s.title,
+      englishSessionId: session.id,
+    });
+    notifyMac("clase de inglés", `✅ guardada: ${session.errors.length} correcciones al reporte`);
+    cleanupSession(s, { keepSnapshotFile: false });
+  } catch (err) {
+    failSession(s, `no se pudo guardar la clase: ${String(err).slice(0, 200)}`, {
+      keepSnapshotFile: true,
+    });
+    notifyMac("clase de inglés", `❌ falló: ${String(err).slice(0, 80)}`);
+  }
+}
+
 function failSession(
   s: LiveSession,
   message: string,
@@ -866,6 +1436,14 @@ function failSession(
 ): void {
   s.status = "error";
   s.error = message;
+  // pending = el snapshot quedó para el recover del boot (el acta aún puede salir).
+  void recordLiveOutcome(s.id, {
+    status: opts.keepSnapshotFile ? "pending" : "error",
+    project: s.project,
+    coachMode: s.coachMode,
+    client: s.client,
+    error: message,
+  });
   broadcast(s, { type: "status", status: "error", detail: message });
   broadcast(s, { type: "error", message, fatal: true });
   emit({ kind: "error", taskId: s.id, detail: `junta en vivo: ${message}` });
@@ -881,11 +1459,15 @@ function cleanupSession(s: LiveSession, opts: { keepSnapshotFile: boolean }): vo
   s.activeQuery = null;
   s.fastCopilot?.destroy();
   s.fastCopilot = null;
+  s.deepEngine?.destroy();
+  s.deepEngine = null;
+  s.articulation?.destroy();
+  s.articulation = null;
   s.stt?.destroy();
   s.stt = null;
   s.snapshotsDisabled = true; // ninguna escritura tardía resucita el dotfile
   if (!opts.keepSnapshotFile) void deleteSnapshot(s);
-  for (const ws of s.clients) {
+  for (const ws of s.clients.all()) {
     try {
       ws.close(1000, "junta terminada");
     } catch {
@@ -967,7 +1549,38 @@ export async function recoverOrphanLiveMeetings(): Promise<void> {
         const snap = JSON.parse(await readFile(path, "utf8")) as LiveMeetingSnapshot & {
           sttName?: string;
         };
-        if (snap.status !== "done") {
+        if (snap.status !== "done" && snap.coachMode === CLASS_COACH_MODE) {
+          // Clase interrumpida: al pipeline de inglés, igual que un cierre normal.
+          const segs = snap.segments ?? [];
+          const names = classSpeakerNames(segs, snap.selfSpeaker, snap.speakerNames ?? {});
+          const transcript = buildFinalTranscript(segs, names);
+          if (transcript.length >= MIN_INGEST_CHARS) {
+            const maxEndMs = segs.reduce((m, seg) => Math.max(m, seg.endMs), 0);
+            const english = await ingestClass({
+              startedAt: snap.startedAt,
+              durationSec: maxEndMs ? Math.round(maxEndMs / 1000) : null,
+              transcript,
+              segments: segs,
+              selfSpeaker: snap.selfSpeaker,
+              suggestions: snap.suggestions ?? [],
+            });
+            await recordLiveOutcome(snap.id, {
+              status: "done",
+              meetingId: `english-${english.id}`,
+              project: snap.project || slug,
+              coachMode: snap.coachMode,
+              client: snap.client,
+            });
+          } else {
+            await recordLiveOutcome(snap.id, {
+              status: "error",
+              project: snap.project || slug,
+              coachMode: snap.coachMode,
+              client: snap.client,
+              error: "clase interrumpida sin transcripción suficiente",
+            });
+          }
+        } else if (snap.status !== "done") {
           const transcript = buildFinalTranscript(snap.segments ?? [], snap.speakerNames ?? {});
           if (transcript.length >= MIN_INGEST_CHARS) {
             emit({
@@ -976,7 +1589,7 @@ export async function recoverOrphanLiveMeetings(): Promise<void> {
               detail: `♻️ recuperando junta interrumpida: ${slug}`,
             });
             const maxEndMs = (snap.segments ?? []).reduce((m, seg) => Math.max(m, seg.endMs), 0);
-            await ingestMeeting({
+            const meeting = await ingestMeeting({
               project: snap.project || slug,
               transcript,
               title: `${snap.title ?? "Junta en vivo"} (interrumpida)`,
@@ -985,10 +1598,30 @@ export async function recoverOrphanLiveMeetings(): Promise<void> {
               durationSec: maxEndMs ? Math.round(maxEndMs / 1000) : null,
               taskId: snap.id,
               liveSuggestions: snap.suggestions ?? [],
+              review:
+                snap.coachMode === TEAM_COACH_MODE
+                  ? teamReviewMarkdown(snap.suggestions ?? [], snap.segments ?? [], snap.selfSpeaker)
+                  : undefined,
               // El coach se recomputa del snapshot (función pura sobre segments).
               coachMetrics: snap.segments?.length
                 ? computeCoachMetrics(snap.segments, snap.selfSpeaker, maxEndMs)
                 : null,
+              client: snap.client ?? "web",
+            });
+            await recordLiveOutcome(snap.id, {
+              status: "done",
+              meetingId: meeting.id,
+              project: meeting.project_slug,
+              coachMode: snap.coachMode,
+              client: snap.client ?? "web",
+            });
+          } else {
+            await recordLiveOutcome(snap.id, {
+              status: "error",
+              project: snap.project || slug,
+              coachMode: snap.coachMode,
+              client: snap.client,
+              error: "junta interrumpida sin transcripción suficiente",
             });
           }
         }
@@ -998,6 +1631,33 @@ export async function recoverOrphanLiveMeetings(): Promise<void> {
       }
     }
   }
+}
+
+/**
+ * Ruta del snapshot anti-reinicio de una sesión si sigue en el vault (la
+ * ingesta falló o el agente murió a mitad): el recover del boot la va a
+ * ingestar. La usa el job que completa la junta con el archivo del teléfono.
+ */
+export async function findLiveSnapshotFile(id: string): Promise<string | null> {
+  if (!env.VAULT_PATH || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
+  let slugs: string[] = [];
+  try {
+    slugs = (await readdir(join(env.VAULT_PATH, "projects"), { withFileTypes: true }))
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return null;
+  }
+  for (const slug of slugs) {
+    const path = join(env.VAULT_PATH, "projects", slug, "reuniones", `.live-${id}.json`);
+    try {
+      await stat(path);
+      return path;
+    } catch {
+      /* no está en este proyecto */
+    }
+  }
+  return null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -1021,6 +1681,11 @@ function toSnapshot(s: LiveSession): LiveMeetingSnapshot {
     selfSpeaker: s.selfSpeaker,
     suggestionLang: s.suggestionLang,
     fastCopilot: s.fastCopilot != null || undefined,
+    coachMode: s.coachMode,
+    englishSessionId: s.englishSessionId,
+    client: s.client,
+    ...s.clients.summary(),
+    autoHelp: s.autoHelp,
   };
 }
 
@@ -1034,7 +1699,7 @@ function send(ws: WSContext, ev: LiveServerEvent): void {
 
 function broadcast(s: LiveSession, ev: LiveServerEvent): void {
   const data = JSON.stringify(ev);
-  for (const ws of s.clients) {
+  for (const ws of s.clients.all()) {
     try {
       ws.send(data);
     } catch {

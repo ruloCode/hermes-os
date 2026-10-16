@@ -15,6 +15,17 @@
  *   los bytes de audio ya enviados (32 bytes = 1 ms a 16 kHz PCM16 mono).
  * - NO usamos voice_focus: aísla la voz principal y suprime el resto — lo
  *   contrario de lo que necesita una junta presencial con un solo mic.
+ * - Silencio largo: SIN `inactivity_timeout` (no lo mandamos) AAI no cierra la
+ *   sesión por falta de audio — dura hasta Terminate o el tope de 3 h — así
+ *   que 60 s sin audio (teléfono sin red) no necesitan KeepAlive. Doc v3:
+ *   "If not set, no inactivity timeout is applied"; cierre 3006 solo si se
+ *   configuró. Ponerse al día: AAI acepta audio más rápido que tiempo real
+ *   pero lo procesa a ~1,25× y cierra con 3007 si hay >5 min encolados; el
+ *   teléfono re-manda su cola a ≤1,25× en tramos de 100 ms (rango válido
+ *   50-1000 ms), y el buffer de reconexión de aquí (≤30 s) cabe holgado.
+ * - Si AAI cierra igual (3005/3007/red): backoff de 4 reintentos; si se rinde,
+ *   el próximo audio que llegue (pasados 30 s) reabre el STT. El offset se
+ *   re-ancla por bytes enviados, así que los tiempos siguen la línea de la junta.
  */
 import WebSocket from "ws";
 import type { LiveSttState } from "@hermes/shared";
@@ -81,6 +92,9 @@ const GAP_BUFFER_CAP_BYTES = 30_000 * BYTES_PER_MS; // 30 s de audio durante un 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000];
 const ROTATE_MARGIN_MS = 60_000; // rotar 60 s antes del expires_at del Begin
 const FINISH_TIMEOUT_MS = 5_000;
+// Tras rendirse: el audio que siga llegando reabre el STT, pero no más seguido
+// que esto (una caída larga de AAI no debe martillar el handshake).
+const REVIVE_AFTER_MS = 30_000;
 const REVISION_GRACE_MS = 400; // tras Termination: ventana para la SpeakerRevision
 
 interface AaiWord {
@@ -116,11 +130,16 @@ class AssemblyAIConnection implements LiveSttConnection {
   private connOffsetMs = 0;
   /** Bytes de audio realmente escritos a algún socket (fuente del offset). */
   private sentBytesTotal = 0;
+  /** Audio descartado en un gap largo (>30 s): cuenta para el offset para que
+   *  lo que siga quede en su minuto real de la junta y no corrido hacia atrás. */
+  private skippedBytes = 0;
   /** Audio acumulado durante un gap de reconexión/rotación (flush al reabrir). */
   private pending: Buffer[] = [];
   private pendingBytes = 0;
   private droppedInGap = false;
   private retries = 0;
+  /** ms en que se agotaron los reintentos (0 = no rendido). */
+  private gaveUpAt = 0;
   private rotateTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private chaosTimer: NodeJS.Timeout | null = null;
@@ -167,8 +186,9 @@ class AssemblyAIConnection implements LiveSttConnection {
         this.epoch += 1;
         this.rotating = false;
         this.retries = 0;
+        this.gaveUpAt = 0;
         // Base de timestamps de ESTA conexión = todo el audio ya entregado antes.
-        this.connOffsetMs = Math.round(this.sentBytesTotal / BYTES_PER_MS);
+        this.connOffsetMs = Math.round((this.sentBytesTotal + this.skippedBytes) / BYTES_PER_MS);
         this.flushPending();
         this.opts.onStatus("connected");
         // Chaos para pruebas de reconexión: mata el socket a los 30s (una vez).
@@ -182,8 +202,13 @@ class AssemblyAIConnection implements LiveSttConnection {
         if (!opened) reject(err instanceof Error ? err : new Error(String(err)));
         // Tras abrir, el 'close' que sigue decide la reconexión.
       });
-      ws.on("close", () => {
+      ws.on("close", (code, reason) => {
         if (this.ws !== ws) return; // socket viejo ya reemplazado
+        // 3005 error del server · 3007 tramo fuera de 50-1000 ms o demasiado
+        // audio encolado · 3008 tope de 3 h · 1008 key/saldo. Útil en el log.
+        if (opened && !this.finishing && !this.rotating) {
+          console.warn(`[live-stt] AssemblyAI cerró (${code}) ${reason.toString().slice(0, 160)}`);
+        }
         if (!opened) {
           reject(new Error("AssemblyAI cerró la conexión antes de abrir"));
           return;
@@ -209,6 +234,7 @@ class AssemblyAIConnection implements LiveSttConnection {
     if (this.destroyed || this.finishing || this.reconnectTimer) return;
     if (immediateDelay === undefined && this.retries >= RECONNECT_DELAYS_MS.length) {
       // Rendidos: la sesión NO muere — queda lo transcrito y el stop ingesta igual.
+      this.gaveUpAt = Date.now();
       this.opts.onStatus("degraded", "STT caído; se conserva lo transcrito");
       this.opts.onError(
         `AssemblyAI no respondió tras ${RECONNECT_DELAYS_MS.length} reintentos`,
@@ -241,6 +267,13 @@ class AssemblyAIConnection implements LiveSttConnection {
 
   sendAudio(chunk: Uint8Array): void {
     if (this.destroyed || this.finishing) return;
+    // Rendido pero sigue llegando audio (p.ej. la red de la Mac volvió): otra
+    // ronda de reintentos. El audio de este gap se acumula abajo y se flushea.
+    if (this.gaveUpAt && !this.ws && !this.reconnectTimer && Date.now() - this.gaveUpAt >= REVIVE_AFTER_MS) {
+      this.gaveUpAt = 0;
+      this.retries = 0;
+      this.scheduleReconnect();
+    }
     const ws = this.ws;
     if (ws && ws.readyState === WebSocket.OPEN && !this.rotating) {
       ws.send(chunk);
@@ -254,6 +287,7 @@ class AssemblyAIConnection implements LiveSttConnection {
     while (this.pendingBytes > GAP_BUFFER_CAP_BYTES && this.pending.length) {
       const dropped = this.pending.shift()!;
       this.pendingBytes -= dropped.length;
+      this.skippedBytes += dropped.length;
       if (!this.droppedInGap) {
         this.droppedInGap = true;
         this.opts.onStatus("degraded", "gap de reconexión: se está perdiendo audio");
@@ -298,7 +332,10 @@ class AssemblyAIConnection implements LiveSttConnection {
     if (!text) return; // parcial vacío o turno sin contenido: nada que pintar
     const words = msg.words ?? [];
     // Fallback si el Turn no trae words: la posición actual del audio enviado.
-    const nowRel = Math.max(Math.round(this.sentBytesTotal / BYTES_PER_MS) - this.connOffsetMs, 0);
+    const nowRel = Math.max(
+      Math.round((this.sentBytesTotal + this.skippedBytes) / BYTES_PER_MS) - this.connOffsetMs,
+      0,
+    );
     const relStart = words.length ? words[0].start : nowRel;
     const relEnd = words.length ? words[words.length - 1].end : nowRel;
     this.opts.onTurn({
@@ -424,6 +461,44 @@ const FAKE_SCRIPT_INTERVIEW: { speaker: string; text: string }[] = [
   { speaker: "B", text: "Latency budgets and silent failures, so I keep the LLM layer additive with a clean degradation path to the base pipeline." },
 ];
 
+// Guion de CLASE DE INGLÉS (HERMES_LIVE_STT_SCRIPT=class): A es la profe, B
+// el dueño con errores reales de hispanohablante — ejercita el modo
+// "clase-ingles" (andamio tras cada pregunta, corrección tras cada turno de B).
+const FAKE_SCRIPT_CLASS: { speaker: string; text: string }[] = [
+  { speaker: "A", text: "Hi! Good to see you again. How was your weekend? What did you do?" },
+  { speaker: "B", text: "It was good, yesterday I go to the park with my family and we eat empanadas." },
+  { speaker: "A", text: "That sounds lovely. And how is work going? Are you busy with your project?" },
+  { speaker: "B", text: "Yes, I am very busy because I have to finish a feature that is depending of another team." },
+  { speaker: "A", text: "I see. Can you explain what the feature does, in simple words?" },
+  { speaker: "B", text: "Is a dashboard that show the activity of the agents in real time for the company." },
+  { speaker: "A", text: "Nice. When do you think you will finish it?" },
+  { speaker: "B", text: "I think I will finish it the next week, if the other team give me the access." },
+  { speaker: "A", text: "Okay. Let's practice the past simple a little bit. Tell me about your last trip." },
+  { speaker: "B", text: "My last trip was to Cartagena, I have been there in December and it was very hot." },
+];
+
+// Guion de REUNIÓN DE EQUIPO (HERMES_LIVE_STT_SCRIPT=team): A y C discuten un
+// tema nuevo para B (el dueño) — colas, idempotencia, dead-letter. Ejercita el
+// modo "equipo": pregunta al grupo, decisión, problema, te nombran, glosario.
+const FAKE_SCRIPT_TEAM: { speaker: string; text: string }[] = [
+  { speaker: "A", text: "Bueno, el tema de hoy es mover el procesamiento de pagos a una arquitectura orientada a eventos con Kafka." },
+  { speaker: "C", text: "La idea es que cada pago publique un evento y los consumidores lo procesen con reintentos y una dead-letter queue." },
+  { speaker: "A", text: "El problema es que hoy los reintentos duplican cobros porque los consumidores no son idempotentes." },
+  { speaker: "C", text: "¿Qué opinan, lo hacemos con outbox pattern o publicamos directo desde el servicio de pagos?" },
+  { speaker: "B", text: "Yo lo vería primero por el lado de los duplicados, antes de elegir cómo publicar." },
+  { speaker: "A", text: "Entonces propongo arrancar con el outbox y medir la latencia en staging dos semanas." },
+  { speaker: "C", text: "Me preocupa el particionamiento: si la clave de partición no es el id del cliente perdemos el orden." },
+  { speaker: "A", text: "Rulo, ¿tú qué piensas del manejo del orden en el frontend cuando llegan eventos desordenados?" },
+  { speaker: "B", text: "En el dashboard podemos ordenar por timestamp del evento y mostrar un estado pendiente mientras llega el resto." },
+  { speaker: "C", text: "Perfecto, quedamos en que el viernes tenemos un prototipo del consumidor con el outbox funcionando." },
+];
+
+const FAKE_SCRIPTS: Record<string, { speaker: string; text: string }[]> = {
+  interview: FAKE_SCRIPT_INTERVIEW,
+  class: FAKE_SCRIPT_CLASS,
+  team: FAKE_SCRIPT_TEAM,
+};
+
 const FAKE_TICK_MS = 300;
 const FAKE_TICKS_PER_TURN = 13; // ≈4 s por turno a 300 ms el tick
 
@@ -434,9 +509,7 @@ class FakeLiveSttConnection implements LiveSttConnection {
   private wordIndex = 0;
   private turnStartMs = 0;
   private readonly script =
-    (process.env.HERMES_LIVE_STT_SCRIPT || "").toLowerCase() === "interview"
-      ? FAKE_SCRIPT_INTERVIEW
-      : FAKE_SCRIPT;
+    FAKE_SCRIPTS[(process.env.HERMES_LIVE_STT_SCRIPT || "").toLowerCase()] ?? FAKE_SCRIPT;
 
   constructor(private readonly opts: LiveSttOptions) {
     opts.onStatus("connected");

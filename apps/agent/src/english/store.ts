@@ -72,6 +72,14 @@ export async function saveEnglishSession(input: SaveSessionInput): Promise<Engli
   return session;
 }
 
+/** Borra una sesión (limpieza del simulador y sesiones de prueba). */
+export async function deleteEnglishSession(id: number): Promise<boolean> {
+  if (!supabase) return false;
+  const { error } = await supabase.from("english_sessions").delete().eq("id", id);
+  if (error) console.error("[english] delete session:", error.message);
+  return !error;
+}
+
 export async function listEnglishSessions(limit = 20): Promise<EnglishSession[]> {
   if (!supabase) return [];
   const { data } = await supabase
@@ -184,6 +192,15 @@ export async function reviewVocab(id: number): Promise<VocabEntry | null> {
 
 // ── Contexto para la dynamic var {{practice_context}} del tutor ────────
 
+/** Errores recientes (tutor + clases) en una línea cada uno — los prioriza el corrector en vivo. */
+export async function recentEnglishErrors(limit = 8): Promise<string[]> {
+  const sessions = await listEnglishSessions(6);
+  return sessions
+    .flatMap((s) => s.errors)
+    .slice(0, limit)
+    .map((e) => `"${e.quote}" → "${e.correction}"${e.note_es ? ` (${e.note_es})` : ""}`);
+}
+
 /** Resumen del progreso real para abrir la sesión con continuidad. */
 export async function buildPracticeContext(): Promise<string> {
   const [sessions, due] = await Promise.all([listEnglishSessions(5), listVocab({ due: true, limit: 5 })]);
@@ -192,7 +209,9 @@ export async function buildPracticeContext(): Promise<string> {
   const last = sessions[0];
   if (last) {
     parts.push(
-      `Last session: ${last.started_at.slice(0, 10)}, fluency ${last.fluency ?? "?"}/5, topics: ${last.topics.join(", ") || "—"}.`,
+      last.source === "class"
+        ? `Last session was a REAL CLASS with his human teacher on ${last.started_at.slice(0, 10)} (not with you): ask how it went and re-drill its errors below.`
+        : `Last session: ${last.started_at.slice(0, 10)}, fluency ${last.fluency ?? "?"}/5, topics: ${last.topics.join(", ") || "—"}.`,
     );
     // Errores recurrentes de las últimas sesiones (los drills del reporte
     // ya vienen resumidos en report_md; aquí van los quotes crudos).

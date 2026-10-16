@@ -142,7 +142,8 @@ export function HermesScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const voiceScrollRef = useRef<ScrollView>(null);
 
-  const voiceActive = v.connected || v.connecting;
+  // La práctica con la tutora vive en Inglés: aquí solo cuentan las llamadas con Hermes.
+  const voiceActive = (v.connected || v.connecting) && v.mode === "hermes";
   const showTakeover = (voiceActive || dialing) && !voiceMin;
 
   const startVoice = async () => {

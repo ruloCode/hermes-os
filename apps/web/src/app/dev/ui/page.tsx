@@ -27,7 +27,15 @@ import { CHART_OTHER, chartVar } from "@/components/ui/tones";
 import { CategoryIcon } from "@/components/vida/categories";
 import { LivePractice, type SessionWord } from "@/components/ingles/LivePractice";
 import { LiveWordBank } from "@/components/ingles/LiveWordBank";
-import { useVoice } from "@/components/VoiceBusyContext";
+import { PracticeSessionRail } from "@/components/ingles/PracticeSessionRail";
+import { useVoice, type VoiceLine } from "@/components/VoiceBusyContext";
+import type { LineFeedback, PracticeCompanion } from "@/hooks/usePracticeCompanion";
+import {
+  agentPartialClear,
+  agentPartialDelta,
+  agentPartialStart,
+  agentPartialStop,
+} from "@/lib/voice-partials";
 import type { VocabEntry } from "@hermes/shared";
 
 const SPARK = [3, 5, 2, 8, 6, 9, 4, 7, 10, 6, 8, 12, 9, 11];
@@ -222,27 +230,31 @@ export default function UiGallery() {
   );
 }
 
-// QA de la práctica en vivo del tutor (/ingles): mismas líneas que produciría
-// la llamada real (pushLine del VoiceBusyContext), goteadas para ver el
-// autoscroll, el KARAOKE de la frase vigente (sin llamada real la animación
-// estimada corre sola) y el tap de palabras → banco de la sesión, sin
-// conectar ElevenLabs. Ojo: los taps sí hacen POST /english/vocab real.
-const DEMO_LINES: { who: "TÚ" | "TUTOR"; text: string }[] = [
-  { who: "TUTOR", text: "Hi! Great to see you again. Last time we worked on prepositions — ready to pick it up?" },
-  { who: "TÚ", text: "Yes, I want to talk about my project. I've been working on the memory system." },
-  { who: "TUTOR", text: "Nice — you said \"working on\", that's exactly the correction from last session. Tell me more: what makes the memory system hard?" },
-  { who: "TÚ", text: "The most important part is storing the conversations without losing information." },
-  { who: "TUTOR", text: "Excellent use of \"the most important\"! Let's push further: compare it with your previous approach using easier / harder — was it more cumbersome or more straightforward?" },
+// QA de la práctica en vivo con la tutora (/ingles), sin ElevenLabs: la
+// tutora "habla" en streaming (lib/voice-partials, igual que
+// agent_chat_response_part), la compañera simulada pone la frase en el dock
+// y el feedback (corrección / bien dicho) bajo tus burbujas. Ojo: los taps de
+// palabras sí hacen POST /english/vocab real.
+type DemoStep =
+  | { at: number; tutor: string }
+  | { at: number; me: string; fb?: LineFeedback }
+  | { at: number; help: { kind: "decir" | "andamio" | "explicar"; text: string } };
+
+const DEMO_STEPS: DemoStep[] = [
+  { at: 600, tutor: "Hi Rulo! Great to see you again. Last time we worked on the past simple. How was your week so far?" },
+  { at: 2600, help: { kind: "decir", text: "It's been good, thanks! Busy with work, but I finished the voice feature for Hermes." } },
+  { at: 5200, me: "It was good, I finish the voice feature for my project Hermes.", fb: { kind: "correction", quote: "I finish the voice feature", correction: "I finished the voice feature", note: "Pasado simple: finish → finished cuando ya pasó." } },
+  { at: 7600, tutor: "Nice, congratulations! Tell me about the hardest part of building it." },
+  { at: 9300, help: { kind: "andamio", text: "Clave: latency (latencia) · streaming (transmisión en vivo) · real time (tiempo real)\nArranca: The hardest part was making it…" } },
+  { at: 12000, me: "The hardest part was making it fast, the answers must arrive in real time.", fb: { kind: "ok" } },
 ];
 
-// Vocab de mentira: pinta el subrayado de acento de "ya en el banco" en el
-// transcript ("prepositions") y la cola "repasa hoy" del LiveWordBank.
 const DEMO_VOCAB: VocabEntry[] = [
   {
     id: 1,
-    term: "prepositions",
-    meaning_es: "preposiciones (in/on/at…)",
-    example: "I've been working ON this project.",
+    term: "latency",
+    meaning_es: "latencia",
+    example: "We cut the latency in half.",
     times_reviewed: 1,
     last_reviewed_at: null,
     learned: false,
@@ -250,45 +262,111 @@ const DEMO_VOCAB: VocabEntry[] = [
 ];
 
 function LivePracticeDemo() {
-  const { pushLine, clearTranscript } = useVoice();
+  const { pushLine, clearTranscript, transcript } = useVoice();
   const [running, setRunning] = useState(false);
   const [words, setWords] = useState<SessionWord[]>([]);
+  const [current, setCurrent] = useState<PracticeCompanion["current"]>(null);
+  const [feedback, setFeedback] = useState<Map<VoiceLine, LineFeedback>>(new Map());
+  const [pending, setPending] = useState<Set<VoiceLine>>(new Set());
+
+  const companion: PracticeCompanion = {
+    ready: true,
+    disabledReason: null,
+    cards: [...feedback.values()].flatMap((f, i) =>
+      f.kind === "correction"
+        ? [{ id: `c${i}`, kind: "corregir" as const, text: `${f.quote} → ${f.correction}`, why: f.note ?? "", atMs: 0 }]
+        : [],
+    ),
+    current,
+    feedback,
+    pending,
+    help: () => undefined,
+  };
+
+  /** La tutora "habla": su texto llega por palabras y luego cierra la línea. */
+  const speak = (text: string) => {
+    agentPartialStart();
+    const words = text.split(" ");
+    words.forEach((w, i) =>
+      setTimeout(() => {
+        agentPartialDelta((i ? " " : "") + w);
+        if (i === words.length - 1)
+          setTimeout(() => {
+            agentPartialStop();
+            agentPartialClear();
+            pushLine({ who: "TUTOR", text });
+          }, 250);
+      }, i * 90),
+    );
+  };
 
   const simulate = () => {
     if (running) return;
     setRunning(true);
     clearTranscript();
     setWords([]);
-    DEMO_LINES.forEach((l, i) =>
+    setCurrent(null);
+    setFeedback(new Map());
+    setPending(new Set());
+    for (const step of DEMO_STEPS) {
       setTimeout(() => {
-        pushLine(l);
-        if (i === DEMO_LINES.length - 1) setRunning(false);
-      }, 1800 * (i + 1)),
-    );
+        if ("tutor" in step) {
+          setCurrent(null);
+          speak(step.tutor);
+        } else if ("help" in step) {
+          const id = `h${step.at}`;
+          setCurrent({ id, kind: step.help.kind, text: "", streaming: true });
+          const parts = step.help.text.match(/.{1,12}/gs) ?? [];
+          parts.forEach((part, i) =>
+            setTimeout(() => {
+              const last = i === parts.length - 1;
+              setCurrent((prev) => prev && prev.id === id ? { ...prev, text: prev.text + part, streaming: !last } : prev);
+            }, i * 60),
+          );
+        } else {
+          const line: VoiceLine = { who: "TÚ", text: step.me };
+          setCurrent(null);
+          pushLine(line);
+          setPending((prev) => new Set(prev).add(line));
+          setTimeout(() => {
+            setPending((prev) => {
+              const next = new Set(prev);
+              next.delete(line);
+              return next;
+            });
+            if (step.fb) setFeedback((prev) => new Map(prev).set(line, step.fb!));
+          }, 1100);
+        }
+        if (step === DEMO_STEPS[DEMO_STEPS.length - 1]) setTimeout(() => setRunning(false), 1500);
+      }, step.at);
+    }
   };
 
   return (
     <Panel
-      title="LivePractice (práctica en vivo del tutor: karaoke + banco)"
+      title="LivePractice (práctica en vivo: streaming de la tutora, Tu turno, feedback por frase)"
       delay={360}
-      className="h-[460px]"
+      className="h-[720px] md:col-span-2 xl:col-span-3"
       right={
         <CmdButton size="sm" onClick={simulate} disabled={running} loading={running}>
           Simular conversación
         </CmdButton>
       }
     >
-      <div className="grid h-full min-h-0 grid-cols-3 gap-3">
+      <div className="grid h-full min-h-0 grid-cols-3 gap-6">
         <div className="col-span-2 min-h-0">
           <LivePractice
             connecting={false}
             vocab={DEMO_VOCAB}
+            companion={companion}
+            onEnd={() => undefined}
             onWordSaved={(w) =>
               setWords((prev) => (prev.some((x) => x.term === w.term) ? prev : [w, ...prev]))
             }
           />
         </div>
-        <div className="min-h-0 border-l border-line pl-3">
+        <div className="flex min-h-0 flex-col gap-6 border-l border-line pl-6">
+          <PracticeSessionRail companion={companion} fromLine={Math.max(0, transcript.length - 99)} />
           <LiveWordBank words={words} vocab={DEMO_VOCAB} onChanged={() => undefined} />
         </div>
       </div>

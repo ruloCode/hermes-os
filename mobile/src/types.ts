@@ -69,10 +69,14 @@ export interface Meeting extends MeetingSummary {
 
 export interface MeetingJobStatus {
   id: string;
-  status: "running" | "done" | "error";
+  /** unknown = job de antes de que el agente los guardara: no sabe cómo terminó. */
+  status: "running" | "done" | "error" | "unknown";
   meetingId?: string;
   title?: string;
   error?: string;
+  /** La Mac tiene copia del audio: se puede reprocesar sin re-subir. */
+  audioOnServer?: boolean;
+  retryable?: boolean;
 }
 
 export interface SystemStats {
@@ -224,4 +228,39 @@ export interface LinearIssueFull {
   project: { name: string } | null;
   labels: { nodes: { name: string }[] };
   copyPrompt: string | null;
+}
+
+// ── Inglés (mismo contrato que packages/shared: EnglishSession/VocabEntry) ──
+export interface EnglishError {
+  quote: string;
+  correction: string;
+  note_es?: string;
+}
+
+export interface EnglishSession {
+  id: number;
+  started_at: string;
+  duration_sec: number | null;
+  topics: string[];
+  fluency: number | null;
+  errors: EnglishError[];
+  wins: string[];
+  report_md: string | null;
+  report_status: "pending" | "running" | "done" | "skipped" | "error";
+  /** web | mobile | meeting | class (clase real con la profesora). */
+  source: string;
+}
+
+export interface EnglishSessionFull extends EnglishSession {
+  transcript: string | null;
+}
+
+export interface VocabEntry {
+  id: number;
+  term: string;
+  meaning_es: string;
+  example: string | null;
+  times_reviewed: number;
+  last_reviewed_at: string | null;
+  learned: boolean;
 }

@@ -154,6 +154,13 @@ export interface RunTurnOptions {
   onSession?: (sdkSessionId: string) => void;
   /** Avisa cada tool_use del turno (la consola los pinta como pasos). */
   onTool?: (step: ChatToolStep) => void;
+  /**
+   * Stop del cliente: si el request se cierra (el teléfono tocó Detener o se
+   * fue), el turno del SDK se corta de verdad en vez de seguir gastando.
+   */
+  signal?: AbortSignal;
+  /** Tools que NO existen en este turno (p. ej. finanzas desde un teléfono sin huella: finance/guard.ts). */
+  disallowedTools?: string[];
 }
 
 // toolTarget (qué tocó cada tool) vive en @hermes/shared: lo usa también la Oficina.
@@ -187,6 +194,12 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
 
   setPresence("working", opts.prompt.slice(0, 120));
 
+  const abort = new AbortController();
+  if (opts.signal) {
+    if (opts.signal.aborted) abort.abort();
+    else opts.signal.addEventListener("abort", () => abort.abort(), { once: true });
+  }
+
   try {
     const q = query({
       prompt: opts.prompt,
@@ -205,6 +218,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
         // el costo en contexto es el índice y no todos los procedimientos.
         plugins: [{ type: "local" as const, path: PLUGIN_DIR }],
         resume: opts.resumeSessionId,
+        abortController: abort,
         mcpServers: {
           hermes: hermesMcpServer,
           ...(linearEnabled() ? { linear: linearMcpServer() } : {}),
@@ -213,8 +227,11 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
             : {}),
         },
         allowedTools: sdkAllowedTools(),
+        ...(opts.disallowedTools?.length ? { disallowedTools: opts.disallowedTools } : {}),
         permissionMode: "default",
         canUseTool: async (toolName, input) => {
+          // Doble seguro: si una tool apagada llegara a pedirse, se niega aquí también.
+          if (opts.disallowedTools?.includes(toolName)) return { behavior: "deny", message: "Finanzas está bloqueada en el teléfono." };
           // Tools del navegador: NO van en allowedTools a propósito — pasar
           // por aquí garantiza el Chrome CDP dedicado ANTES de cada uso (el
           // MCP solo se conecta; si el Chrome no está, el tool fallaría).
@@ -336,6 +353,11 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
       }
     }
   } catch (err) {
+    // Detenido por el cliente: lo dicho hasta aquí vale y no es un error.
+    // (el finally igual corre: presencia y traza se cierran ahí).
+    if (abort.signal.aborted) {
+      return { sdkSessionId, finalText, toolCalls, isError: false, costUsd, usage, models };
+    }
     // Resume de una sesión SDK que ya no existe (transcript limpiado o CLI
     // actualizado): reintenta UNA vez con sesión fresca. El session_id nuevo
     // se guarda al terminar el turno, así el mapeo stale se auto-repara.
@@ -397,7 +419,7 @@ export async function saveSdkSession(
 // ── Registro de tareas async (para run_task por voz) ───────────────────
 const tasks = new Map<string, HermesTask>();
 
-export function startTask(prompt: string): HermesTask {
+export function startTask(prompt: string, opts: { disallowedTools?: string[] } = {}): HermesTask {
   const task: HermesTask = {
     id: randomUUID().slice(0, 8),
     prompt,
@@ -410,7 +432,7 @@ export function startTask(prompt: string): HermesTask {
   emit({ kind: "task_start", taskId: task.id, detail: prompt.slice(0, 200) });
 
   void (async () => {
-    const result = await runAgentTurn({ prompt, taskId: task.id });
+    const result = await runAgentTurn({ prompt, taskId: task.id, disallowedTools: opts.disallowedTools });
     task.status = result.isError ? "error" : "done";
     task.result = result.finalText;
     task.toolCalls = result.toolCalls;

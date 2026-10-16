@@ -79,6 +79,7 @@ export async function readProjects(force = false): Promise<ProjectStatus[]> {
         estado: String(data.estado ?? "desconocido"),
         rama: data.rama ? String(data.rama) : undefined,
         ruta_local: data.ruta_local ? String(data.ruta_local) : undefined,
+        repos: Array.isArray(data.repos) ? data.repos.map(String).filter(Boolean) : undefined,
         actualizado: data.actualizado ? String(data.actualizado) : undefined,
         estado_actual: estadoActual.slice(0, 2000),
         tareas_pendientes: extractTasks(tareasRaw),
@@ -166,6 +167,29 @@ async function readProjectsFromCache(): Promise<ProjectStatus[]> {
 }
 
 const expandHome = (p: string) => (p.startsWith("~") ? join(homedir(), p.slice(1)) : p);
+
+/**
+ * Todos los repos del proyecto que existen en ESTA máquina: `ruta_local`
+ * primero y después los de `repos:` (sin duplicados). Para un proyecto de un
+ * solo repo es lo mismo que resolveProjectRoot.
+ */
+export function resolveProjectRepos(
+  p: Pick<ProjectStatus, "slug" | "ruta_local" | "repos">,
+): { name: string; root: string }[] {
+  const out: { name: string; root: string }[] = [];
+  const seen = new Set<string>();
+  const add = (root: string | null) => {
+    if (!root || seen.has(root) || !existsSync(root)) return;
+    seen.add(root);
+    out.push({ name: basename(root), root });
+  };
+  add(resolveProjectRoot(p));
+  for (const r of p.repos ?? []) {
+    const abs = expandHome(r);
+    if (isAbsolute(abs)) add(abs);
+  }
+  return out;
+}
 
 /**
  * Carpeta REAL del proyecto en ESTA máquina.

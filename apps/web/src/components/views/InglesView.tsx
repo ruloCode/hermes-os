@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/ScrollArea";
 import { RailSection } from "@/components/ui/Rail";
 import { useEnglish } from "@/hooks/useEnglish";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
+import { useVoice } from "@/components/VoiceBusyContext";
 import { useVidaContext } from "@/state/VidaProvider";
 import { EnglishStats } from "@/components/ingles/EnglishStats";
 import { LivePractice, type SessionWord } from "@/components/ingles/LivePractice";
@@ -27,6 +28,11 @@ import { SessionDetail } from "@/components/ingles/SessionDetail";
 import { EnglishRecs } from "@/components/ingles/EnglishRecs";
 import { VocabPanel } from "@/components/ingles/VocabPanel";
 import { EnglishTasksPanel } from "@/components/ingles/EnglishTasksPanel";
+import { LiveMeetingView } from "@/components/live/LiveMeetingView";
+import { useClassPip } from "@/components/live/ClassPip";
+import { useLiveMeeting } from "@/state/LiveMeetingProvider";
+import { usePracticeCompanion } from "@/hooks/usePracticeCompanion";
+import { PracticeSessionRail } from "@/components/ingles/PracticeSessionRail";
 
 const PRACTICE_HABIT = "práctica de inglés";
 
@@ -35,18 +41,65 @@ export function InglesView() {
   const voice = useVoiceConnect();
   const vida = useVidaContext();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const live = useLiveMeeting();
+  const pip = useClassPip();
+
+  // Clase EN VIVO (Google Meet): toma TODO el ancho — trae su propio riel.
+  const classLive = live.isClass && live.phase !== "idle";
+  const [classError, setClassError] = useState<string | null>(null);
+  const startClass = () => {
+    setClassError(null);
+    if (voice.connected || voice.connecting) {
+      setClassError("Cuelga con la tutora antes de iniciar la clase (comparten micrófono).");
+      return;
+    }
+    if (live.active) {
+      setClassError("Hay una junta en vivo en curso: termínala antes de iniciar la clase.");
+      return;
+    }
+    void live.startClass();
+  };
+
+  // La clase terminó y quedó guardada: su reporte se abre aquí mismo.
+  const classResult = live.result?.englishSessionId;
+  useEffect(() => {
+    if (!classResult) return;
+    setSelectedId(classResult);
+    void refresh();
+    live.consumeResult();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classResult]);
 
   // Práctica EN VIVO: con el tutor conectado, el centro se vuelve la
   // transcripción en tiempo real (reforzar reading mientras hablas).
   const tutorLive = voice.mode === "tutor" && (voice.connected || voice.connecting);
+  // Compañera de la práctica: correcciones y ayuda en pantalla mientras hablas
+  // con la tutora (las mismas tarjetas que la clase en vivo).
+  // Abre con la llamada CONECTANDO: su arranque corre en paralelo con el de la
+  // voz y llega lista a la primera pregunta de la tutora.
+  const companion = usePracticeCompanion(tutorLive);
+  const { transcript } = useVoice();
+  // Dónde arrancó ESTA práctica en el transcript (el riel cuenta solo esto).
+  const [practiceFrom, setPracticeFrom] = useState(0);
 
   // Banco de la sesión: palabras tocadas en el transcript de ESTA práctica.
   // Arrancar una práctica nueva lo vacía; el vocab enriquecido llega por poll.
   const [sessionWords, setSessionWords] = useState<SessionWord[]>([]);
   const prevLiveRef = useRef(tutorLive);
   useEffect(() => {
-    if (tutorLive && !prevLiveRef.current) setSessionWords([]);
+    if (tutorLive && !prevLiveRef.current) {
+      setSessionWords([]);
+      setPracticeFrom(transcript.length);
+    }
+    // Colgó: la tutora guarda la sesión y el reporte se arma — se abre aquí
+    // la más reciente apenas llega (selectedId null = "la última").
+    if (!tutorLive && prevLiveRef.current) {
+      setTimeout(() => {
+        void refresh().then(() => setSelectedId(null));
+      }, 2500);
+    }
     prevLiveRef.current = tutorLive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tutorLive]);
   const addSessionWord = useCallback((w: SessionWord) => {
     setSessionWords((prev) => (prev.some((x) => x.term === w.term) ? prev : [w, ...prev]));
@@ -76,9 +129,13 @@ export function InglesView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <ViewHeader title="Inglés" meta={tutorLive ? "Practicando" : undefined} />
+      <ViewHeader
+        title="Inglés"
+        meta={classLive ? "En clase" : tutorLive ? "Practicando" : undefined}
+      />
 
-      <div className="shrink-0">
+      {/* En vivo (práctica o clase) la conversación manda: las stats esperan. */}
+      <div className={`shrink-0 ${tutorLive || classLive ? "hidden" : ""}`}>
         <EnglishStats
           sessions={sessions}
           vocab={vocab}
@@ -87,14 +144,39 @@ export function InglesView() {
           live={tutorLive}
           onPractice={() => void voice.switchToTutor()}
           onStop={() => void voice.disconnect()}
+          classBusy={classLive || live.active}
+          onClass={startClass}
         />
+        {classError && <p className="mt-2 text-2xs text-red">⚠ {classError}</p>}
       </div>
+
+      {/* Clase en vivo: la ventanita flota encima de Meet (un clic: Chrome
+          exige un gesto para abrirla, y el del inicio ya se usó en la pestaña). */}
+      {classLive && live.phase === "live" && pip.supported && !pip.open && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
+          <p className="text-xs text-text">
+            Abre la ventanita y vuelve a Meet: la ayuda queda flotando encima de la llamada.
+          </p>
+          <button
+            type="button"
+            onClick={() => void pip.openPip()}
+            className="ml-auto rounded-sm border border-accent bg-accent/10 px-3 py-1 text-xs text-accent"
+          >
+            ⧉ Abrir ventanita
+          </button>
+        </div>
+      )}
 
       {/* lg: la única fila mide exactamente el alto disponible (minmax(0,1fr));
           sin esto la fila es `auto`, crece con el reporte y su scroll interno
           nunca se activa (el contenido se corta). */}
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
-        {tutorLive ? (
+        {classLive ? (
+          /* Takeover de clase: transcript + compañera + coach, todo el ancho */
+          <div className="col-span-12 flex min-h-[480px] flex-col lg:min-h-0">
+            <LiveMeetingView />
+          </div>
+        ) : tutorLive ? (
           /* Takeover de práctica: la transcripción en vivo ocupa el centro */
           <div className="col-span-12 flex min-h-[420px] flex-col md:col-span-8 lg:min-h-0">
             {/* min-h-0: sin él, el min-height:auto de flexbox lo estira a su
@@ -105,6 +187,8 @@ export function InglesView() {
                 connecting={voice.connecting}
                 vocab={vocab}
                 onWordSaved={addSessionWord}
+                companion={companion}
+                onEnd={() => void voice.disconnect()}
               />
             </div>
           </div>
@@ -132,7 +216,12 @@ export function InglesView() {
               <div className="flex min-h-0 flex-1 flex-col">
                 <span className="mb-2.5 shrink-0 text-2xs text-text-faint">Reporte del coach</span>
                 <div className="min-h-0 flex-1">
-                  <SessionDetail session={selected} />
+                  <SessionDetail
+                    session={selected}
+                    onReviewWithTutor={
+                      live.active ? undefined : () => void voice.switchToTutor()
+                    }
+                  />
                 </div>
               </div>
             </div>
@@ -141,8 +230,11 @@ export function InglesView() {
 
         {/* Riel derecho: en vivo = banco de palabras de la sesión (foco);
             en reposo = qué hacer con lo aprendido */}
-        {tutorLive ? (
-          <div className="col-span-12 flex min-h-[260px] flex-col md:col-span-4 lg:col-span-4 lg:min-h-0">
+        {classLive ? null : tutorLive ? (
+          <div className="col-span-12 flex min-h-[260px] flex-col gap-6 md:col-span-4 lg:col-span-4 lg:min-h-0">
+            <RailSection label="Esta práctica">
+              <PracticeSessionRail companion={companion} fromLine={practiceFrom} />
+            </RailSection>
             <RailSection label="Banco de palabras" grow>
               <LiveWordBank words={sessionWords} vocab={vocab} onChanged={() => void refresh()} />
             </RailSection>

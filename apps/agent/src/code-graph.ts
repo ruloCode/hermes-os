@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import type { CodeGraph3D, CodeGraphLink, CodeGraphNode } from "@hermes/shared";
 import { cbmAvailable, cbmGraph3D, cbmList, cbmProject, cbmQuery, indexRepo } from "./code-memory.js";
 import { env } from "./env.js";
-import { readProjects, resolveProjectRoot } from "./vault/projects.js";
+import { readProjects, resolveProjectRepos, resolveProjectRoot } from "./vault/projects.js";
 
 // Grafo de código: indexa cada repo con tree-sitter (AST puro, sin LLM) y
 // responde consultas de estructura. Multi-repo: hermes-os (este monorepo) +
@@ -77,11 +77,13 @@ export async function indexableRepos(): Promise<IndexableRepo[]> {
     if (p.estado !== "activo") continue;
     // El repo se resuelve contra el disco de ESTA máquina: en otro PC los
     // clones viven en otra carpeta y la ruta_local del vault no aplica.
-    const root = resolveProjectRoot(p);
-    if (!root || seen.has(root)) continue;
-    if (await exists(join(root, ".git"))) {
-      seen.add(root);
-      repos.push({ slug: p.slug, root });
+    // Un proyecto puede tener varios repos (`repos:` en la nota): el principal
+    // conserva el slug del proyecto y los demás van como "slug:carpeta".
+    const all = resolveProjectRepos(p);
+    for (const [i, r] of all.entries()) {
+      if (seen.has(r.root) || !(await exists(join(r.root, ".git")))) continue;
+      seen.add(r.root);
+      repos.push({ slug: i === 0 ? p.slug : `${p.slug}:${r.name}`, root: r.root });
     }
   }
   return repos;
@@ -97,6 +99,9 @@ async function resolveRoot(project?: string): Promise<{ root?: string; error?: s
     return { root: env.CODE_GRAPH_ROOT };
   }
   const q = project.toLowerCase();
+  // "cliente:SDK" (repo extra de un proyecto) o slug exacto indexable.
+  const direct = (await indexableRepos()).find((r) => r.slug.toLowerCase() === q);
+  if (direct) return { root: direct.root };
   const projects = await readProjects();
   const p =
     projects.find((x) => x.slug.toLowerCase() === q || x.name.toLowerCase() === q) ??

@@ -163,7 +163,8 @@ export function EstudioPipeline() {
           {[...pieces]
             .filter((p) => p.status !== "descartada")
             .sort((a, b) => {
-              if (!a.publish_at) return 1;
+              // Dos sin fecha conservan el orden del servidor (por etiqueta).
+              if (!a.publish_at) return b.publish_at ? 1 : 0;
               if (!b.publish_at) return -1;
               return new Date(a.publish_at).getTime() - new Date(b.publish_at).getTime();
             })

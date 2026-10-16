@@ -4,6 +4,7 @@
  * en foco y overlay de Ajustes. Arranque en dos fases: hidratar config+sesión
  * de AsyncStorage → resolver base URL (LAN vs túnel) → cargar proyectos.
  */
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import * as api from "./hermes";
@@ -17,7 +18,7 @@ import {
 } from "./auth";
 import type { ProjectStatus } from "./types";
 
-export type Tab = "voz" | "reuniones" | "proyectos" | "tareas" | "finanzas";
+export type Tab = "voz" | "reuniones" | "ingles" | "proyectos" | "tareas" | "finanzas";
 
 interface Store {
   projects: ProjectStatus[];
@@ -60,6 +61,8 @@ interface Store {
 
 const Ctx = createContext<Store | null>(null);
 
+const PROJECTS_KEY = "hermes.projects";
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [projectsLoading, setLoading] = useState(true);
@@ -68,7 +71,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [agentBase, setAgentBase] = useState(getBase());
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("voz");
+  // Reuniones abre la app: es la función que se usa todos los días.
+  const [tab, setTab] = useState<Tab>("reuniones");
   const [focused, setFocused] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const booted = useRef(false);
@@ -78,6 +82,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const [ps, h] = await Promise.all([api.projects(), api.health().catch(() => null)]);
       setProjects(ps);
+      // Copia en el teléfono: sin señal (una sala de juntas, el metro) los
+      // chips de proyecto siguen ahí y se puede grabar igual.
+      void AsyncStorage.setItem(PROJECTS_KEY, JSON.stringify(ps)).catch(() => undefined);
       setOnline(true);
       if (h?.machine) setMachine(h.machine);
     } catch {
@@ -97,6 +104,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (booted.current) return;
     booted.current = true;
     void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(PROJECTS_KEY);
+        if (raw) setProjects((cur) => (cur.length ? cur : (JSON.parse(raw) as ProjectStatus[])));
+      } catch {
+        /* sin copia: llegan de la red */
+      }
       await loadConfig();
       await loadSession();
       const s = getSession();

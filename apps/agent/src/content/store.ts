@@ -233,6 +233,10 @@ export async function listPieces(limit = 200): Promise<ContentPiece[]> {
     .from("content_pieces")
     .select("*")
     .order("publish_at", { ascending: true, nullsFirst: false })
+    // Sin fecha, el orden lo da la etiqueta (IA0·C01, IA0·C02…): una serie se
+    // lee en secuencia en vez de en el orden arbitrario de Postgres.
+    .order("week_label", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true })
     .limit(limit);
   return (data ?? []).map((r) => rowToPiece(r as Record<string, unknown>));
 }

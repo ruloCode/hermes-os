@@ -36,6 +36,12 @@ export interface CreateTransactionInput {
   source?: string;
   /** rompe la idempotencia (gasto genuinamente repetido el mismo día). */
   allowDuplicate?: boolean;
+  /**
+   * Clave idempotente propia (avisos del banco: `notif:<huella del aviso>`).
+   * Reemplaza la de "misma frase el mismo día": dos compras iguales el mismo
+   * día son dos avisos y dos filas; el mismo aviso repetido, una.
+   */
+  localKey?: string;
 }
 
 /**
@@ -56,7 +62,7 @@ export async function createTransaction(
   // Nombre canónico de la billetera si el texto dicho coincide con una.
   const matched = input.account ? await resolveWallet(input.account) : null;
   const account = matched?.name ?? input.account?.trim() ?? null;
-  const key = localKey(
+  const key = input.localKey ?? localKey(
     "tx",
     input.kind,
     input.amount.toFixed(2),

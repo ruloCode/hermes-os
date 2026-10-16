@@ -17,8 +17,17 @@ import {
   type RefObject,
 } from "react";
 import { useConversationStatus } from "@elevenlabs/react";
+import {
+  CLASS_COACH_MODE,
+  CLASS_PROJECT_SLUG,
+  classSpeakerNames,
+  inferSelfSpeaker,
+  TEAM_COACH_MODE,
+  type SourceEnergy,
+} from "@hermes/shared";
 import type {
   LiveAudioMode,
+  LiveHelpIntent,
   LiveCoachMetrics,
   LiveMeetingSnapshot,
   LiveMeetingStatus,
@@ -35,8 +44,14 @@ import {
   startLiveMeeting,
   stopLiveMeeting,
   suggestNowLive,
+  systemAudioWsUrl,
 } from "@/lib/hermes";
-import { useLiveMeetingAudio } from "@/hooks/useLiveMeetingAudio";
+import {
+  useLiveMeetingAudio,
+  type CallAudioSource,
+  type SourceLevels,
+} from "@/hooks/useLiveMeetingAudio";
+import { readAutoHelp, useAutoHelp } from "@/lib/auto-help";
 
 /**
  * Fases del CLIENTE (el `status` del server se mapea aquí):
@@ -82,16 +97,27 @@ export interface LiveMeetingValue {
   selfSpeaker: string | null;
   /** Modo de audio de la junta (del snapshot del server). */
   mode: LiveAudioMode | null;
-  /** Remoto: ¿la pestaña compartida sigue aportando audio? (null = no aplica). */
+  /** Remoto: ¿el audio de la llamada (pestaña o app) sigue entrando? (null = no aplica). */
   systemAudio: boolean | null;
+  /** Remoto: de dónde sale el audio de los demás (pestaña o app de escritorio). */
+  callSource: CallAudioSource | null;
+  /** Remoto: por qué no entra el audio de la llamada (permiso, picker sin audio…). */
+  systemAudioError: string | null;
   /** Métricas del coach (ratio de habla, WPM, muletillas) — del server cada 5s. */
   coachMetrics: LiveCoachMetrics | null;
   sttState: LiveSttState;
   wsConnected: boolean;
   error: string | null;
   micLevelRef: RefObject<number>;
-  /** Junta cerrada e ingestada → MeetingsPanel navega y llama consumeResult(). */
-  result: { project: string; meetingId: string } | null;
+  /** Junta cerrada e ingestada → MeetingsPanel navega y llama consumeResult().
+   *  Con englishSessionId fue una clase de inglés: la consume /ingles. */
+  result: { project: string; meetingId: string; englishSessionId?: number } | null;
+  /** Key del modo del server ("junta" · "clase-ingles"). */
+  coachMode: string | null;
+  /** Clase de inglés en vivo: otra vista, otros botones, nombres Profe/Tú. */
+  isClass: boolean;
+  /** Reunión de equipo: aportar + entender (botones y tarjetas propias). */
+  isTeam: boolean;
   /** Sube con requestStopConfirm(): la vista abre su confirmación inline. */
   stopConfirmNonce: number;
 
@@ -99,8 +125,19 @@ export interface LiveMeetingValue {
     project: string;
     title?: string;
     mode?: "presencial" | "remoto";
+    /** Remoto: pestaña (Meet / Teams web, default) o app de escritorio (Teams, Zoom). */
+    source?: CallAudioSource;
     languages?: ("es" | "en")[];
+    coachMode?: string;
+    maxSpeakers?: number;
+    autoHelp?: "full" | "scaffold" | "off";
   }): Promise<void>;
+  /**
+   * Clase de inglés por Google Meet: mic + pestaña de Meet, es/en (para
+   * captar las caídas al español), 2 voces, modo compañera. Llamarlo desde un
+   * click: pide la pestaña con getDisplayMedia.
+   */
+  startClass(): Promise<void>;
   /** Cierre confirmado por la UI (la confirmación vive en LiveMeetingView). */
   stop(): Promise<void>;
   /** Pide abrir la confirmación de cierre (⌘K "terminar junta"): NO corta en seco. */
@@ -108,10 +145,11 @@ export interface LiveMeetingValue {
   renameSpeaker(speaker: string, name: string): void;
   /** Marca/desmarca un hablante como "yo" (toggle si ya lo era). */
   markSelf(speaker: string): void;
-  /** Remoto: re-compartir la pestaña de la llamada (requiere click). */
+  /** Remoto: reintentar el audio de la llamada (la pestaña requiere click). */
   retrySystemAudio(): Promise<void>;
   dismissSuggestion(id: string): void;
-  suggestNow(): void;
+  /** En clase, `intent` elige la ayuda (andamio por defecto). */
+  suggestNow(intent?: LiveHelpIntent): void;
   /** MeetingsPanel ya navegó al detalle: limpia todo y vuelve a idle. */
   consumeResult(): void;
   /** Desde phase error: limpia todo y vuelve a idle. */
@@ -121,11 +159,17 @@ export interface LiveMeetingValue {
 const LiveMeetingContext = createContext<LiveMeetingValue | null>(null);
 
 const STORAGE_KEY = "hermes_live_meeting";
+/** Fuente del audio de la llamada: tras ⌘R la app se reengancha sola (no pide gesto). */
+const SOURCE_KEY = "hermes_live_source";
 const MAX_SUGGESTIONS = 50;
 /** Backpressure del WS: por encima se descarta el frame (hueco honesto). */
 const MAX_BUFFERED_BYTES = 256_000;
 /** El server manda ping cada 15 s → 20 s sin mensajes = conexión muerta. */
 const WATCHDOG_MS = 20_000;
+/** Ms de audio por frame del worklet (PCM16 16 kHz). */
+const FRAME_MS = 100;
+/** Energía por fuente guardada para el "soy yo" automático (~10 min). */
+const MAX_ENERGY_FRAMES = 6_000;
 
 /** Nombre visible de un label del provider ("A".."J" | "UNKNOWN"). */
 export function liveSpeakerName(
@@ -165,8 +209,23 @@ function readStorage(): string | null {
     return null;
   }
 }
+function saveSource(source: CallAudioSource): void {
+  try {
+    sessionStorage.setItem(SOURCE_KEY, source);
+  } catch {
+    /* sin sessionStorage */
+  }
+}
+function readSource(): CallAudioSource {
+  try {
+    return sessionStorage.getItem(SOURCE_KEY) === "app" ? "app" : "tab";
+  } catch {
+    return "tab";
+  }
+}
 function clearStorage(): void {
   try {
+    sessionStorage.removeItem(SOURCE_KEY);
     sessionStorage.removeItem(STORAGE_KEY);
   } catch {
     /* noop */
@@ -197,11 +256,14 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const [selfSpeaker, setSelfSpeaker] = useState<string | null>(null);
   const [mode, setMode] = useState<LiveAudioMode | null>(null);
   const [systemAudio, setSystemAudio] = useState<boolean | null>(null);
+  const [callSource, setCallSource] = useState<CallAudioSource | null>(null);
+  const [systemAudioError, setSystemAudioError] = useState<string | null>(null);
   const [coachMetrics, setCoachMetrics] = useState<LiveCoachMetrics | null>(null);
   const [sttState, setSttState] = useState<LiveSttState>("connected");
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ project: string; meetingId: string } | null>(null);
+  const [result, setResult] = useState<LiveMeetingValue["result"]>(null);
+  const [coachMode, setCoachMode] = useState<string | null>(null);
   const [stopConfirmNonce, setStopConfirmNonce] = useState(0);
 
   // Espejos mutables para los handlers del WS/timers (evitan closures viejos).
@@ -209,12 +271,19 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const liveIdRef = useRef<string | null>(null);
   const projectRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  /** true = esta pestaña solo MIRA (el audio lo manda Hermes Phone): conecta con role=viewer. */
+  const viewerRef = useRef(false);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const doneRef = useRef(false);
   const aliveRef = useRef(true);
+  /** Energía mic/pestaña en el reloj del audio ENVIADO (≈ el reloj del STT). */
+  const energyRef = useRef<SourceEnergy[]>([]);
+  const sentMsRef = useRef(0);
+  /** El "soy yo" automático ya decidió (o el humano marcó): no se repite. */
+  const selfDecidedRef = useRef(false);
 
   function setPhase(p: LivePhase): void {
     phaseRef.current = p;
@@ -274,6 +343,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setFastCopilot(Boolean(snap.fastCopilot));
     setSelfSpeaker(snap.selfSpeaker ?? null);
     setMode(snap.mode ?? "presencial");
+    setCoachMode(snap.coachMode ?? null);
     setSttState(snap.sttState);
   }
 
@@ -295,7 +365,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   }
 
   /** Junta cerrada e ingestada: teardown + result (idempotente vía doneRef). */
-  function handleDone(meetingId: string | null): void {
+  function handleDone(meetingId: string | null, englishSessionId?: number): void {
     if (doneRef.current) return;
     if (!meetingId) {
       // done sin id (no debería pasar): el poll de cierre lo rescata.
@@ -312,7 +382,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     clearStorage();
     setWsConnected(false);
     setPhase("processing");
-    setResult({ project: projectRef.current ?? "", meetingId });
+    setResult({ project: projectRef.current ?? "", meetingId, englishSessionId });
   }
 
   /** Error terminal: suelta todo y deja el mensaje para la vista. */
@@ -346,7 +416,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         startDonePoll();
         break;
       case "done":
-        handleDone(snap?.meetingId ?? null);
+        handleDone(snap?.meetingId ?? null, snap?.englishSessionId);
         break;
       case "error":
         failFatal(snap?.error ?? "La junta terminó con error en el agente.");
@@ -360,7 +430,8 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         // Replay al (re)conectar: el server es la fuente de verdad. Recién
         // aquí la conexión cuenta como sana → se resetea el backoff.
         attemptRef.current = 0;
-        setError(null);
+        // Como espectadora, el aviso de "el teléfono tiene el micrófono" se queda a la vista.
+        if (!viewerRef.current) setError(null);
         applySnapshot(ev.session);
         syncServerStatus(ev.session.status, ev.session);
         break;
@@ -422,7 +493,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         }
         break;
       case "done":
-        handleDone(ev.meetingId);
+        handleDone(ev.meetingId, ev.englishSessionId);
         break;
       case "error":
         if (ev.fatal) failFatal(ev.message);
@@ -468,7 +539,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     closeWs();
     let ws: WebSocket;
     try {
-      ws = new WebSocket(liveMeetingWsUrl(id));
+      ws = new WebSocket(liveMeetingWsUrl(id, viewerRef.current ? "viewer" : "audio"));
     } catch {
       scheduleReconnect(id);
       return;
@@ -507,6 +578,17 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       // 4000-4999 = cierre DELIBERADO de la aplicación (el server aceptó el
       // upgrade y decidió cortar): reconectar sería un bucle infinito.
       if (ev.code >= 4000 && ev.code <= 4999) {
+        if (ev.code === 4001 && /tel[eé]fono/i.test(ev.reason)) {
+          // Hermes Phone tomó el micrófono ("Pasar el micrófono a este teléfono"): esta
+          // pestaña suelta el suyo y SIGUE la junta como espectadora (role=viewer), en vez
+          // de rendirse como cuando otra pestaña se la lleva.
+          audio.stop();
+          viewerRef.current = true;
+          setError("El teléfono tomó el micrófono de la junta: esta pestaña la sigue sin grabar.");
+          clearReconnect();
+          connectWs(id);
+          return;
+        }
         if (ev.code === 4001) {
           // Otra pestaña tomó la junta: rendirse aquí SIN tocar la sesión del
           // server ni el storage — la pestaña nueva es ahora la dueña del mic.
@@ -539,10 +621,17 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
 
   /** El worklet entrega un frame: al WS si está sano; si no, se descarta
    *  (reenviar audio viejo desalinea timestamps — el hueco queda honesto). */
-  function handleFrame(frame: ArrayBuffer): void {
+  function handleFrame(frame: ArrayBuffer, levels?: SourceLevels): void {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < MAX_BUFFERED_BYTES) {
       ws.send(frame);
+      // Solo lo ENVIADO avanza el reloj: así queda alineado con los ms del STT.
+      if (levels) {
+        const energy = energyRef.current;
+        energy.push({ ms: sentMsRef.current, mic: levels.mic, tab: levels.tab });
+        if (energy.length > MAX_ENERGY_FRAMES) energy.splice(0, energy.length - MAX_ENERGY_FRAMES);
+      }
+      sentMsRef.current += FRAME_MS;
     }
   }
 
@@ -575,7 +664,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       misses = 0;
       if (snap.status === "done" && snap.meetingId) {
         stopDonePoll();
-        handleDone(snap.meetingId);
+        handleDone(snap.meetingId, snap.englishSessionId);
       } else if (snap.status === "error") {
         stopDonePoll();
         failFatal(snap.error ?? "La ingesta de la junta falló.");
@@ -593,6 +682,9 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     clearStorage();
     doneRef.current = false;
     attemptRef.current = 0;
+    energyRef.current = [];
+    sentMsRef.current = 0;
+    selfDecidedRef.current = false;
     liveIdRef.current = null;
     projectRef.current = null;
     setLiveIdState(null);
@@ -608,11 +700,15 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setFastCopilot(false);
     setSelfSpeaker(null);
     setMode(null);
+    setCoachMode(null);
     setSystemAudio(null);
+    setCallSource(null);
+    setSystemAudioError(null);
     setCoachMetrics(null);
     setSttState("connected");
     setWsConnected(false);
     setError(null);
+    viewerRef.current = false;
     setResult(null);
     setPhase("idle");
   }
@@ -621,30 +717,50 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     project: slug,
     title: t,
     mode,
+    source = "tab",
     languages,
+    coachMode: cm,
+    maxSpeakers,
+    autoHelp,
   }: {
     project: string;
     title?: string;
     mode?: "presencial" | "remoto";
+    source?: CallAudioSource;
     languages?: ("es" | "en")[];
+    coachMode?: string;
+    maxSpeakers?: number;
+    autoHelp?: "full" | "scaffold" | "off";
   }) {
     if (phaseRef.current !== "idle" && phaseRef.current !== "error") return;
     resetAll();
     if (voiceStatusRef.current === "connected" || voiceStatusRef.current === "connecting") {
       // Guard de mic (también mientras la voz negocia): mensaje explícito,
       // sin auto-cortar la llamada.
-      setError("Termina la llamada de voz antes de iniciar la junta (comparten micrófono).");
+      setError(
+        cm === CLASS_COACH_MODE
+          ? "Cuelga con la tutora antes de iniciar la clase (comparten micrófono)."
+          : "Termina la llamada de voz antes de iniciar la junta (comparten micrófono).",
+      );
       return;
     }
+    // El modo se sabe desde el click: la vista de clase toma el centro ya
+    // mientras se pide el mic (y muestra el error si falla).
+    setCoachMode(cm ?? null);
     // Mic PRIMERO: si no hay permiso, nunca se crea la sesión server-side.
     // En remoto también pide la pestaña (mismo gesto del click de inicio).
     setPhase("requesting_mic");
     try {
       const res = await audio.start(handleFrame, {
         mode,
-        onSystemAudioEnded: () => setSystemAudio(false),
+        source,
+        appAudioUrl: systemAudioWsUrl(),
+        onSystemAudioEnded: onCallAudioEnded,
       });
       setSystemAudio(mode === "remoto" ? res.systemAudio : null);
+      setCallSource(mode === "remoto" ? source : null);
+      setSystemAudioError(mode === "remoto" ? audio.systemAudioErrorRef.current : null);
+      if (mode === "remoto") saveSource(source);
     } catch {
       setPhase("error");
       setError("No se pudo acceder al micrófono. Revisa el permiso (requiere HTTPS fuera de localhost).");
@@ -653,7 +769,15 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setPhase("connecting");
     try {
       // 409 → startLiveMeeting devuelve el snapshot de la activa: se reanuda ESA.
-      const snap = await startLiveMeeting({ project: slug, title: t, mode, languages });
+      const snap = await startLiveMeeting({
+        project: slug,
+        title: t,
+        mode,
+        languages,
+        coachMode: cm,
+        maxSpeakers,
+        autoHelp,
+      });
       if (!aliveRef.current) return;
       applySnapshot(snap);
       saveStorage(snap.id);
@@ -663,7 +787,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         startDonePoll();
       } else if (snap.status === "done" && snap.meetingId) {
         audio.stop();
-        handleDone(snap.meetingId);
+        handleDone(snap.meetingId, snap.englishSessionId);
       } else if (snap.status === "error") {
         failFatal(snap.error ?? "La junta activa terminó con error.");
       } else {
@@ -717,11 +841,18 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   async function retrySystemAudio(): Promise<void> {
     const ok = await audio.enableSystemAudio();
     setSystemAudio(ok);
+    setSystemAudioError(ok ? null : audio.systemAudioErrorRef.current);
+  }
+
+  function onCallAudioEnded(): void {
+    setSystemAudio(false);
+    setSystemAudioError(audio.systemAudioErrorRef.current);
   }
 
   function markSelf(speaker: string): void {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    selfDecidedRef.current = true; // lo que marca el humano manda sobre la inferencia
     // Toggle: volver a marcar al mismo hablante lo desmarca.
     const next = selfSpeaker === speaker ? "" : speaker;
     setSelfSpeaker(next || null); // optimista; el server confirma con self_marked
@@ -732,14 +863,14 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setDismissed((prev) => new Set(prev).add(id));
   }
 
-  function suggestNow(): void {
+  function suggestNow(intent?: LiveHelpIntent): void {
     const id = liveIdRef.current;
     if (!id || phaseRef.current !== "live") return;
     // Con capa rápida el feedback es la tarjeta streaming (suggestion_start
     // llega enseguida); el flag `suggesting` es solo del loop estratégico.
     if (!fastCopilot) setSuggesting(true); // optimista; el server confirma con suggesting{inFlight}
     // 409 (false) = ya hay una tanda en vuelo: el flag ya está bien puesto.
-    void suggestNowLive(id).catch(() => {
+    void suggestNowLive(id, intent).catch(() => {
       setSuggesting(false);
       setError("No se pudo pedir la sugerencia. ¿Sigue el agente en línea?");
     });
@@ -776,11 +907,17 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         try {
           // Tras ⌘R no hay gesto de usuario: en remoto getDisplayMedia falla
           // y la junta reanuda solo con mic (el banner ofrece re-compartir).
+          const remote = (snap.mode ?? "presencial") === "remoto";
+          const source = readSource();
           const res = await audio.start(handleFrame, {
             mode: snap.mode ?? "presencial",
-            onSystemAudioEnded: () => setSystemAudio(false),
+            source,
+            appAudioUrl: systemAudioWsUrl(),
+            onSystemAudioEnded: onCallAudioEnded,
           });
-          setSystemAudio((snap.mode ?? "presencial") === "remoto" ? res.systemAudio : null);
+          setSystemAudio(remote ? res.systemAudio : null);
+          setCallSource(remote ? source : null);
+          setSystemAudioError(remote ? audio.systemAudioErrorRef.current : null);
         } catch {
           // La sesión sigue viva en el agente: no borres el storage, otro
           // ⌘R con el permiso concedido puede reengancharla.
@@ -798,7 +935,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         startDonePoll();
       } else if (snap.status === "done" && snap.meetingId) {
         applySnapshot(snap);
-        handleDone(snap.meetingId);
+        handleDone(snap.meetingId, snap.englishSessionId);
       } else {
         clearStorage();
       }
@@ -810,6 +947,33 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const active = phase !== "idle" && phase !== "error";
+
+  // Clase: la preferencia "ayuda automática" viaja al agente al (re)conectar
+  // y cada vez que cambia (la toggle vive en el riel, la ventanita y /ingles).
+  const [autoHelp] = useAutoHelp();
+  useEffect(() => {
+    if (coachMode !== CLASS_COACH_MODE || !wsConnected) return;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: "auto_help", mode: autoHelp }));
+  }, [autoHelp, coachMode, wsConnected]);
+
+  // Remoto (clase o junta): "soy yo" automático por energía mic vs audio de la
+  // llamada. Corre en cada turno final hasta decidir una vez; el chip manual
+  // queda de respaldo (y lo que marca el humano manda).
+  const finalCount = useMemo(() => segments.filter((s) => s.final).length, [segments]);
+  useEffect(() => {
+    if (mode !== "remoto" || !systemAudio) return;
+    if (selfSpeaker || selfDecidedRef.current || phase !== "live") return;
+    const guess = inferSelfSpeaker(segments, energyRef.current);
+    if (!guess) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    selfDecidedRef.current = true;
+    setSelfSpeaker(guess);
+    ws.send(JSON.stringify({ type: "mark_self", speaker: guess }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalCount, coachMode, mode, systemAudio, selfSpeaker, phase]);
 
   // Aviso nativo del browser antes de cerrar la pestaña con junta en curso.
   useEffect(() => {
@@ -830,6 +994,17 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     return order;
   }, [segments]);
 
+  const isClass = coachMode === CLASS_COACH_MODE;
+  const isTeam = coachMode === TEAM_COACH_MODE;
+  // En clase los nombres visibles son Profe/Tú (salvo nombre puesto a mano);
+  // el server guarda el transcript con Profe/Yo.
+  const displayNames = useMemo(() => {
+    if (!isClass) return speakerNames;
+    const names = classSpeakerNames(segments, selfSpeaker ?? undefined, speakerNames);
+    if (selfSpeaker && names[selfSpeaker] === "Yo") names[selfSpeaker] = "Tú";
+    return names;
+  }, [isClass, segments, selfSpeaker, speakerNames]);
+
   const value = useMemo<LiveMeetingValue>(
     () => ({
       phase,
@@ -839,7 +1014,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       title,
       startedAt,
       segments,
-      speakerNames,
+      speakerNames: displayNames,
       speakerOrder,
       suggestions,
       dismissed,
@@ -849,14 +1024,29 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       selfSpeaker,
       mode,
       systemAudio,
+      callSource,
+      systemAudioError,
       coachMetrics,
       sttState,
       wsConnected,
       error,
       micLevelRef: audio.levelRef,
       result,
+      coachMode,
+      isClass,
+      isTeam,
       stopConfirmNonce,
       start,
+      startClass: () =>
+        start({
+          project: CLASS_PROJECT_SLUG,
+          title: "Clase de inglés",
+          mode: "remoto",
+          languages: ["es", "en"],
+          coachMode: CLASS_COACH_MODE,
+          maxSpeakers: 2,
+          autoHelp: readAutoHelp(),
+        }),
       stop,
       requestStopConfirm: () => setStopConfirmNonce((n) => n + 1),
       renameSpeaker,
@@ -876,7 +1066,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       title,
       startedAt,
       segments,
-      speakerNames,
+      displayNames,
       speakerOrder,
       suggestions,
       dismissed,
@@ -886,11 +1076,16 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       selfSpeaker,
       mode,
       systemAudio,
+      callSource,
+      systemAudioError,
       coachMetrics,
       sttState,
       wsConnected,
       error,
       result,
+      coachMode,
+      isClass,
+      isTeam,
       stopConfirmNonce,
     ],
   );

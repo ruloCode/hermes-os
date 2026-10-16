@@ -37,6 +37,8 @@ apps/web/public/mediapipe/
 
 # Binario del helper nativo de ventanas (se compila con build-window-helper.sh)
 apps/agent/native/window-helper
+# Helper de audio del sistema (Teams de escritorio en la junta en vivo; build-system-audio.sh)
+apps/agent/native/system-audio
 
 # Archivos sueltos en la raíz (fotos/videos de prueba) — nunca al repo
 /*.jpeg
@@ -44,6 +46,14 @@ apps/agent/native/window-helper
 /*.png
 /*.mp4
 /*.mov
+/*.pdf
+/*.zip
+
+# Trabajo personal fuera de Hermes (portafolios, documentos de terceros) — nunca al repo público
+sensy/
+
+# Build de los módulos nativos del móvil (Gradle lo regenera)
+mobile/modules/*/android/build/
 
 # Persona del dueño: vive en ~/.hermes-os/SOUL.md, nunca en el repo
 SOUL.md

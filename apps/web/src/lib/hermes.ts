@@ -16,6 +16,7 @@ import type {
   ChatToolStep,
   ClaudeSessionSummary,
   ClaudeSessionDetail,
+  LiveHelpIntent,
   LiveMeetingSnapshot,
   MachinePresence,
   Meeting,
@@ -547,6 +548,11 @@ export async function startLiveMeeting(input: {
   /** Bias de idioma del STT (["es"] default, ["es","en"] = code-switching). */
   languages?: ("es" | "en")[];
   suggestionLang?: "auto" | "es" | "en";
+  /** "junta" (default) · "clase-ingles" (compañera de clase de inglés). */
+  coachMode?: string;
+  maxSpeakers?: number;
+  /** Clase: qué ayuda sale sola cuando te preguntan. */
+  autoHelp?: "full" | "scaffold" | "off";
 }): Promise<LiveMeetingSnapshot> {
   const res = await hermesFetch(`/meetings/live/start`, {
     method: "POST",
@@ -601,12 +607,15 @@ export async function renameLiveSpeaker(
   await hermesPost(`/meetings/live/${encodeURIComponent(id)}/rename`, { speaker, name });
 }
 
-/** "Soplar ahora": fuerza una tanda de sugerencias. false = ya hay una en vuelo (409). */
-export async function suggestNowLive(id: string): Promise<boolean> {
+/**
+ * "Soplar ahora": fuerza una tanda de sugerencias. false = ya hay una en vuelo (409).
+ * En clase de inglés, `intent` elige la ayuda: andamio · explicar lo último · frase completa.
+ */
+export async function suggestNowLive(id: string, intent?: LiveHelpIntent): Promise<boolean> {
   const res = await hermesFetch(`/meetings/live/${encodeURIComponent(id)}/suggest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify(intent ? { intent } : {}),
   });
   if (res.status === 409) return false;
   if (!res.ok) throw new Error(`/meetings/live/:id/suggest → ${res.status}`);
@@ -618,8 +627,19 @@ export async function suggestNowLive(id: string): Promise<boolean> {
  * mismo ?key= (el browser no manda headers en WS) y respeta el selector
  * multi-Mac; http→ws y https→wss con el mismo replace.
  */
-export function liveMeetingWsUrl(id: string): string {
-  return sseUrl(`/meetings/live/${encodeURIComponent(id)}/ws`).replace(/^http/, "ws");
+export function liveMeetingWsUrl(id: string, role: "audio" | "viewer" = "audio"): string {
+  const q = role === "viewer" ? "?role=viewer" : "";
+  return sseUrl(`/meetings/live/${encodeURIComponent(id)}/ws${q}`).replace(/^http/, "ws");
+}
+
+/** WS del audio del sistema (Teams/Zoom de escritorio → PCM16 ↓ · estado en JSON). */
+export function systemAudioWsUrl(): string {
+  return sseUrl(`/audio/system/ws`).replace(/^http/, "ws");
+}
+
+/** WS de la compañera de "Practicar ahora" (líneas ↑ · tarjetas ↓). */
+export function practiceCompanionWsUrl(): string {
+  return sseUrl(`/english/practice/ws`).replace(/^http/, "ws");
 }
 
 // ── Control por gestos (mano → cursor) ─────────────────────────────────

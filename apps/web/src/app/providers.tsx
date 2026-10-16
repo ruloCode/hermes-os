@@ -11,6 +11,7 @@ import { WorkspaceProvider } from "@/state/WorkspaceContext";
 import { VidaProvider } from "@/state/VidaProvider";
 import { EstudioProvider } from "@/state/EstudioProvider";
 import { LiveMeetingProvider } from "@/state/LiveMeetingProvider";
+import { ClassPipProvider } from "@/components/live/ClassPip";
 import { GestureControlProvider } from "@/state/GestureControlProvider";
 import { UiHandsProvider } from "@/state/UiHandsProvider";
 import { DocViewerProvider } from "@/components/DocViewer";
@@ -31,6 +32,7 @@ import { BootGate } from "@/components/boot/BootGate";
  *  - VidaProvider          → poll único de finanzas+hábitos (Finanzas·Hábitos·Inglés)
  *  - EstudioProvider       → poll único del pipeline de contenido (ESTUDIO)
  *  - LiveMeetingProvider   → junta EN VIVO (mic + WS): sobrevive a navegar
+ *  - ClassPipProvider      → ventanita flotante de la clase de inglés (una sola)
  *  - GestureControlProvider→ control por gestos (webcam → cursor del sistema)
  *  - UiHandsProvider       → manos sobre la UI (cursor de mano + clic + scroll)
  *  - DocViewerProvider     → visor global de docs .md del vault
@@ -53,6 +55,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
                   <VidaProvider>
                     <EstudioProvider>
                     <LiveMeetingProvider>
+                    <ClassPipProvider>
                       <GestureControlProvider>
                         <UiHandsProvider>
                           <DocViewerProvider>
@@ -66,6 +69,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
                           </DocViewerProvider>
                         </UiHandsProvider>
                       </GestureControlProvider>
+                    </ClassPipProvider>
                     </LiveMeetingProvider>
                     </EstudioProvider>
                   </VidaProvider>

@@ -18,6 +18,8 @@ import { syntheticBody, type PoseWorldLandmark } from "@hermes/shared";
 export interface PoseSample {
   /** 33 world landmarks de la persona detectada, o null si no hay nadie. */
   world: PoseWorldLandmark[] | null;
+  /** Los mismos 33 puntos en la IMAGEN (x, y normalizados 0..1, y hacia abajo). */
+  image?: PoseWorldLandmark[] | null;
   /** performance.now() del frame. */
   tMs: number;
   /** Ancho/alto del video (para el preview). */
@@ -43,7 +45,18 @@ const MODEL_LOCAL = "/mediapipe/pose_landmarker_lite.task";
 const MODEL_CDN =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
-export function usePose(onSample: (s: PoseSample) => void): {
+export interface PoseOptions {
+  /** Cámara concreta (enumerateDevices); sin él, la que el navegador dé por defecto. */
+  deviceId?: string | null;
+  /** Resolución pedida (p.ej. 1280×720 para el FOV completo de una webcam 16:9). */
+  width?: number;
+  height?: number;
+}
+
+export function usePose(
+  onSample: (s: PoseSample) => void,
+  opts: PoseOptions = {},
+): {
   phase: PosePhase;
   error: string | null;
   start: () => Promise<void>;
@@ -57,6 +70,8 @@ export function usePose(onSample: (s: PoseSample) => void): {
 
   const onSampleRef = useRef(onSample);
   onSampleRef.current = onSample;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
   const aliveRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
@@ -92,7 +107,12 @@ export function usePose(onSample: (s: PoseSample) => void): {
     setError(null);
     aliveRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: VIDEO_CONSTRAINTS });
+      const o = optsRef.current;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: o.deviceId
+          ? { deviceId: { exact: o.deviceId }, width: o.width ?? VIDEO_CONSTRAINTS.width, height: o.height ?? VIDEO_CONSTRAINTS.height, frameRate: 30 }
+          : { ...VIDEO_CONSTRAINTS, ...(o.width ? { width: o.width } : {}), ...(o.height ? { height: o.height } : {}) },
+      });
       if (!aliveRef.current) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -140,8 +160,10 @@ export function usePose(onSample: (s: PoseSample) => void): {
         if (now < simUntilRef.current) return;
         const result = landmarker.detectForVideo(vid, now);
         const world = result.worldLandmarks?.[0] as PoseWorldLandmark[] | undefined;
+        const image = result.landmarks?.[0] as PoseWorldLandmark[] | undefined;
         onSampleRef.current({
           world: world && world.length ? world : null,
+          image: image && image.length ? image : null,
           tMs: now,
           videoWidth: vid.videoWidth,
           videoHeight: vid.videoHeight,

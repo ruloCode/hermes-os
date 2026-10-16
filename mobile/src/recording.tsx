@@ -1,176 +1,208 @@
 /**
- * Grabación de reuniones como servicio global (patrón Fabric/Granola/Otter):
- * este provider —montado en la raíz, igual que VoiceProvider— es el dueño del
- * recorder de expo-audio, del timer y del proyecto asociado. Las pantallas se
- * desmontan al cambiar de tab, pero el provider no: la junta sobrevive a la
- * navegación.
+ * Estado de la grabación de juntas para React. La grabación NO vive aquí: la
+ * maneja el módulo nativo `hermes-recorder` (foreground service + AAC ADTS),
+ * así que sobrevive a salir de la app, bloquear la pantalla, deslizar Hermes
+ * desde Recientes o que React se recree. Este provider solo refleja su estado
+ * (evento `onStatus`, ~5/s) y manda órdenes.
  *
- * Al detener, la grabación se mueve a almacenamiento durable (recordings.ts)
- * y queda en `handoff`: la pantalla de reuniones la consume y ejecuta la
- * subida — un solo flujo de stop→persistir→subir venga de donde venga el stop
- * (botón de la pantalla o píldora global).
- *
- * Android: intenta grabar con el foreground service de expo-audio
- * (`allowsBackgroundRecording` → notificación sticky del sistema; la grabación
- * aguanta segundo plano y pantalla bloqueada). Los APK construidos sin
- * `enableBackgroundRecording` en app.json no traen ese service en el manifest
- * y el prepare falla: se reintenta sin servicio, donde keep-awake evita que la
- * pantalla se apague pero salir de la app corta el micrófono (restricción de
- * Android sin foreground service).
+ * Al detener (aquí, desde la píldora o desde la notificación) la grabación
+ * queda en el diario nativo y el motor de entrega (`meeting-queue.ts`) la
+ * indexa y la sube solo.
  */
-import React, { createContext, useCallback, useContext, useRef, useState } from "react";
-import { PermissionsAndroid, Platform } from "react-native";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { AppState, PermissionsAndroid, Platform } from "react-native";
+import { requestRecordingPermissionsAsync } from "expo-audio";
 import {
-  RecordingPresets,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  useAudioRecorder,
-  useAudioRecorderState,
-} from "expo-audio";
-import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import * as rec from "./recordings";
+  HermesRecorder,
+  type RecorderChecks,
+  type RecorderState,
+} from "../modules/hermes-recorder";
+import { kick } from "./meeting-queue";
 
-const KEEP_AWAKE_TAG = "hermes-meeting-recording";
+/** Muestras de nivel para la onda (≈10 s a 5/s). */
+const LEVEL_HISTORY = 50;
 
 interface RecordingStore {
+  /** false = APK sin el módulo nativo (hay que reinstalar). */
+  available: boolean;
+  status: RecorderState["status"];
+  /** Hay una grabación abierta (grabando o en pausa). */
   isRecording: boolean;
-  /** true mientras stop+persistencia están en curso (bloquea doble stop). */
+  paused: boolean;
+  /** true mientras stop está en curso (bloquea doble stop). */
   stopping: boolean;
-  /** Segundos transcurridos de la grabación en curso. */
   durationSec: number;
-  /** Proyecto fijado al arrancar: cambiar de chip a mitad de junta no lo mueve. */
   project: string | null;
-  /** URI del recorder, para excluirla del rescate de huérfanas. */
-  recorderUri: string | null;
-  /** true si ESTA grabación corre con el foreground service de Android. */
-  backgroundCapable: boolean;
-  /** Arranca a grabar. Devuelve un mensaje de error o null si todo bien. */
-  start: (project: string) => Promise<string | null>;
-  /**
-   * Detiene y persiste a almacenamiento durable ANTES de cualquier red.
-   * La entrada queda en `handoff` para que la pantalla de reuniones la suba.
-   * Devuelve un mensaje de error o null si todo bien.
-   */
+  projectName: string | null;
+  /** Historial de nivel 0..1, el último es el actual. */
+  levels: number[];
+  silencedByOtherApp: boolean;
+  silentForSec: number;
+  /** Confirmado por el service: sigue grabando fuera de la app. */
+  background: boolean;
+  backgroundError: string | null;
+  error: string | null;
+  bytes: number;
+  checks: RecorderChecks | null;
+  refreshChecks: () => void;
+  /** Devuelve un mensaje de error o null si todo bien. */
+  start: (project: string, projectName: string) => Promise<string | null>;
   stop: () => Promise<string | null>;
-  /** Grabación recién persistida esperando subida (la consume MeetingsScreen). */
-  handoff: rec.PendingRecording | null;
-  consumeHandoff: () => rec.PendingRecording | null;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
+  /** Descarta la grabación en curso (solo para los primeros segundos). */
+  cancel: () => Promise<void>;
 }
 
 const Ctx = createContext<RecordingStore | null>(null);
 
-export function RecordingProvider({ children }: { children: React.ReactNode }) {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recState = useAudioRecorderState(recorder, 500);
-  const [project, setProject] = useState<string | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const [backgroundCapable, setBackgroundCapable] = useState(false);
-  const [handoff, setHandoffState] = useState<rec.PendingRecording | null>(null);
-  const startedAt = useRef(0);
-  // Refs espejo: stop() es un callback estable y leería estado viejo.
-  const projectRef = useRef<string | null>(null);
-  const stoppingRef = useRef(false);
-  const handoffRef = useRef<rec.PendingRecording | null>(null);
+const IDLE: RecorderState = {
+  status: "idle",
+  id: null,
+  project: null,
+  projectName: null,
+  startedAt: null,
+  elapsedMs: 0,
+  level: 0,
+  silencedByOtherApp: false,
+  silentForMs: 0,
+  background: false,
+  backgroundError: null,
+  error: null,
+  bytes: 0,
+  finished: [],
+};
 
-  const setHandoff = (v: rec.PendingRecording | null) => {
-    handoffRef.current = v;
-    setHandoffState(v);
-  };
+/** Lecturas del módulo nativo que NUNCA tumban la pantalla. */
+function safeState(): RecorderState {
+  try {
+    return HermesRecorder?.getState() ?? IDLE;
+  } catch (e) {
+    return { ...IDLE, error: `No pude leer el grabador: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+function safeChecks(): RecorderChecks | null {
+  try {
+    return HermesRecorder?.checks() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const newId = () =>
+  `rec-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${Math.random().toString(36).slice(2, 7)}`;
+
+export function RecordingProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<RecorderState>(safeState);
+  const [levels, setLevels] = useState<number[]>([]);
+  const [stopping, setStopping] = useState(false);
+  const [checks, setChecks] = useState<RecorderChecks | null>(safeChecks);
+  const stoppingRef = useRef(false);
+
+  const refreshChecks = useCallback(() => {
+    setChecks(safeChecks());
+  }, []);
+
+  useEffect(() => {
+    if (!HermesRecorder) return;
+    const sub = HermesRecorder.addListener("onStatus", (s) => {
+      setState(s);
+      if (s.status === "recording") {
+        setLevels((prev) => [...prev.slice(-(LEVEL_HISTORY - 1)), s.level]);
+      } else if (s.status === "idle") {
+        setLevels([]);
+      }
+    });
+    // Volver a la app: re-leer (el JS pudo estar dormido) y re-chequear
+    // permisos (el usuario pudo cambiarlos en Ajustes).
+    const app = AppState.addEventListener("change", (st) => {
+      if (st !== "active") return;
+      setState(safeState());
+      refreshChecks();
+    });
+    return () => {
+      sub.remove();
+      app.remove();
+    };
+  }, [refreshChecks]);
 
   const start = useCallback(
-    async (proj: string): Promise<string | null> => {
+    async (project: string, projectName: string): Promise<string | null> => {
+      if (!HermesRecorder) {
+        return "Esta versión de la app no trae el grabador nuevo. Instala el APK actualizado.";
+      }
       try {
         const perm = await requestRecordingPermissionsAsync();
         if (!perm.granted) return "Sin permiso de micrófono no puedo grabar.";
-        // El foreground service exige POST_NOTIFICATIONS en Android 13+.
-        // Best-effort: si lo niegan, el prepare falla y caemos al modo clásico.
+        // Sin notificaciones el service corre igual, pero no ves la
+        // notificación con el cronómetro: se pide, sin bloquear.
         if (Platform.OS === "android" && Number(Platform.Version) >= 33) {
-          await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-          ).catch(() => null);
+          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).catch(
+            () => null,
+          );
         }
-        let bg = true;
-        try {
-          await setAudioModeAsync({
-            playsInSilentMode: true,
-            allowsRecording: true,
-            allowsBackgroundRecording: true,
-          });
-          await recorder.prepareToRecordAsync();
-        } catch {
-          // APK sin AudioRecordingService en el manifest (build previo a
-          // enableBackgroundRecording en app.json) o notificaciones negadas.
-          bg = false;
-          await setAudioModeAsync({
-            playsInSilentMode: true,
-            allowsRecording: true,
-            allowsBackgroundRecording: false,
-          });
-          await recorder.prepareToRecordAsync();
-        }
-        recorder.record();
-        startedAt.current = Date.now();
-        projectRef.current = proj;
-        setProject(proj);
-        setBackgroundCapable(bg);
-        // Sin foreground service, pantalla apagada = junta muerta; con él,
-        // igual evita que el teléfono se bloquee solo a mitad de junta.
-        await activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => null);
+        const s = await HermesRecorder.start(newId(), project, projectName);
+        setState(s);
+        refreshChecks();
         return null;
       } catch (e) {
         return e instanceof Error ? e.message : "No pude iniciar la grabación.";
       }
     },
-    [recorder],
+    [refreshChecks],
   );
 
   const stop = useCallback(async (): Promise<string | null> => {
-    if (stoppingRef.current) return null;
+    if (!HermesRecorder || stoppingRef.current) return null;
     stoppingRef.current = true;
     setStopping(true);
     try {
-      const durationSec = Math.max(1, Math.round((Date.now() - startedAt.current) / 1000));
-      await recorder.stop();
-      const uri = recorder.uri;
-      if (!uri) return "La grabación quedó vacía.";
-      const proj = projectRef.current;
-      if (!proj) return "La grabación no tiene proyecto asociado.";
-      // Primero a puerto seguro (documents/), después la red.
-      const entry = await rec.stashRecording({ uri, project: proj, durationSec });
-      setHandoff(entry);
-      return null;
+      const done = await HermesRecorder.stop();
+      setState(safeState());
+      kick(); // indexar + subir ya
+      return done ? null : "La grabación quedó vacía (no entró audio).";
     } catch (e) {
-      return e instanceof Error ? e.message : "No pude guardar la grabación.";
+      return e instanceof Error ? e.message : "No pude detener la grabación.";
     } finally {
       stoppingRef.current = false;
       setStopping(false);
-      projectRef.current = null;
-      setProject(null);
-      setBackgroundCapable(false);
-      void deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => null);
     }
-  }, [recorder]);
+  }, []);
 
-  const consumeHandoff = useCallback((): rec.PendingRecording | null => {
-    const h = handoffRef.current;
-    if (h) {
-      handoffRef.current = null;
-      setHandoffState(null);
-    }
-    return h;
+  const pause = useCallback(async () => {
+    await HermesRecorder?.pause();
+  }, []);
+  const resume = useCallback(async () => {
+    await HermesRecorder?.resume();
+  }, []);
+  const cancel = useCallback(async () => {
+    await HermesRecorder?.cancel();
+    setState(safeState());
   }, []);
 
   const value: RecordingStore = {
-    isRecording: recState.isRecording,
+    available: !!HermesRecorder,
+    status: state.status,
+    isRecording: state.status !== "idle",
+    paused: state.status === "paused",
     stopping,
-    durationSec: Math.max(0, Math.floor(recState.durationMillis / 1000)),
-    project,
-    recorderUri: recorder.uri ?? null,
-    backgroundCapable,
+    durationSec: Math.floor(state.elapsedMs / 1000),
+    project: state.project,
+    projectName: state.projectName,
+    levels,
+    silencedByOtherApp: state.silencedByOtherApp,
+    silentForSec: Math.floor(state.silentForMs / 1000),
+    background: state.background,
+    backgroundError: state.backgroundError,
+    error: state.error,
+    bytes: state.bytes,
+    checks,
+    refreshChecks,
     start,
     stop,
-    handoff,
-    consumeHandoff,
+    pause,
+    resume,
+    cancel,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

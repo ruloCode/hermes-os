@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import { useConversationClientTool, useConversationStatus } from "@elevenlabs/react";
 import type { EnglishError, EnglishSession, VocabEntry } from "@hermes/shared";
 import { hermesGet, hermesPost } from "@/lib/hermes";
+import { mergePracticeCorrections } from "@/lib/practice-corrections";
 import { useVoice } from "./VoiceBusyContext";
 
 const str = (v: unknown): string | undefined =>
@@ -90,7 +91,8 @@ export function EnglishTutorTools() {
         duration_sec: durationSec(),
         topics: Array.isArray(p.topics) ? (p.topics as unknown[]).map(String) : [],
         fluency: typeof p.fluency === "number" ? p.fluency : undefined,
-        errors: errors satisfies EnglishError[],
+        // + lo que la compañera corrigió en pantalla (sin repetir lo del tutor).
+        errors: mergePracticeCorrections(errors) satisfies EnglishError[],
         wins: Array.isArray(p.wins) ? (p.wins as unknown[]).map(String) : [],
         transcript: sessionTranscript(),
       });
@@ -127,6 +129,7 @@ export function EnglishTutorTools() {
         started_at: startedAtRef.current,
         duration_sec: durationSec(),
         transcript: sessionTranscript(),
+        errors: mergePracticeCorrections([]),
       };
       savedRef.current = true;
       void hermesPost("/english/sessions", payload).catch(() => undefined);

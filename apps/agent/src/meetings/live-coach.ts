@@ -3,11 +3,16 @@
  * transcript real (regla de oro del dashboard: nada inventado). Corre en el
  * tick de 5 s de live.ts — es una función pura y barata, sin LLM.
  *
- * Métricas: tiempo hablado (ratio de conversación), palabras, WPM y conteo
- * de muletillas es/en. El juicio cualitativo (claridad, estructura, score)
- * se difiere al post-meeting (ingest), donde sí hay LLM y contexto completo.
+ * Métricas: tiempo hablado (ratio de conversación), palabras, WPM, conteo
+ * de muletillas es/en y señales de articulación débil (shared/articulation).
+ * El juicio cualitativo (claridad, estructura, score) se difiere al post-meeting (ingest), donde sí hay LLM y contexto completo.
  */
-import type { LiveCoachMetrics, LiveSegment, LiveSpeakerStats } from "@hermes/shared";
+import {
+  detectWeakPhrases,
+  type LiveCoachMetrics,
+  type LiveSegment,
+  type LiveSpeakerStats,
+} from "@hermes/shared";
 
 // Muletillas por idioma. Palabra completa (\b) para no contar substrings;
 // "este" y "like" son ambiguas pero el conteo agregado sigue siendo señal
@@ -15,9 +20,16 @@ import type { LiveCoachMetrics, LiveSegment, LiveSpeakerStats } from "@hermes/sh
 const FILLERS_ES = /\b(este|estee|o sea|osea|pues|eh|ehh|em|emm|como que|digamos|¿no\?|¿sí\?)\b/gi;
 const FILLERS_EN = /\b(like|you know|um|umm|uh|uhh|basically|actually|i mean|sort of|kind of)\b/gi;
 
-export function countFillers(text: string): number {
-  const es = text.match(FILLERS_ES)?.length ?? 0;
+/**
+ * "both" (junta: se habla en los dos) · "en" (clase de inglés: "este"/"pues"
+ * ahí son caídas al español, no muletillas — se cuentan aparte).
+ */
+export type FillerLang = "both" | "en";
+
+export function countFillers(text: string, lang: FillerLang = "both"): number {
   const en = text.match(FILLERS_EN)?.length ?? 0;
+  if (lang === "en") return en;
+  const es = text.match(FILLERS_ES)?.length ?? 0;
   return es + en;
 }
 
@@ -25,16 +37,18 @@ export function computeCoachMetrics(
   segments: LiveSegment[],
   selfSpeaker: string | undefined,
   atMs: number,
+  opts: { fillers?: FillerLang } = {},
 ): LiveCoachMetrics {
   const bySpeaker: Record<string, LiveSpeakerStats> = {};
   for (const seg of segments) {
     if (!seg.final) continue; // los parciales cambian: solo texto consolidado
     const text = seg.text.trim();
     if (!text) continue;
-    const stats = (bySpeaker[seg.speaker] ??= { talkMs: 0, words: 0, wpm: 0, fillers: 0 });
+    const stats = (bySpeaker[seg.speaker] ??= { talkMs: 0, words: 0, wpm: 0, fillers: 0, weak: 0 });
     stats.talkMs += Math.max(0, seg.endMs - seg.startMs);
     stats.words += text.split(/\s+/).length;
-    stats.fillers += countFillers(text);
+    stats.fillers += countFillers(text, opts.fillers);
+    stats.weak = (stats.weak ?? 0) + detectWeakPhrases(text, opts.fillers === "en" ? "en" : undefined).length;
   }
   for (const stats of Object.values(bySpeaker)) {
     stats.wpm = stats.talkMs > 0 ? Math.round((stats.words / stats.talkMs) * 60_000) : 0;

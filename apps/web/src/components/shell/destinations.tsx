@@ -167,6 +167,22 @@ export const DESTS_VIDA: Dest[] = [
       <circle cx="12" cy="12" r="9" opacity=".45" />,
     ),
   },
+  // Gimnasio de articulación: hablar con el punto primero, en español e inglés. Mancuerna.
+  {
+    kind: "route",
+    href: "/gimnasio",
+    label: "Gimnasio",
+    icon: I("M6.5 8v8M17.5 8v8M3.5 10v4M20.5 10v4M6.5 12h11"),
+  },
+  // Entender: el tutor de proyecto (repos + actas, explica dibujando). Libro abierto.
+  {
+    kind: "route",
+    href: "/entender",
+    label: "Entender",
+    icon: I(
+      "M12 6.5C10.2 5 7.6 4.5 4 4.8v13.4c3.6-.3 6.2.2 8 1.7 1.8-1.5 4.4-2 8-1.7V4.8c-3.6-.3-6.2.2-8 1.7zM12 6.5v13.4",
+    ),
+  },
   // Estudio de contenido (marca RuloCode): claqueta.
   {
     kind: "route",

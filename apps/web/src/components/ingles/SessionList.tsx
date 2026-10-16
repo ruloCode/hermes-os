@@ -31,7 +31,7 @@ export function SessionList({
         kind="empty"
         compact
         title="Sin sesiones todavía"
-        hint='Di "Hermes, quiero practicar inglés" o usa ⌘K → Practicar inglés.'
+        hint='Practica con la tutora (⌘K → Practicar inglés) o abre la compañera en tu clase de Meet (● Clase en vivo).'
       />
     );
   }
@@ -55,11 +55,12 @@ export function SessionList({
               <span className="font-display text-xs text-text tabular-nums">
                 {fmtDate(s.started_at)}
               </span>
-              <span className={`shrink-0 text-2xs tracking-label uppercase ${st.cls}`}>
+              <span className={`shrink-0 text-2xs ${st.cls}`}>
                 {st.label}
               </span>
             </div>
             <div className="mt-0.5 flex items-center gap-2 text-2xs text-text-dim">
+              {s.source === "class" && <span className="text-accent">Clase</span>}
               <span className="tabular-nums">
                 {s.duration_sec ? fmtDuration(s.duration_sec) : "—"}
               </span>

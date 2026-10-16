@@ -1,11 +1,12 @@
 import { serve, upgradeWebSocket } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import type {
   AgentActivityEvent,
+  TutorStreamEvent,
   Currency,
   GoalStatus,
   HabitCadence,
@@ -68,10 +69,14 @@ import {
 } from "./meetings/store.js";
 import {
   startMeetingJob,
-  getMeetingJob,
+  getMeetingJobDurable,
+  retryMeetingJobFromAudio,
   listFailedTranscripts,
   retryFailedTranscript,
 } from "./meetings/ingest.js";
+import { UploadError, appendChunk, completeUpload, initUpload } from "./meetings/uploads.js";
+import { resumeLiveCompletionJobs, retryLiveCompletion } from "./meetings/live-completion.js";
+import { parseClientKind, parseClientRole } from "./meetings/live-clients.js";
 import {
   startLiveMeeting,
   stopLiveMeeting,
@@ -79,14 +84,24 @@ import {
   listLiveMeetings,
   renameSpeaker,
   requestSuggestions,
+  parseHelpIntent,
   attachClient,
   detachClient,
   pushAudio,
   handleClientMessage,
+  markSelf,
+  setAutoHelp,
   recoverOrphanLiveMeetings,
   LiveConflictError,
   LiveNotConfiguredError,
 } from "./meetings/live.js";
+import { openSystemAudio, type SystemAudioCapture } from "./meetings/system-audio.js";
+import { tutorProjects, tutorTurn } from "./tutor/tutor.js";
+import {
+  deleteConversation as deleteTutorConversation,
+  getConversation as getTutorConversation,
+  listConversations as listTutorConversations,
+} from "./tutor/store.js";
 import {
   attachGestureClient,
   detachGestureClient,
@@ -94,6 +109,11 @@ import {
 } from "./input/gestures.js";
 import { mouseStatus } from "./input/mouse.js";
 import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
+import { phoneLink } from "./phone/link.js";
+import { evolutionReport } from "./phone/evolution.js";
+import { phoneHome } from "./phone/home.js";
+import { companion, wireCompanion } from "./growth/index.js";
+import { parseGrowthSettings } from "@hermes/shared";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
 import { officeBoards } from "./office/boards.js";
 import { officeSpend } from "./office/spend.js";
@@ -118,9 +138,13 @@ import {
   type BrowserCommand,
 } from "./browser.js";
 import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
+import { ruloviewStatus, ruviewToken, startServer, stopServer } from "./ruloview/server.js";
+import { subscribeRuloview } from "./ruloview/stream.js";
+import { deleteScan, readRoom, ROOM_PATH, SCAN_MAX_BYTES, SCAN_PATH, writeRoom, writeScan } from "./ruloview/room.js";
 import { avatarProvider, terminatorAvatar } from "./avatar.js";
 import { officeState, officeViewerJoined, officeWatched, officeWorkerPrivate, startOffice, subscribeOffice } from "./office/state.js";
 import { approvalState, decideApproval, pendingApprovals, requestApproval, runForToken } from "./office/approvals.js";
+import { mountGymRoutes } from "./gym/routes.js";
 import { transcribe } from "./meetings/stt.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
@@ -155,6 +179,10 @@ import {
 import { getFinanceSummary, summaryToText, formatAmount } from "./finance/advisor.js";
 import { getUsdCopRate } from "./finance/fx.js";
 import { listWallets, setWalletBalance, balancesToText } from "./finance/wallets.js";
+import { filePlanStore, suggestPlan, validatePlanItems } from "./finance/plan.js";
+import { ingestNotifMovements, validateNotifMovements } from "./finance/notifications.js";
+import { financeGate } from "./finance/guard.js";
+import { loadHistory, recordBalance } from "./finance/history.js";
 import {
   createHabit,
   listHabits,
@@ -162,10 +190,22 @@ import {
   resolveHabit,
   checkinHabit,
   habitsToday,
+  habitDaysCount,
 } from "./habits/store.js";
+import {
+  fileFocusStore,
+  ingestSessions,
+  ingestUsage,
+  summarize,
+  summaryLine,
+  validateSessions,
+  validateUsage,
+} from "./focus/store.js";
+import { todayBogota } from "./dates.js";
 import { createGoal, listGoals, resolveGoal, updateGoal } from "./habits/goals.js";
 import {
   buildPracticeContext,
+  deleteEnglishSession,
   getEnglishSession,
   listEnglishSessions,
   listVocab,
@@ -173,6 +213,12 @@ import {
   saveEnglishSession,
   saveVocab,
 } from "./english/store.js";
+import {
+  closePracticeCompanion,
+  isAutoHelp,
+  openPracticeCompanion,
+  type PracticeCompanion,
+} from "./english/practice-companion.js";
 import { generatePracticeReport } from "./english/report.js";
 import {
   contentBoard,
@@ -244,8 +290,8 @@ import {
   deleteClaudeSession,
 } from "./agent/claude-sessions.js";
 import { randomUUID } from "node:crypto";
-import { createReadStream, readFileSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join as joinPath } from "node:path";
 import { Readable } from "node:stream";
@@ -362,6 +408,16 @@ app.post("/v1/chat/completions", async (c) => {
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   if (!lastUser) return c.json({ error: "no user message" }, 400);
+  // De dónde escribe el dueño. Desde el teléfono, "abre X" / "toca" / "lee la
+  // pantalla" son sobre el TELÉFONO; sin esta línea el modelo los resolvía en
+  // la Mac (abría el Chrome de Hermes). Solo va al prompt del turno: lo que se
+  // guarda en la conversación es el texto tal cual.
+  const gate = financeGate((h) => c.req.header(h));
+  const clientNote =
+    c.req.header("X-Hermes-Client") === "phone"
+      ? "[Escribo desde mi teléfono (Hermes Phone). \"Abre\", \"toca\", \"escribe\", \"lee la pantalla\" son en el TELÉFONO con las tools phone_*, salvo que diga \"en la Mac\".]" +
+        (gate.note ? `\n${gate.note}` : "")
+      : null;
 
   // "new" = sesión fresca (tab nuevo); uuid = resume de esa sesión; sin
   // header = mapeo legado (clientes viejos / voz).
@@ -403,8 +459,9 @@ app.post("/v1/chat/completions", async (c) => {
     let assistantText = "";
     const toolsUsed: string[] = [];
     const result = await runAgentTurn({
-      prompt: lastUser,
+      prompt: clientNote ? `${clientNote}\n\n${lastUser}` : lastUser,
       resumeSessionId: resume,
+      disallowedTools: gate.disallowedTools,
       project: focusProject,
       cwd,
       // Anuncia el session id del SDK apenas nace: el tab lo adopta y los
@@ -421,6 +478,8 @@ app.post("/v1/chat/completions", async (c) => {
         assistantText += t;
         void send(chunk(t));
       },
+      // Detener en el cliente (o cerrar la conexión) corta el turno de verdad.
+      signal: c.req.raw.signal,
     });
 
     if (result.sdkSessionId) {
@@ -496,7 +555,9 @@ app.post("/conversations/:project/chats/:id/restore", async (c) => {
 app.post("/tasks", async (c) => {
   const { prompt } = await c.req.json<{ prompt?: string }>();
   if (!prompt) return c.json({ error: "prompt requerido" }, 400);
-  const task = startTask(prompt);
+  // La voz del teléfono lanza tareas por aquí: mismo candado de finanzas que el chat.
+  const gate = financeGate((h) => c.req.header(h));
+  const task = startTask(gate.note ? `${gate.note}\n\n${prompt}` : prompt, { disallowedTools: gate.disallowedTools });
   return c.json({ task_id: task.id, status: task.status });
 });
 
@@ -551,11 +612,98 @@ app.post(
   },
 );
 
-// Estado de un job de ingest (para el spinner del panel; el /events también avisa).
-app.get("/meetings/jobs/:id", (c) => {
-  const job = getMeetingJob(c.req.param("id"));
+// Estado de un job de ingest (para el spinner del panel; el /events también
+// avisa). Sobrevive reinicios: memoria → disco → audio de custodia.
+app.get("/meetings/jobs/:id", async (c) => {
+  const job = await getMeetingJobDurable(c.req.param("id"));
   if (!job) return c.json({ error: "job no encontrado" }, 404);
-  return c.json(job);
+  const { audioPath, ...rest } = job;
+  return c.json({ ...rest, audioOnServer: !!audioPath });
+});
+
+// Reprocesa un job desde el audio que la Mac YA tiene (el teléfono no re-sube).
+app.post("/meetings/jobs/:id/retry", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { project?: string; durationSec?: number };
+  try {
+    // Completación de una junta en vivo (audio del teléfono): se reintenta
+    // completando ESA junta (mismo job), no creando otra.
+    const live = await retryLiveCompletion(c.req.param("id"));
+    if (live) return c.json({ meeting_job_id: live.id, status: live.status });
+    const job = await retryMeetingJobFromAudio(
+      c.req.param("id"),
+      String(body.project ?? ""),
+      body.durationSec ? Number(body.durationSec) : null,
+    );
+    return c.json({ meeting_job_id: job.id, status: job.status });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 404);
+  }
+});
+
+// Errores de la app móvil: en release un error de JS cerraba la app sin
+// rastro; ahora la app los manda aquí y quedan en logs/mobile-errors.log.
+app.post("/mobile/errors", bodyLimit({ maxSize: 64 * 1024 }), async (c) => {
+  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body) return c.json({ error: "json inválido" }, 400);
+  const line = JSON.stringify({ received: new Date().toISOString(), ...body });
+  console.error(`[mobile] ${String(body.kind)} v${String(body.version)}: ${String(body.message).slice(0, 300)}`);
+  const dir = joinPath(homedir(), ".hermes-os", "logs");
+  await mkdir(dir, { recursive: true });
+  await appendFile(joinPath(dir, "mobile-errors.log"), line + "\n");
+  return c.json({ ok: true });
+});
+
+// Subida POR PARTES (meetings/uploads.ts): cada parte es una petición corta —
+// el túnel corta a los ~100 s y un POST de 45 MB por datos móviles no llega.
+const uploadErr = (c: Context, err: unknown) => {
+  if (err instanceof UploadError) {
+    return c.json({ error: err.message, received: err.received }, err.status);
+  }
+  console.error("[uploads]", err);
+  return c.json({ error: String(err) }, 500);
+};
+
+app.post("/meetings/uploads", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  try {
+    const r = await initUpload({
+      id: String(b.id ?? ""),
+      project: String(b.project ?? "").trim(),
+      size: Number(b.size ?? 0),
+      mime: String(b.mime ?? "audio/aac"),
+      filename: String(b.filename ?? "reunion.aac"),
+      durationSec: b.durationSec != null ? Number(b.durationSec) : null,
+      title: b.title ? String(b.title) : undefined,
+      // Solo si lo manda: la app móvil vieja no lo trae y no es "web".
+      client: b.client != null ? parseClientKind(b.client) : undefined,
+      // La junta también se mandó en vivo: el complete la completa en vez de duplicarla.
+      liveSessionId: b.liveSessionId != null && b.liveSessionId !== "" ? String(b.liveSessionId) : undefined,
+      gapMs: b.gapMs != null ? Number(b.gapMs) : undefined,
+    });
+    return c.json(r);
+  } catch (err) {
+    return uploadErr(c, err);
+  }
+});
+
+app.put("/meetings/uploads/:id", bodyLimit({ maxSize: 16 * 1024 * 1024 }), async (c) => {
+  const offset = Number(c.req.query("offset") ?? "NaN");
+  if (!Number.isInteger(offset) || offset < 0) return c.json({ error: "offset inválido" }, 400);
+  try {
+    const bytes = Buffer.from(await c.req.arrayBuffer());
+    return c.json({ received: await appendChunk(c.req.param("id"), offset, bytes) });
+  } catch (err) {
+    return uploadErr(c, err);
+  }
+});
+
+app.post("/meetings/uploads/:id/complete", async (c) => {
+  try {
+    const r = await completeUpload(c.req.param("id"));
+    return c.json({ meeting_job_id: r.jobId, status: r.status });
+  } catch (err) {
+    return uploadErr(c, err);
+  }
 });
 
 // Transcripciones que se salvaron de un análisis fallido: se pueden reintentar
@@ -594,6 +742,8 @@ app.post("/meetings/live/start", async (c) => {
     languages?: string[];
     suggestionLang?: string;
     coachMode?: string;
+    autoHelp?: string;
+    client?: string;
   }
   const b = await c.req.json<StartLiveBody>().catch(() => ({}) as StartLiveBody);
   if (!b.project?.trim()) return c.json({ error: "project requerido" }, 400);
@@ -615,6 +765,8 @@ app.post("/meetings/live/start", async (c) => {
       languages: languages?.length ? languages : undefined,
       suggestionLang,
       coachMode: typeof b.coachMode === "string" ? b.coachMode : undefined,
+      autoHelp: isAutoHelp(b.autoHelp) ? b.autoHelp : undefined,
+      client: parseClientKind(b.client),
     });
     return c.json(snapshot);
   } catch (err) {
@@ -649,11 +801,31 @@ app.post("/meetings/live/:id/rename", async (c) => {
   return c.json(snapshot);
 });
 
+// "Soy yo" (espejo REST de mark_self): speaker "" = desmarcar.
+app.post("/meetings/live/:id/self", async (c) => {
+  const b = await c.req.json<{ speaker?: unknown }>().catch(() => ({}) as { speaker?: unknown });
+  if (typeof b.speaker !== "string") return c.json({ error: "speaker requerido (\"\" = desmarcar)" }, 400);
+  const snapshot = markSelf(c.req.param("id"), b.speaker);
+  if (!snapshot) return c.json({ error: "junta no encontrada" }, 404);
+  return c.json(snapshot);
+});
+
+// Ayuda automática de la clase (espejo REST de auto_help): full | scaffold | off.
+app.post("/meetings/live/:id/auto-help", async (c) => {
+  const b = await c.req.json<{ mode?: unknown }>().catch(() => ({}) as { mode?: unknown });
+  if (!isAutoHelp(b.mode)) return c.json({ error: "mode debe ser full | scaffold | off" }, 400);
+  const snapshot = setAutoHelp(c.req.param("id"), b.mode);
+  if (!snapshot) return c.json({ error: "junta no encontrada" }, 404);
+  return c.json(snapshot);
+});
+
 // "Soplar ahora": dispara una generación manual; el resultado llega push por WS.
-app.post("/meetings/live/:id/suggest", (c) => {
+app.post("/meetings/live/:id/suggest", async (c) => {
   const id = c.req.param("id");
   if (!getLiveMeeting(id)) return c.json({ error: "junta no encontrada" }, 404);
-  const res = requestSuggestions(id);
+  // intent (solo clase de inglés): scaffold | explain | full.
+  const b = await c.req.json<{ intent?: unknown }>().catch(() => ({}) as { intent?: unknown });
+  const res = requestSuggestions(id, parseHelpIntent(b.intent));
   if (!res.ok) return c.json(res, 409);
   return c.json(res);
 });
@@ -669,18 +841,25 @@ app.post("/meetings/live/:id/stop", async (c) => {
 // WS de la junta: audio PCM16 ↑ (binario) · LiveServerEvent ↓ (JSON). El
 // middleware de auth global corre en el upgrade (GET acepta ?key=, mismo
 // mecanismo que el SSE /events — el browser no manda headers en un WS).
+// `?role=audio|viewer&client=web|phone` (default audio+web = el dashboard de
+// siempre): un audio nuevo desplaza solo al audio anterior (4001); un viewer
+// mira y controla sin desplazar a nadie y su binario se ignora.
 app.get(
   "/meetings/live/:id/ws",
   upgradeWebSocket((c) => {
     const id = c.req.param("id") ?? "";
+    const info = {
+      role: parseClientRole(c.req.query("role")),
+      client: parseClientKind(c.req.query("client")),
+    };
     return {
       onOpen(_evt, ws) {
         // attachClient manda el hello {session} (replay completo del estado).
-        if (!attachClient(id, ws)) ws.close(4404, "sesión no encontrada");
+        if (!attachClient(id, ws, info)) ws.close(4404, "sesión no encontrada");
       },
-      onMessage(evt) {
+      onMessage(evt, ws) {
         if (typeof evt.data === "string") handleClientMessage(id, evt.data);
-        else if (evt.data instanceof ArrayBuffer) pushAudio(id, evt.data);
+        else if (evt.data instanceof ArrayBuffer) pushAudio(id, evt.data, ws);
       },
       onClose(_evt, ws) {
         detachClient(id, ws);
@@ -688,6 +867,138 @@ app.get(
     };
   }),
 );
+
+// Audio del SISTEMA para la junta en vivo (Teams/Zoom de escritorio: el
+// browser solo captura pestañas). El helper nativo escribe PCM16 16 kHz y va
+// por aquí en frames de 100 ms; el browser lo mezcla con el mic. Solo LAN: el
+// audio de la Mac no sale por el túnel. Mensajes de texto = estado del helper.
+app.get(
+  "/audio/system/ws",
+  upgradeWebSocket((c) => {
+    const remote = viaTunnel((h) => c.req.header(h));
+    let capture: SystemAudioCapture | null = null;
+    let closed = false;
+    return {
+      onOpen(_evt, ws) {
+        if (remote) {
+          ws.close(4403, "el audio del sistema solo se comparte en la red local");
+          return;
+        }
+        void openSystemAudio(
+          (frame) => {
+            try {
+              ws.send(frame);
+            } catch {
+              /* cliente roto: su close limpia */
+            }
+          },
+          (status) => {
+            try {
+              ws.send(JSON.stringify({ type: "status", ...status }));
+            } catch {
+              /* idem */
+            }
+          },
+        ).then((cap) => {
+          if (closed) cap.close(); // el browser se fue mientras arrancaba
+          else capture = cap;
+        });
+      },
+      onClose() {
+        closed = true;
+        capture?.close();
+        capture = null;
+      },
+    };
+  }),
+);
+
+// Compañera de "Practicar ahora": el browser sube las líneas de la tutora y
+// las tuyas (ya transcritas por ElevenLabs) y recibe correcciones/ayuda.
+// Una conexión = una compañera; cerrar el WS mata sus procesos CLI.
+app.get(
+  "/english/practice/ws",
+  upgradeWebSocket(() => {
+    let companion: PracticeCompanion | null = null;
+    return {
+      onOpen(_evt, ws) {
+        companion = openPracticeCompanion((ev) => {
+          try {
+            ws.send(JSON.stringify(ev));
+          } catch {
+            /* cliente roto: su close limpia */
+          }
+        });
+      },
+      onMessage(evt) {
+        if (typeof evt.data === "string") companion?.handleMessage(evt.data);
+      },
+      onClose() {
+        if (companion) closePracticeCompanion(companion);
+        companion = null;
+      },
+    };
+  }),
+);
+
+// ── Tutor de proyecto (Entender) ───────────────────────────────────────
+// Conversación de SOLO LECTURA sobre los repos, el vault y las actas de un
+// proyecto, que explica dibujando (Mermaid por tool + fuentes). Código y
+// actas de clientes: solo por la red local, nunca por el túnel.
+const TUTOR_PRIVATE = "El tutor de proyectos es privado: solo desde la red local";
+
+app.get("/tutor/projects", async (c) => {
+  if (viaTunnel((h) => c.req.header(h))) return c.json({ error: TUTOR_PRIVATE }, 403);
+  return c.json(await tutorProjects());
+});
+
+app.get("/tutor/:project/conversations", async (c) => {
+  if (viaTunnel((h) => c.req.header(h))) return c.json({ error: TUTOR_PRIVATE }, 403);
+  try {
+    return c.json(await listTutorConversations(c.req.param("project")));
+  } catch {
+    return c.json({ error: "proyecto inválido" }, 400);
+  }
+});
+
+app.get("/tutor/:project/conversations/:id", async (c) => {
+  if (viaTunnel((h) => c.req.header(h))) return c.json({ error: TUTOR_PRIVATE }, 403);
+  const conv = await getTutorConversation(c.req.param("project"), c.req.param("id")).catch(() => null);
+  if (!conv) return c.json({ error: "conversación no encontrada" }, 404);
+  return c.json(conv);
+});
+
+app.delete("/tutor/:project/conversations/:id", async (c) => {
+  if (viaTunnel((h) => c.req.header(h))) return c.json({ error: TUTOR_PRIVATE }, 403);
+  const ok = await deleteTutorConversation(c.req.param("project"), c.req.param("id")).catch(() => false);
+  return ok ? c.json({ ok }) : c.json({ error: "conversación no encontrada" }, 404);
+});
+
+// Un turno del tutor. SSE propio: conversation · delta · tool · diagram · done.
+// Stop del cliente (o cierre del tab) aborta el turno del SDK de verdad.
+app.post("/tutor/:project/chat", async (c) => {
+  if (viaTunnel((h) => c.req.header(h))) return c.json({ error: TUTOR_PRIVATE }, 403);
+  const b = await c.req
+    .json<{ message?: string; conversationId?: string; voice?: boolean }>()
+    .catch(() => ({}) as { message?: string; conversationId?: string; voice?: boolean });
+  const message = b.message?.trim();
+  if (!message) return c.json({ error: "message requerido" }, 400);
+  const project = c.req.param("project");
+  return streamSSE(c, async (stream) => {
+    let queue: Promise<unknown> = Promise.resolve();
+    const send = (ev: TutorStreamEvent) => {
+      queue = queue.then(() => stream.writeSSE({ data: JSON.stringify(ev) }));
+      return queue;
+    };
+    await tutorTurn(
+      project,
+      { message, conversationId: b.conversationId || undefined, voice: b.voice === true },
+      (ev) => void send(ev),
+      c.req.raw.signal,
+    ).catch((err) => send({ type: "done", error: String(err).slice(0, 200) }));
+    await queue;
+  });
+});
 
 // ── Control por gestos (mano → cursor) ─────────────────────────────────
 // El browser corre MediaPipe con la webcam y manda posiciones/pinza por WS;
@@ -763,6 +1074,97 @@ app.get(
     },
   })),
 );
+
+// ── Hermes Phone: el teléfono como cuerpo ─────────────────────────────
+// WS de texto JSON (protocolo en phone/protocol.ts — lo habla la app Android,
+// no cambiarlo sin ella). Auth global en el upgrade: Bearer (key o JWT de
+// Supabase) o ?key=. Un teléfono activo a la vez (el nuevo cierra al viejo con 4001).
+app.get(
+  "/phone/ws",
+  upgradeWebSocket(() => ({
+    onMessage(evt, ws) {
+      if (typeof evt.data === "string") phoneLink.handleMessage(ws, evt.data);
+    },
+    onClose(_evt, ws) {
+      phoneLink.handleClose(ws);
+    },
+  })),
+);
+
+app.get("/phone/status", async (c) => c.json(await phoneLink.status()));
+
+// Avisos al teléfono (Hermes habla primero): presupuesto del día + últimos 20.
+app.get("/phone/notices", async (c) => c.json(await phoneLink.notices()));
+
+// Aviso manual (QA y el dueño desde el dashboard). Cuenta contra el presupuesto como cualquiera.
+app.post("/phone/notify", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { title?: unknown; body?: unknown };
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  const text = typeof body.body === "string" ? body.body.trim() : "";
+  if (!title && !text) return c.json({ ok: false, error: "Falta title o body." }, 400);
+  const notice = await phoneLink.notify({ title: title || "Hermes", body: text, source: "agent" });
+  if (!notice) return c.json({ ok: false, error: "No se pudo guardar el aviso." }, 500);
+  return c.json({ ok: true, notice });
+});
+
+// Pantalla de inicio del teléfono en UN poll: evolución + próximo evento + lo de hoy.
+app.get("/phone/home", async (c) => c.json(await phoneHome()));
+
+// ── Compañero (hermes-phone/docs/companero.md) ─────────────────────────
+// Metas con fecha y plan, check-ins con vetos y la llamada semanal. Las metas,
+// los planes y los horarios los dice el dueño: aquí solo se leen y ajustan.
+app.get("/growth/status", async (c) => c.json(await companion.status()));
+
+app.put("/growth/settings", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== "object") return c.json({ ok: false, error: "Falta el cuerpo." }, 400);
+  const settings = await companion.updateSettings((cur) => parseGrowthSettings(body, cur));
+  return c.json({ ok: true, settings });
+});
+
+app.post("/growth/plans", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const r = await companion.addPlan(body);
+  return r.ok ? c.json({ ok: true, plan: r.plan }) : c.json({ ok: false, error: r.error }, 400);
+});
+
+app.patch("/growth/plans/:id", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { status?: unknown };
+  const st = body.status === "paused" || body.status === "active" ? body.status : null;
+  if (!st) return c.json({ ok: false, error: "status debe ser active o paused." }, 400);
+  const ok = await companion.setPlanStatus(c.req.param("id"), st);
+  return ok ? c.json({ ok: true }) : c.json({ ok: false, error: "No existe ese plan." }, 404);
+});
+
+app.delete("/growth/plans/:id", async (c) => {
+  const ok = await companion.setPlanStatus(c.req.param("id"), "removed");
+  return ok ? c.json({ ok: true }) : c.json({ ok: false, error: "No existe ese plan." }, 404);
+});
+
+// La llamada semanal: el teléfono pide el contexto al sonar y manda la conversación al colgar.
+app.get("/growth/call/context", async (c) => {
+  const id = (c.req.query("id") || "").trim().slice(0, 80);
+  if (!id) return c.json({ ok: false, error: "Falta id." }, 400);
+  return c.json(await companion.callContext(id));
+});
+
+app.post("/growth/calls/:id/close", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { duration_s?: unknown; transcript?: unknown };
+  const transcript = Array.isArray(body.transcript)
+    ? body.transcript.flatMap((l) => {
+        const x = (l ?? {}) as Record<string, unknown>;
+        return typeof x.text === "string" ? [{ role: x.role === "user" ? "user" : "hermes", text: x.text }] : [];
+      })
+    : [];
+  const r = await companion.closeCall(c.req.param("id"), {
+    duration_s: typeof body.duration_s === "number" ? body.duration_s : undefined,
+    transcript,
+  });
+  return c.json({ ok: true, ...r });
+});
+
+// Evolución de Hermes: métricas reales + etapa (lógica pura en shared/evolution.ts).
+app.get("/evolution", async (c) => c.json(await evolutionReport()));
 
 // ── Control del navegador por voz (Chrome real vía AppleScript) ────────
 // Respuestas SIEMPRE 200 con { ok, error }: el client tool de la voz relata
@@ -1169,6 +1571,47 @@ app.get("/finance/summary", async (c) =>
   ),
 );
 
+// Plan mensual (base de las proyecciones del teléfono): lo confirma el dueño,
+// Hermes solo sugiere desde las transacciones (finance/plan.ts).
+const planStore = filePlanStore();
+app.get("/finance/plan", async (c) => {
+  const [plan, txs] = await Promise.all([planStore.load(), listTransactions({ limit: 500 })]);
+  const { suggestions, candidates } = suggestPlan(txs);
+  const inPlan = new Set(plan.items.map((i) => i.id));
+  return c.json({
+    plan,
+    suggestions: suggestions.filter((s) => !inPlan.has(s.id)),
+    candidates: candidates.filter((s) => !inPlan.has(s.id)),
+  });
+});
+app.put("/finance/plan", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { items?: unknown };
+  const { items, rejected } = validatePlanItems(body.items);
+  if (rejected.length && !items.length) return c.json({ ok: false, error: rejected.join(" · ") }, 400);
+  const plan = { items, confirmed_at: new Date().toISOString() };
+  await planStore.save(plan);
+  return c.json({ ok: true, plan, rejected });
+});
+
+// Historia del saldo: una foto por día (finance/history.ts). Leerla también
+// toma la de hoy, así la gráfica nunca se queda un día atrás.
+app.get("/finance/history", async (c) => {
+  const wallets = await listWallets();
+  if (wallets.length) await recordBalance(wallets, env.SCHEDULED_TZ).catch(() => 0);
+  return c.json({ snapshots: await loadHistory() });
+});
+
+// Movimientos leídos de los avisos del banco en el teléfono (finance/notifications.ts).
+// Idempotente por huella: el teléfono reintenta su cola sin miedo a duplicar.
+app.post("/finance/notifications", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { movements?: unknown };
+  const { items, rejected } = validateNotifMovements(body.movements);
+  const results = await ingestNotifMovements(items);
+  const created = results.filter((r) => r.status === "created");
+  if (created.length) emit({ kind: "phone", detail: `${created.length} movimiento${created.length === 1 ? "" : "s"} desde avisos del banco` });
+  return c.json({ ok: true, results: results.map(({ key, status, wallet }) => ({ key, status, balance: wallet?.balance ?? null })), rejected });
+});
+
 app.get("/finance/budgets", async (c) => c.json(await listBudgets()));
 
 app.post("/finance/budgets", async (c) => {
@@ -1234,7 +1677,8 @@ app.post("/english/sessions", async (c) => {
       : [],
     wins: Array.isArray(b.wins) ? b.wins.map(String).slice(0, 6) : [],
     transcript: b.transcript ? String(b.transcript) : null,
-    source: b.source === "mobile" || b.source === "meeting" ? b.source : "web",
+    source:
+      b.source === "mobile" || b.source === "meeting" || b.source === "class" ? b.source : "web",
   });
   if (!session) return c.json({ error: "no se pudo guardar (sin Supabase)" }, 500);
   void generatePracticeReport(session.id);
@@ -1249,6 +1693,11 @@ app.get("/english/sessions/:id", async (c) => {
   const session = await getEnglishSession(Number(c.req.param("id")));
   if (!session) return c.json({ error: "sesión no encontrada" }, 404);
   return c.json(session);
+});
+
+app.delete("/english/sessions/:id", async (c) => {
+  const ok = await deleteEnglishSession(Number(c.req.param("id")));
+  return ok ? c.json({ ok }) : c.json({ error: "no se pudo borrar" }, 500);
 });
 
 app.post("/english/vocab", async (c) => {
@@ -1742,6 +2191,7 @@ app.delete("/content/refs/:id", async (c) => {
 // melodía → molde → letras). Las rutas viven en composicion/routes.ts (contrato
 // en packages/shared/src/composicion.ts); HERMES_COMPOSICION=off las apaga.
 mountComposicionRoutes(app);
+mountGymRoutes(app);
 
 // ── Hábitos y metas (desarrollo personal) ──────────────────────────────
 
@@ -1771,6 +2221,37 @@ app.post("/habits/:id/checkin", async (c) => {
 });
 
 app.get("/habits/today", async (c) => c.json(await habitsToday()));
+
+// ── Foco (Hermes Phone, focus/store.ts) ──────────────────────────────────
+// El teléfono es el dueño de sesiones y uso (funciona sin la Mac); aquí sube
+// el resumen con cola y reintento. Idempotente por id; el check-in del hábito
+// atado usa la fecha DE LA SESIÓN y ocurre una sola vez.
+const focusStore = fileFocusStore();
+
+app.post("/focus/sessions", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { sessions?: unknown };
+  const { items, rejected } = validateSessions(body.sessions);
+  if (rejected.length && !items.length) return c.json({ ok: false, error: rejected.join(" · ") }, 400);
+  const { results, checked } = await ingestSessions(focusStore, items, async (habitId, date, note) =>
+    !!(await checkinHabit(habitId, { date, note, source: "focus" })),
+  );
+  for (const k of checked) emit({ kind: "phone", detail: `Foco: ${k.habit ?? "hábito"} marcado (${k.date})` });
+  const saved = results.filter((r) => r.status === "saved").length;
+  if (saved) emit({ kind: "phone", detail: `${saved} sesión${saved === 1 ? "" : "es"} de foco desde el teléfono` });
+  return c.json({ ok: true, results, checked, rejected });
+});
+
+app.put("/focus/usage/:date", async (c) => {
+  const day = validateUsage(c.req.param("date"), await c.req.json().catch(() => ({})));
+  if (!day) return c.json({ ok: false, error: "fecha inválida (AAAA-MM-DD)" }, 400);
+  return c.json({ ok: true, ...(await ingestUsage(focusStore, day)) });
+});
+
+app.get("/focus/summary", async (c) => {
+  const [data, habitDays] = await Promise.all([focusStore.load(), habitDaysCount()]);
+  const s = summarize(data, todayBogota(), habitDays);
+  return c.json({ ...s, line: summaryLine(s) });
+});
 
 app.get("/goals", async (c) =>
   c.json(await listGoals((c.req.query("status") as GoalStatus) || undefined)),
@@ -2387,7 +2868,7 @@ app.post("/tools/find_events", async (c) => {
 // token efímero (WebRTC preferido, WebSocket de fallback) — igual que la ruta
 // /api/elevenlabs/token del dashboard, pero servida por el agente para que el
 // celular hable con los MISMOS agentes de voz sin exponer secretos.
-// `?agent=tutor` = tutor de inglés; sin query = Hermes; cualquier otra clave
+// `?agent=tutor` = tutor de inglés; `?agent=phone` = Hermes Phone; sin query = Hermes; cualquier otra clave
 // = un personaje de la Sala de Agentes 3D (~/.hermes-os/sala.json).
 app.get("/elevenlabs/token", async (c) => {
   const apiKey = env.ELEVENLABS_API_KEY;
@@ -2400,6 +2881,10 @@ app.get("/elevenlabs/token", async (c) => {
   } else if (which === "tutor") {
     agentId = env.ELEVENLABS_TUTOR_AGENT_ID;
     hint = "Configura NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID en .env (pnpm setup:elevenlabs lo crea)";
+  } else if (which === "phone") {
+    // Hermes Phone: agente propio con las client tools que corren en el teléfono.
+    agentId = env.ELEVENLABS_PHONE_AGENT_ID;
+    hint = "Configura ELEVENLABS_PHONE_AGENT_ID en .env (pnpm setup:elevenlabs --phone lo crea)";
   } else if (env.SALA_ENABLED) {
     try {
       const r = await resolveSalaAgentId(which);
@@ -2743,6 +3228,74 @@ app.get("/sala/agents", async (c) => {
     throw err;
   }
 });
+
+// ── RuloView (/ruloview) ───────────────────────────────────────────────
+// Presencia con la señal WiFi de 3 nodos ESP32 (fork ruloCode/RuView). El
+// agente arranca/para el servidor con el script del repo y reenvía su stream.
+// Es presencia en un cuarto real: NO sale por el túnel (como Composición).
+app.use("/ruloview/*", async (c, next) => {
+  if (!env.RULOVIEW_ENABLED) return c.json({ error: "RuloView está apagado (HERMES_RULOVIEW=off)" }, 404);
+  if (viaTunnel((h) => c.req.header(h))) return c.json({ error: "RuloView es privado: solo desde la red local" }, 403);
+  await next();
+});
+app.get("/ruloview/status", async (c) => c.json(await ruloviewStatus()));
+app.post("/ruloview/start", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { source?: string };
+  const source = body.source === "esp32" || body.source === "simulated" ? body.source : undefined;
+  const res = startServer(source);
+  if (res.ok) emit({ kind: "ruloview", detail: `RuloView · arrancando${source ? ` (${source})` : ""}` });
+  return c.json(res);
+});
+app.post("/ruloview/stop", (c) => {
+  const res = stopServer();
+  if (res.ok) emit({ kind: "ruloview", detail: "RuloView · deteniendo" });
+  return c.json(res);
+});
+app.get("/ruloview/room", (c) => c.json({ ...readRoom(), path: ROOM_PATH }));
+// El escaneo del celular (.glb). El navegador lo baja con fetch + Bearer (un
+// loader de three no manda credenciales) y lo parsea en memoria.
+app.get("/ruloview/room/scan", (c) => {
+  if (!existsSync(SCAN_PATH)) return c.json({ error: "no hay escaneo" }, 404);
+  return new Response(readFileSync(SCAN_PATH), {
+    headers: { "Content-Type": "model/gltf-binary", "Cache-Control": "no-store" },
+  });
+});
+app.put("/ruloview/room/scan", bodyLimit({ maxSize: SCAN_MAX_BYTES }), async (c) => {
+  const len = Number(c.req.header("content-length") || 0);
+  if (len > SCAN_MAX_BYTES) return c.json({ ok: false, error: `el escaneo pesa ${(len / 1e6).toFixed(0)} MB (tope ${SCAN_MAX_BYTES / 1e6} MB)` }, 413);
+  const res = writeScan(new Uint8Array(await c.req.arrayBuffer()));
+  if (res.ok) emit({ kind: "ruloview", detail: `RuloView · escaneo del cuarto (${(res.bytes / 1e6).toFixed(1)} MB)` });
+  return c.json(res, res.ok ? 200 : 400);
+});
+app.delete("/ruloview/room/scan", (c) => c.json(deleteScan()));
+app.put("/ruloview/room", async (c) => {
+  const res = writeRoom(await c.req.json().catch(() => null));
+  return res.ok ? c.json(res) : c.json(res, 400);
+});
+// Las páginas originales del servidor (Observatorio) piden el token a mano.
+app.get("/ruloview/token", (c) => c.json({ token: ruviewToken() || null }));
+app.get("/ruloview/events", (c) =>
+  streamSSE(c, async (stream) => {
+    let open = true;
+    const sub = subscribeRuloview((msg) => {
+      if (open) void stream.writeSSE({ data: JSON.stringify(msg) });
+    });
+    await stream.writeSSE({ data: JSON.stringify({ type: "link", state: sub.state, error: sub.error }) });
+    stream.onAbort(() => {
+      open = false;
+      sub.leave();
+    });
+    try {
+      while (open) {
+        await new Promise((r) => setTimeout(r, 15000));
+        if (open) await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+      }
+    } finally {
+      if (open) sub.leave();
+      open = false;
+    }
+  }),
+);
 
 // ── Tótem de estación (/estacion) ──────────────────────────────────────
 // Rutas del sistema de transporte con datos REALES: el GTFS manda las líneas,
@@ -3119,13 +3672,27 @@ app.get("/dashboard", async (c) => {
 startSystemSampler(); // sampler de CPU (5s) para GET /system
 void ensurePlugin(); // plugin local de skills (~/.hermes-os/plugin) listo antes del primer turno
 void readProjects(); // primer parse + sync a projects_cache
-void reconcileRunningTasks(); // arregla tareas 'running' huérfanas de un reinicio
-void recoverOrphanLiveMeetings(); // ingesta juntas en vivo que un reinicio dejó a medias
-// Sesiones de composición que un reinicio dejó "procesando": error con el motivo.
-void reconcileComposicion().catch((err) => console.error("[composicion] reconciliar:", err));
+// Rescates del arranque: NO en un agente de ensayo (HERMES_JOBS=off). Comparte
+// Supabase, el vault y ~/.hermes-os con producción, y lo que para él es
+// "huérfano" está VIVO en el otro proceso: marcaba como pendientes las tareas
+// que producción corría, ingería la junta en vivo de producción desde su
+// snapshot (acta duplicada) y daba por muertas las sesiones de composición.
+if (process.env.HERMES_JOBS !== "off") {
+  void reconcileRunningTasks(); // arregla tareas 'running' huérfanas de un reinicio
+  void recoverOrphanLiveMeetings(); // ingesta juntas en vivo que un reinicio dejó a medias
+  // Audio del teléfono que completaba una junta en vivo cuando el agente murió.
+  void resumeLiveCompletionJobs();
+  // Sesiones de composición que un reinicio dejó "procesando": error con el motivo.
+  void reconcileComposicion().catch((err) => console.error("[composicion] reconciliar:", err));
+}
 
 // Jobs periódicos con estado observable (GET /jobs → panel AUTOMATIZACIONES).
 // Presencia: latido para que otras Macs sepan que estamos vivos.
+// Foto diaria del saldo (la gráfica de evolución se arma desde que esto corre).
+registerJob("finance-balance-snapshot", 6 * 60 * 60_000, async () => {
+  const wallets = await listWallets();
+  return wallets.length ? recordBalance(wallets, env.SCHEDULED_TZ) : null;
+}, (n) => (n ? `${n} días con foto del saldo` : null));
 registerJob("presence-heartbeat", 30_000, pushPresence, () =>
   hasSupabase() ? "latido enviado" : null,
 );
@@ -3156,6 +3723,11 @@ registerJob("content-metrics-sync", 6 * 60 * 60_000, metricsSweep, (r) =>
 // Tareas programadas: barrido cada minuto. El estado vive en Postgres (no en
 // este registry), así que es escanea-y-actúa: si el agente estuvo caído, al
 // volver corre lo que quedó vencido en vez de perderlo.
+// El compañero: check-ins de los planes de metas EN MARCHA (con vetos y presupuesto).
+wireCompanion();
+registerJob("growth-checkins", 5 * 60_000, () => companion.sweep(), (r) =>
+  r ? `${r.sent} check-in(s) enviado(s)${r.skipped ? ` · ${r.skipped} sin mandar` : ""}${r.dropped ? ` · ${r.dropped} sin presupuesto` : ""}` : null,
+);
 registerJob("scheduled-tasks", 60_000, scheduledSweep, (r) =>
   r
     ? `${r.ran} tarea(s) ejecutada(s)${r.failed ? `, ${r.failed} con error` : ""}${r.blocked.length ? ` · BLOQUEADAS: ${r.blocked.join(", ")}` : ""}`

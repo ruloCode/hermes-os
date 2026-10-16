@@ -11,7 +11,14 @@ import { PanelState } from "@/components/ui/PanelState";
 import { getEnglishSessionDetail } from "@/lib/hermes";
 import { fmtDate, fmtDuration } from "./report-utils";
 
-export function SessionDetail({ session }: { session: EnglishSession | null }) {
+export function SessionDetail({
+  session,
+  onReviewWithTutor,
+}: {
+  session: EnglishSession | null;
+  /** Clase real: practicar sus errores con la tutora de voz (abre la llamada). */
+  onReviewWithTutor?: () => void;
+}) {
   const [transcript, setTranscript] = useState<string | null>(null);
   const [showTranscript, setShowTranscript] = useState(false);
 
@@ -58,10 +65,27 @@ export function SessionDetail({ session }: { session: EnglishSession | null }) {
             {session.topics.join(" · ")}
           </span>
         )}
-        <span className="ml-auto text-2xs tracking-label text-text-faint uppercase">
-          {session.source}
+        <span className="ml-auto text-2xs text-text-faint">
+          {session.source === "class" ? "clase en vivo" : session.source}
         </span>
       </div>
+
+      {/* Clase real → la tutora abre con sus errores ({{practice_context}}). */}
+      {session.source === "class" && onReviewWithTutor && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-green/40 bg-green/5 px-3 py-2">
+          <p className="min-w-0 flex-1 text-xs leading-snug text-text">
+            Repasa esta clase con la tutora: te pregunta cómo te fue y practica tus errores
+            principales.
+          </p>
+          <button
+            type="button"
+            onClick={onReviewWithTutor}
+            className="rounded-sm border border-green/60 px-3 py-1 text-xs text-green transition-colors hover:border-green"
+          >
+            ▶ Repasar ahora
+          </button>
+        </div>
+      )}
 
       {/* Reporte del coach (o su estado) */}
       {session.report_md ? (
@@ -81,7 +105,7 @@ export function SessionDetail({ session }: { session: EnglishSession | null }) {
       {/* Aciertos y errores crudos del tutor (complementan al reporte) */}
       {session.wins.length > 0 && (
         <div className="shrink-0">
-          <h3 className="text-2xs tracking-label text-green uppercase">Aciertos</h3>
+          <h3 className="text-2xs text-green">Aciertos</h3>
           <ul className="mt-1 space-y-0.5 text-xs leading-snug text-text-dim">
             {session.wins.map((w) => (
               <li key={w}>✓ {w}</li>
@@ -91,7 +115,9 @@ export function SessionDetail({ session }: { session: EnglishSession | null }) {
       )}
       {!session.report_md && session.errors.length > 0 && (
         <div className="shrink-0">
-          <h3 className="text-2xs tracking-label text-red uppercase">Errores anotados</h3>
+          <h3 className="text-2xs text-red">
+            {session.source === "class" ? "Correcciones de la clase" : "Errores anotados"}
+          </h3>
           <ul className="mt-1 space-y-1 text-xs leading-snug text-text-dim">
             {session.errors.map((e) => (
               <li key={e.quote}>
@@ -109,7 +135,7 @@ export function SessionDetail({ session }: { session: EnglishSession | null }) {
           <button
             type="button"
             onClick={() => setShowTranscript((v) => !v)}
-            className="text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-text"
+            className="text-2xs text-text-dim transition-colors hover:text-text"
           >
             {showTranscript ? "▾ ocultar transcript" : "▸ ver transcript"}
           </button>

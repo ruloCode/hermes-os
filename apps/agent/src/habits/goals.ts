@@ -92,6 +92,8 @@ export async function updateGoal(
     /** marca un milestone por título (includes, case-insensitive). */
     milestoneDone?: string;
     description?: string;
+    /** "AAAA-MM-DD" o null para quitarla. Con fecha y un plan, la meta queda "en marcha". */
+    dueDate?: string | null;
   },
 ): Promise<Goal | null> {
   if (!supabase) return null;
@@ -104,6 +106,7 @@ export async function updateGoal(
   if (patch.delta !== undefined) current += patch.delta;
   if (current !== goal.current_value) clean.current_value = current;
   if (patch.description !== undefined) clean.description = patch.description;
+  if (patch.dueDate !== undefined) clean.due_date = patch.dueDate;
   if (patch.status !== undefined) clean.status = patch.status;
 
   if (patch.milestoneDone) {

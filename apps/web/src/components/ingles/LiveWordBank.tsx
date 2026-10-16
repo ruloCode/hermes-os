@@ -40,13 +40,13 @@ export function LiveWordBank({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain pr-1">
-      <h3 className="text-2xs tracking-label text-accent uppercase">
+      <h3 className="text-2xs text-accent">
         Esta sesión · {words.length}
       </h3>
       {words.length === 0 ? (
         <p className="rounded-sm border border-line border-dashed px-2.5 py-3 text-2xs leading-relaxed text-text-faint">
-          👆 Toca cualquier palabra del tutor en la transcripción y aparece aquí al
-          instante. El tutor la explica en la charla y le pone su significado.
+          Toca cualquier palabra de la tutora en la transcripción y aparece aquí al
+          instante. La tutora la explica en la charla y le pone su significado.
         </p>
       ) : (
         words.map((w) => {
@@ -72,11 +72,11 @@ export function LiveWordBank({
 
       {due.length > 0 && (
         <>
-          <h3 className="mt-1 text-2xs tracking-label text-amber uppercase">
+          <h3 className="mt-1 text-2xs text-amber">
             Repasa hoy · {due.length}
           </h3>
           <p className="text-2xs leading-snug text-text-faint">
-            Pídele al tutor un quiz (“let’s review my vocabulary”) y marca el repaso aquí.
+            Pídele a la tutora un quiz (“let’s review my vocabulary”) y marca el repaso aquí.
           </p>
           {due.map((v) => (
             <VocabTerm key={v.id} v={v} due busy={busyId === v.id} onReview={(id) => void review(id)} />

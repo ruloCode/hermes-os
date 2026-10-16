@@ -24,6 +24,10 @@ import type {
   TransactionKind,
   Wallet,
   ChatToolStep,
+  EnglishSession,
+  EnglishSessionFull,
+  EnglishError,
+  VocabEntry,
   LinearBoardIssue,
   LinearIssueFull,
   LinearStateType,
@@ -160,6 +164,80 @@ export async function uploadMeetingAudio(input: {
   const res = await req("/meetings", { method: "POST", body: form });
   if (!res.ok) throw new Error(`/meetings → ${res.status}`);
   return (await res.json()) as { meeting_job_id: string; status: string };
+}
+
+// ── Subida por partes (reanudable) ─────────────────────────────────────
+// Ver apps/agent/src/meetings/uploads.ts: cada parte es una petición corta,
+// así una junta de 60 MB llega aunque el túnel corte a los ~100 s o la red
+// parpadee. El servidor recuerda los bytes recibidos.
+
+/** Error HTTP con el `received` del servidor (409 = reanudar desde ahí). */
+export class UploadHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly received?: number,
+  ) {
+    super(message);
+  }
+}
+
+async function uploadJson<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const res = await req(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string; received?: number };
+  if (!res.ok) throw new UploadHttpError(data.error ?? `${path} → ${res.status}`, res.status, data.received);
+  return data;
+}
+
+export function initMeetingUpload(input: {
+  id: string;
+  project: string;
+  size: number;
+  mime: string;
+  filename: string;
+  durationSec?: number | null;
+}): Promise<{ received: number; jobId?: string }> {
+  return uploadJson("/meetings/uploads", "POST", input);
+}
+
+/** Sube una parte. expo/fetch: el fetch de RN no manda bytes crudos bien. */
+export async function putMeetingChunk(id: string, offset: number, bytes: Uint8Array): Promise<number> {
+  await ensureFreshToken();
+  const send = () =>
+    expoFetch(`${getBase()}/meetings/uploads/${encodeURIComponent(id)}?offset=${offset}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/octet-stream" },
+      // expo/fetch acepta cualquier ArrayBufferView (RequestUtils); el tipo
+      // de TS solo choca por el genérico ArrayBufferLike de Uint8Array.
+      body: bytes as Uint8Array<ArrayBuffer>,
+    });
+  let res = await send();
+  if (res.status === 401 && getSession() && (await refreshSession())) res = await send();
+  const data = (await res.json().catch(() => ({}))) as { received?: number; error?: string };
+  if (!res.ok) {
+    throw new UploadHttpError(data.error ?? `parte → ${res.status}`, res.status, data.received);
+  }
+  return data.received ?? offset + bytes.length;
+}
+
+export function completeMeetingUpload(id: string): Promise<{ meeting_job_id: string; status: string }> {
+  return uploadJson(`/meetings/uploads/${encodeURIComponent(id)}/complete`, "POST", {});
+}
+
+/** Reprocesa en la Mac un job cuyo audio ya está allá (no se re-sube nada). */
+export function retryMeetingJob(
+  jobId: string,
+  project: string,
+  durationSec?: number | null,
+): Promise<{ meeting_job_id: string; status: string }> {
+  return uploadJson(`/meetings/jobs/${encodeURIComponent(jobId)}/retry`, "POST", {
+    project,
+    durationSec,
+  });
 }
 
 export async function uploadMeetingTranscript(input: {
@@ -513,9 +591,43 @@ export interface VoiceCreds {
   error?: string;
   notConfigured?: boolean;
 }
-export async function voiceToken(): Promise<VoiceCreds> {
-  const res = await req("/elevenlabs/token");
+/** `agent: "tutor"` = la tutora de inglés; sin agente = Hermes. */
+export async function voiceToken(agent?: "tutor"): Promise<VoiceCreds> {
+  const res = await req(agent ? `/elevenlabs/token?agent=${agent}` : "/elevenlabs/token");
   const data = (await res.json().catch(() => ({}))) as VoiceCreds;
   if (!res.ok && !data.error) return { error: `token → ${res.status}` };
   return data;
+}
+
+// ── Inglés: clases reales, práctica con la tutora y vocabulario ────────
+export function englishSessions(limit = 60): Promise<EnglishSession[]> {
+  return get<EnglishSession[]>(`/english/sessions?limit=${limit}`);
+}
+export function englishSession(id: number): Promise<EnglishSessionFull> {
+  return get<EnglishSessionFull>(`/english/sessions/${id}`);
+}
+export function englishVocab(due = false, limit = 40): Promise<VocabEntry[]> {
+  return get<VocabEntry[]>(`/english/vocab?due=${due}&limit=${limit}`);
+}
+export function reviewVocab(id: number): Promise<VocabEntry> {
+  return post<VocabEntry>(`/english/vocab/${id}/review`, {});
+}
+export function saveVocab(input: { term: string; meaning_es?: string; example?: string }): Promise<VocabEntry> {
+  return post<VocabEntry>("/english/vocab", input);
+}
+/** String para {{practice_context}} de la tutora (última sesión, errores, vocab). */
+export async function englishContext(): Promise<string> {
+  return (await get<{ context: string }>("/english/context")).context;
+}
+export function saveEnglishSession(input: {
+  started_at: string;
+  duration_sec?: number;
+  topics?: string[];
+  fluency?: number;
+  errors?: EnglishError[];
+  wins?: string[];
+  transcript?: string;
+  source: "mobile";
+}): Promise<EnglishSession> {
+  return post<EnglishSession>("/english/sessions", input);
 }

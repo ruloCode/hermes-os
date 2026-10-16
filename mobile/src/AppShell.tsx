@@ -31,8 +31,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { C, mono } from "./theme";
 import { useApp, type Tab } from "./store";
 import { useRecording } from "./recording";
+import { startMeetingQueue } from "./meeting-queue";
+import { fmtClock } from "./meetings/format";
 import { HermesScreen } from "./screens/HermesScreen";
 import { MeetingsScreen } from "./screens/MeetingsScreen";
+import { EnglishScreen } from "./screens/EnglishScreen";
+import { useVoice } from "./voice";
 import { ProjectsScreen } from "./screens/ProjectsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
 import { FinanceScreen } from "./screens/FinanceScreen";
@@ -43,10 +47,12 @@ import { Loading } from "./ui";
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 const TABS: { key: Tab; icon: IconName; iconOn: IconName; label: string }[] = [
-  { key: "voz", icon: "chatbubbles-outline", iconOn: "chatbubbles", label: "Hermes" },
+  // Las dos funciones de todos los días van primero.
   { key: "reuniones", icon: "mic-outline", iconOn: "mic", label: "Reuniones" },
-  { key: "proyectos", icon: "grid-outline", iconOn: "grid", label: "Proyectos" },
+  { key: "ingles", icon: "language-outline", iconOn: "language", label: "Inglés" },
+  { key: "voz", icon: "chatbubbles-outline", iconOn: "chatbubbles", label: "Hermes" },
   { key: "tareas", icon: "checkbox-outline", iconOn: "checkbox", label: "Tareas" },
+  { key: "proyectos", icon: "grid-outline", iconOn: "grid", label: "Proyectos" },
   { key: "finanzas", icon: "wallet-outline", iconOn: "wallet", label: "Finanzas" },
 ];
 
@@ -73,6 +79,12 @@ export function AppShell() {
   // Boton ATRAS de Android. Antes no se manejaba: pulsarlo salia de la app
   // desde cualquier sitio, incluso con Ajustes abierto. Orden de prioridad:
   // overlay -> detalle de la pantalla (pila del store) -> tab inicial -> salir.
+  // Motor de entrega de juntas: arranca con la sesión y vive fuera de las
+  // pantallas (sube y sigue los jobs aunque no estés en Reuniones).
+  useEffect(() => {
+    if (app.authed) startMeetingQueue();
+  }, [app.authed]);
+
   const { settingsOpen, setSettingsOpen, handleBack, tab, setTab } = app;
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -81,8 +93,9 @@ export function AppShell() {
         return true;
       }
       if (handleBack()) return true;
-      if (tab !== "voz") {
-        setTab("voz");
+      // Reuniones es la pantalla de inicio: es lo que se usa a diario.
+      if (tab !== "reuniones") {
+        setTab("reuniones");
         return true;
       }
       return false; // en Hermes y sin nada abierto: que salga, como se espera
@@ -116,6 +129,7 @@ export function AppShell() {
       <View style={{ flex: 1, paddingBottom: keyboard ? 0 : BAR_H + barBottom + 8 }}>
         {app.tab === "voz" ? <HermesScreen /> : null}
         {app.tab === "reuniones" ? <MeetingsScreen /> : null}
+        {app.tab === "ingles" ? <EnglishScreen /> : null}
         {app.tab === "proyectos" ? <ProjectsScreen /> : null}
         {app.tab === "tareas" ? <TasksScreen /> : null}
         {app.tab === "finanzas" ? <FinanceScreen /> : null}
@@ -135,6 +149,7 @@ export function AppShell() {
       ) : null}
 
       <RecordingPill bottomOffset={keyboard ? 14 : barBottom + BAR_H + 14} />
+      <TutorPill bottomOffset={keyboard ? 14 : barBottom + BAR_H + 14} />
 
       {keyboard ? null : (
       <View
@@ -178,8 +193,6 @@ export function AppShell() {
   );
 }
 
-const fmtClock = (sec: number) =>
-  `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
 /**
  * Píldora flotante de grabación en curso: visible en cualquier tab menos
@@ -187,6 +200,38 @@ const fmtClock = (sec: number) =>
  * botón de la pantalla (el provider persiste y MeetingsScreen sube al montar).
  * Se dibuja POR ENCIMA de la barra de tabs (bottomOffset), no debajo.
  */
+/**
+ * Práctica con la tutora en curso y estás en otra pestaña: píldora para
+ * volver. Si hay una junta grabándose, manda la píldora de la grabación.
+ */
+function TutorPill({ bottomOffset }: { bottomOffset: number }) {
+  const app = useApp();
+  const v = useVoice();
+  const recording = useRecording();
+  const active = v.mode === "tutor" && (v.connected || v.connecting);
+  if (!active || app.tab === "ingles" || recording.isRecording) return null;
+  return (
+    <Pressable
+      onPress={() => app.setTab("ingles")}
+      accessibilityRole="button"
+      accessibilityLabel="Práctica con la tutora en curso. Volver a Inglés"
+      style={({ pressed }) => [styles.pill, { bottom: bottomOffset }, pressed ? { opacity: 0.85 } : null]}
+    >
+      <Ionicons name="language" size={15} color={C.green} />
+      <Text style={styles.pillLabel}>Hablando con tu tutora</Text>
+      <Pressable
+        onPress={v.disconnect}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel="Terminar práctica"
+        style={({ pressed }) => [styles.pillStop, { opacity: pressed ? 0.7 : 1 }]}
+      >
+        <Text style={{ color: C.red, fontSize: 13, fontWeight: "800" }}>■</Text>
+      </Pressable>
+    </Pressable>
+  );
+}
+
 function RecordingPill({ bottomOffset }: { bottomOffset: number }) {
   const app = useApp();
   const recording = useRecording();
@@ -194,7 +239,10 @@ function RecordingPill({ bottomOffset }: { bottomOffset: number }) {
   const active = recording.isRecording || recording.stopping;
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || recording.paused) {
+      pulse.setValue(recording.paused ? 0.4 : 1);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 0.25, duration: 600, useNativeDriver: true }),
@@ -203,15 +251,22 @@ function RecordingPill({ bottomOffset }: { bottomOffset: number }) {
     );
     loop.start();
     return () => loop.stop();
-  }, [active, pulse]);
+  }, [active, recording.paused, pulse]);
 
   if (!active || app.tab === "reuniones") return null;
 
-  const stopNow = async () => {
-    const err = await recording.stop();
-    // A Reuniones siempre: ahí vive la subida de la recién persistida.
-    app.setTab("reuniones");
-    if (err) Alert.alert("No pude guardar la grabación", err);
+  const stopNow = () => {
+    Alert.alert("¿Terminar la junta?", `${fmtClock(recording.durationSec)} grabados. Se guarda y se sube sola.`, [
+      { text: "Seguir grabando", style: "cancel" },
+      {
+        text: "Terminar",
+        onPress: () =>
+          void recording.stop().then((err) => {
+            app.setTab("reuniones");
+            if (err) Alert.alert("No pude guardar la grabación", err);
+          }),
+      },
+    ]);
   };
 
   return (
@@ -225,11 +280,15 @@ function RecordingPill({ bottomOffset }: { bottomOffset: number }) {
         pressed ? { opacity: 0.85 } : null,
       ]}
     >
-      <Animated.View style={[styles.pillDot, { opacity: pulse }]} />
-      <Text style={styles.pillLabel}>Grabando</Text>
+      <Animated.View
+        style={[styles.pillDot, { opacity: pulse }, recording.paused ? { backgroundColor: C.amber } : null]}
+      />
+      <Text style={styles.pillLabel}>
+        {recording.silencedByOtherApp ? "Sin micrófono" : recording.paused ? "En pausa" : "Grabando"}
+      </Text>
       <Text style={styles.pillTimer}>{fmtClock(recording.durationSec)}</Text>
       <Pressable
-        onPress={() => void stopNow()}
+        onPress={stopNow}
         disabled={recording.stopping}
         hitSlop={10}
         accessibilityRole="button"

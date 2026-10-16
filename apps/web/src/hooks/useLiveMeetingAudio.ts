@@ -96,6 +96,69 @@ class Pcm16Processor extends AudioWorkletProcessor {
   }
 }
 registerProcessor("pcm16-processor", Pcm16Processor);
+
+// Fuente: PCM16 16 kHz que llega por el port (el audio del sistema que manda
+// el agente) → muestras al rate del contexto. Colchón de ~150 ms antes de
+// sonar (la red llega a ráfagas) y tope de ~600 ms (si se atrasa, se tira lo
+// viejo: en una llamada vale más estar al día que completo).
+class Pcm16SourceProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.step = 16000 / sampleRate; // muestras de entrada por muestra de salida
+    this.queue = [];
+    this.head = 0; // índice dentro de queue[0]
+    this.pos = 0; // fase fraccional
+    this.queued = 0;
+    this.started = false;
+    this.prev = 0;
+    this.port.onmessage = (ev) => {
+      const pcm = new Int16Array(ev.data);
+      const f = new Float32Array(pcm.length);
+      for (let i = 0; i < pcm.length; i++) f[i] = pcm[i] / 32768;
+      this.queue.push(f);
+      this.queued += f.length;
+      while (this.queued > 9600 && this.queue.length > 1) {
+        this.queued -= this.queue[0].length - this.head;
+        this.queue.shift();
+        this.head = 0;
+      }
+    };
+  }
+  next() {
+    while (this.queue.length && this.head >= this.queue[0].length) {
+      this.queue.shift();
+      this.head = 0;
+    }
+    if (!this.queue.length) return null;
+    this.queued -= 1;
+    return this.queue[0][this.head++];
+  }
+  process(_inputs, outputs) {
+    const out = outputs[0] && outputs[0][0];
+    if (!out) return true;
+    if (!this.started) {
+      if (this.queued < 2400) return true; // colchón inicial (salida en silencio)
+      this.started = true;
+    }
+    for (let i = 0; i < out.length; i++) {
+      this.pos += this.step;
+      while (this.pos >= 1) {
+        const v = this.next();
+        if (v === null) {
+          this.started = false; // se vació: re-llenar el colchón (en silencio, sin DC)
+          this.pos = 0;
+          this.prev = 0;
+          break;
+        }
+        this.prev = v;
+        this.pos -= 1;
+      }
+      out[i] = this.prev;
+    }
+    return true;
+  }
+}
+registerProcessor("pcm16-source", Pcm16SourceProcessor);
 `;
 
 async function createWorkletNode(ctx: AudioContext): Promise<AudioWorkletNode> {
@@ -114,11 +177,28 @@ async function createWorkletNode(ctx: AudioContext): Promise<AudioWorkletNode> {
   });
 }
 
+/** De dónde sale el audio de los demás en remoto: una pestaña (Meet, Teams web) o la app de escritorio. */
+export type CallAudioSource = "tab" | "app";
+
 export interface LiveAudioStartOptions {
-  /** "presencial" (default) = solo mic · "remoto" = mic + pestaña compartida. */
+  /** "presencial" (default) = solo mic · "remoto" = mic + audio de la llamada. */
   mode?: "presencial" | "remoto";
-  /** El usuario cortó el share de la pestaña a media junta (solo remoto). */
+  /** Remoto: "tab" (default) = pestaña compartida · "app" = audio del sistema vía el agente. */
+  source?: CallAudioSource;
+  /** WS del agente con el audio del sistema (requerido con source "app"). */
+  appAudioUrl?: string;
+  /** El audio de la llamada se cortó a media junta (dejó de compartir / el helper murió). */
   onSystemAudioEnded?: () => void;
+}
+
+/**
+ * Energía (RMS) de cada fuente ANTES de la mezcla, medida al emitir cada
+ * frame. Con ella la clase de inglés sabe qué voz es la tuya (inferSelfSpeaker):
+ * el mic con cancelación de eco no oye a la profe; la pestaña no te oye a ti.
+ */
+export interface SourceLevels {
+  mic: number;
+  tab: number;
 }
 
 export interface LiveMeetingAudio {
@@ -126,12 +206,14 @@ export interface LiveMeetingAudio {
    *  Lanza si el permiso del MIC falla; la pestaña es best-effort:
    *  `systemAudio` dice si quedó capturando (false = solo mic). */
   start: (
-    onFrame: (frame: ArrayBuffer) => void,
+    onFrame: (frame: ArrayBuffer, levels: SourceLevels) => void,
     opts?: LiveAudioStartOptions,
   ) => Promise<{ systemAudio: boolean }>;
-  /** Reintenta capturar la pestaña con la junta ya corriendo (requiere
-   *  gesto del usuario: botón). true = quedó mezclando. */
+  /** Reintenta capturar el audio de la llamada con la junta ya corriendo
+   *  (la pestaña requiere gesto del usuario: botón). true = quedó mezclando. */
   enableSystemAudio: () => Promise<boolean>;
+  /** Por qué falló la última captura del audio de la llamada (null = no falló). */
+  systemAudioErrorRef: RefObject<string | null>;
   /** Suelta mic + pestaña + contexto (idempotente). */
   stop: () => void;
   /** RMS del último frame (0..~1) — para el VU con rAF, sin estado React. */
@@ -145,6 +227,26 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<AudioWorkletNode | null>(null);
   const onSysEndedRef = useRef<(() => void) | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const tabAnalyserRef = useRef<AnalyserNode | null>(null);
+  const bufRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const sourceRef = useRef<CallAudioSource>("tab");
+  const appUrlRef = useRef<string | null>(null);
+  const appWsRef = useRef<WebSocket | null>(null);
+  const appNodeRef = useRef<AudioWorkletNode | null>(null);
+  const systemAudioErrorRef = useRef<string | null>(null);
+
+  /** RMS de lo último que vio un analizador (~128 ms a 16 kHz). */
+  const rmsOf = useCallback((a: AnalyserNode | null): number => {
+    if (!a) return 0;
+    if (!bufRef.current || bufRef.current.length !== a.fftSize)
+      bufRef.current = new Float32Array(a.fftSize);
+    const buf = bufRef.current;
+    a.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    return Math.sqrt(sum / buf.length);
+  }, []);
 
   const stopDisplay = useCallback(() => {
     displayRef.current?.getTracks().forEach((t) => {
@@ -152,6 +254,20 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
       t.stop();
     });
     displayRef.current = null;
+    const ws = appWsRef.current;
+    appWsRef.current = null;
+    if (ws) {
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.close();
+    }
+    try {
+      appNodeRef.current?.disconnect();
+    } catch {
+      /* ya desconectado */
+    }
+    appNodeRef.current = null;
+    tabAnalyserRef.current = null;
   }, []);
 
   const stop = useCallback(() => {
@@ -167,6 +283,7 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    micAnalyserRef.current = null;
     stopDisplay();
     onSysEndedRef.current = null;
     const ctx = ctxRef.current;
@@ -175,9 +292,81 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
     levelRef.current = 0;
   }, [stopDisplay]);
 
+  /**
+   * App de escritorio (Teams, Zoom…): el agente captura el audio del sistema
+   * y lo manda por WS; aquí entra al MISMO mezclador que la pestaña, con su
+   * analizador antes de mezclar (el "soy yo" automático sigue funcionando).
+   * false = el helper no arrancó (sin permiso, sin swiftc…): el motivo queda
+   * en systemAudioErrorRef y la junta sigue solo con el mic.
+   */
+  const enableAppAudio = useCallback(async (): Promise<boolean> => {
+    const ctx = ctxRef.current;
+    const node = nodeRef.current;
+    const url = appUrlRef.current;
+    if (!ctx || !node || !url) return false;
+    stopDisplay();
+    systemAudioErrorRef.current = null;
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    appWsRef.current = ws;
+    const src = new AudioWorkletNode(ctx, "pcm16-source", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    });
+    const ok = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        systemAudioErrorRef.current = "el agente no respondió con el audio del sistema";
+        resolve(false);
+      }, 12_000); // la primera vez puede compilar el helper
+      ws.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          src.port.postMessage(ev.data, [ev.data]);
+          return;
+        }
+        try {
+          const msg = JSON.parse(String(ev.data)) as { state?: string; message?: string };
+          if (msg.state === "capturing") {
+            clearTimeout(timer);
+            resolve(true);
+          } else if (msg.state === "error") {
+            clearTimeout(timer);
+            systemAudioErrorRef.current = msg.message ?? "falló la captura del audio del sistema";
+            resolve(false);
+          }
+        } catch {
+          /* frame no-JSON */
+        }
+      };
+      ws.onclose = (ev) => {
+        clearTimeout(timer);
+        if (!systemAudioErrorRef.current)
+          systemAudioErrorRef.current = ev.reason || "se cerró la conexión del audio del sistema";
+        resolve(false);
+      };
+    });
+    if (!ok || appWsRef.current !== ws) {
+      if (appWsRef.current === ws) stopDisplay();
+      return false;
+    }
+    appNodeRef.current = src;
+    src.connect(node);
+    const tabAnalyser = ctx.createAnalyser();
+    tabAnalyser.fftSize = 2048;
+    src.connect(tabAnalyser);
+    tabAnalyserRef.current = tabAnalyser;
+    ws.onclose = (ev) => {
+      // Se cortó a media junta (agente reiniciado, helper muerto): degradar a mic-only.
+      systemAudioErrorRef.current = ev.reason || "se cortó el audio del sistema";
+      stopDisplay();
+      onSysEndedRef.current?.();
+    };
+    return true;
+  }, [stopDisplay]);
+
   /** Pide la pestaña y la conecta al worklet vivo. Best-effort: false si el
    *  usuario canceló el picker o no marcó "compartir audio de la pestaña". */
-  const enableSystemAudio = useCallback(async (): Promise<boolean> => {
+  const enableTabAudio = useCallback(async (): Promise<boolean> => {
     const ctx = ctxRef.current;
     const node = nodeRef.current;
     if (!ctx || !node) return false;
@@ -204,6 +393,7 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
     if (!audioTrack) {
       // Compartió sin marcar "compartir audio de la pestaña".
       display.getTracks().forEach((t) => t.stop());
+      systemAudioErrorRef.current = "compartiste sin marcar «Compartir audio de la pestaña»";
       return false;
     }
     displayRef.current = display;
@@ -212,17 +402,31 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
       stopDisplay();
       onSysEndedRef.current?.();
     };
-    ctx.createMediaStreamSource(new MediaStream([audioTrack])).connect(node);
+    const tabSource = ctx.createMediaStreamSource(new MediaStream([audioTrack]));
+    tabSource.connect(node);
+    const tabAnalyser = ctx.createAnalyser();
+    tabAnalyser.fftSize = 2048;
+    tabSource.connect(tabAnalyser);
+    tabAnalyserRef.current = tabAnalyser;
+    systemAudioErrorRef.current = null;
     return true;
   }, [stopDisplay]);
 
+  const enableSystemAudio = useCallback(
+    () => (sourceRef.current === "app" ? enableAppAudio() : enableTabAudio()),
+    [enableAppAudio, enableTabAudio],
+  );
+
   const start = useCallback(
     async (
-      onFrame: (frame: ArrayBuffer) => void,
+      onFrame: (frame: ArrayBuffer, levels: SourceLevels) => void,
       opts?: LiveAudioStartOptions,
     ): Promise<{ systemAudio: boolean }> => {
       stop();
       const mode = opts?.mode ?? "presencial";
+      sourceRef.current = opts?.source ?? "tab";
+      appUrlRef.current = opts?.appAudioUrl ?? null;
+      systemAudioErrorRef.current = null;
       onSysEndedRef.current = opts?.onSystemAudioEnded ?? null;
       // El mic va PRIMERO (si falla, no queda nada abierto que limpiar).
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -244,9 +448,17 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
         node.port.onmessage = (ev: MessageEvent) => {
           const data = ev.data as { pcm: ArrayBuffer; rms: number };
           levelRef.current = data.rms;
-          onFrame(data.pcm);
+          onFrame(data.pcm, {
+            mic: rmsOf(micAnalyserRef.current),
+            tab: rmsOf(tabAnalyserRef.current),
+          });
         };
-        ctx.createMediaStreamSource(stream).connect(node);
+        const micSource = ctx.createMediaStreamSource(stream);
+        micSource.connect(node);
+        const micAnalyser = ctx.createAnalyser();
+        micAnalyser.fftSize = 2048;
+        micSource.connect(micAnalyser);
+        micAnalyserRef.current = micAnalyser;
         // Gain 0 hacia destination: garantiza que el grafo procese en todos
         // los motores sin playback audible (el worklet es nodo "terminal").
         const mute = ctx.createGain();
@@ -260,11 +472,11 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
         throw err;
       }
     },
-    [stop, enableSystemAudio],
+    [stop, enableSystemAudio, rmsOf],
   );
 
   // Al desmontar el dueño (el provider vive en el shell: en la práctica nunca).
   useEffect(() => stop, [stop]);
 
-  return { start, enableSystemAudio, stop, levelRef };
+  return { start, enableSystemAudio, stop, levelRef, systemAudioErrorRef };
 }

@@ -44,6 +44,9 @@ import { addProfileEntry, profileEntries, removeProfileEntry, replaceProfileEntr
 import { createSkill, getSkill, listSkills, patchSkill } from "../learning/skills.js";
 import { createScheduledTask, listScheduledTasks, updateScheduledTask } from "../scheduled/store.js";
 import { describeCron } from "../scheduled/cron.js";
+import { PHONE_TOOLS } from "../phone/tools.js";
+import { GROWTH_TOOLS } from "../growth/tools.js";
+import { buildDailyBrief } from "../brief.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -778,6 +781,15 @@ const manageSkillTool = tool(
   },
 );
 
+// ── Brief ──────────────────────────────────────────────────────────────
+
+const getDailyBriefTool = tool(
+  "get_daily_brief",
+  `El brief del día de ${OWNER}: agenda de hoy, proyectos activos y hábitos pendientes. Texto corto y real (cada sección sale de su fuente; sin datos, se omite). Entrégalo tal cual cuando sea un brief programado. NO trae saldos a propósito (suele terminar como notificación en el teléfono): la plata se consulta con las tools de finanzas.`,
+  {},
+  async () => text(await buildDailyBrief({ finance: false })),
+);
+
 // ── Tareas programadas ─────────────────────────────────────────────────
 
 const scheduleTaskTool = tool(
@@ -880,9 +892,15 @@ const HERMES_TOOLS = [
   controlLightsTool,
   updateProfileTool,
   manageSkillTool,
+  getDailyBriefTool,
   scheduleTaskTool,
   listScheduledTasksTool,
   manageScheduledTaskTool,
+  // El compañero: metas con fecha y plan, check-ins y la llamada semanal.
+  ...GROWTH_TOOLS,
+  // Cuerpo en el teléfono (Hermes Phone): reenvían por /phone/ws; la
+  // confirmación de lo que tiene efectos la hace el teléfono.
+  ...PHONE_TOOLS,
 ];
 
 export const hermesMcpServer = createSdkMcpServer({

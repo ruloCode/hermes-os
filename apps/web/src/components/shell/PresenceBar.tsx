@@ -54,8 +54,11 @@ export function PresenceBar({
 }) {
   const { state } = useOrbState();
   const { connect, disconnect, connected, connecting, configured } = useVoiceConnect();
-  const { transcript, action } = useVoice();
+  const { transcript, action, mode } = useVoice();
   const [open, setOpen] = useState(false);
+  // Con la tutora de inglés en la llamada, la que habla es ella, no Hermes.
+  const label =
+    state === "speaking" && mode === "tutor" ? "La tutora está hablando" : ORB_LABEL[state];
 
   const enVoz = connected || connecting || transcript.length > 0;
   const last = transcript[transcript.length - 1];
@@ -113,8 +116,8 @@ export function PresenceBar({
           ref={anchorRef}
           onClick={toggleVoz}
           disabled={!configured}
-          title={ORB_LABEL[state]}
-          aria-label={ORB_LABEL[state]}
+          title={label}
+          aria-label={label}
           className="h-16 w-16 shrink-0 rounded-full transition-transform enabled:cursor-pointer enabled:hover:scale-105 enabled:active:scale-95 disabled:opacity-40"
         />
 
@@ -134,7 +137,13 @@ export function PresenceBar({
           {enVoz && (action || last) ? (
             <>
               <span className="shrink-0 text-text-faint">
-                {action ? "·" : last?.who === "TÚ" ? "Tú" : "Hermes"}
+                {action
+                  ? "·"
+                  : last?.who === "TÚ"
+                    ? "Tú"
+                    : last?.who === "TUTOR"
+                      ? "Tutora"
+                      : "Hermes"}
               </span>
               <span className="truncate">{action ?? last?.text}</span>
               <svg
@@ -153,7 +162,7 @@ export function PresenceBar({
               </svg>
             </>
           ) : (
-            <span className="truncate">{ORB_LABEL[state]}</span>
+            <span className="truncate">{label}</span>
           )}
         </button>
       </div>

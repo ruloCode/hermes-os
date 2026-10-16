@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
   } else if (which === "tutor") {
     agentId = process.env.NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID;
     hint = "Configura NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID en .env (pnpm setup:elevenlabs lo crea)";
+  } else if (which === "phone") {
+    agentId = process.env.ELEVENLABS_PHONE_AGENT_ID;
+    hint = "Configura ELEVENLABS_PHONE_AGENT_ID en .env (pnpm setup:elevenlabs --phone lo crea)";
   } else if ((process.env.HERMES_SALA || "").toLowerCase() === "off") {
     agentId = null;
     hint = "La sala está apagada (HERMES_SALA=off)";

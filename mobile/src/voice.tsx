@@ -21,8 +21,29 @@ import { useApp, type Tab } from "./store";
 import { useChat } from "./chat";
 
 export interface Line {
-  who: "TÚ" | "HERMES";
+  who: "TÚ" | "HERMES" | "TUTORA";
   text: string;
+}
+
+/** A quién le hablas: Hermes (asistente) o la tutora de inglés (otro agente ElevenLabs). */
+export type VoiceMode = "hermes" | "tutor";
+
+/** Cómo terminó la última práctica con la tutora (para avisarlo en Inglés). */
+export type TutorSaveState = "saved" | "autosaved" | "error" | null;
+
+interface ConnectOptions {
+  /**
+   * Contexto para {{practice_context}} de la tutora. Sin él se pide al agente
+   * (última sesión, errores recurrentes, vocabulario por repasar). "Repasar
+   * esta clase" lo arma con las correcciones de ESA clase.
+   */
+  practiceContext?: string;
+  /**
+   * Primer turno "del usuario" enviado al conectar. El saludo de la tutora es
+   * fijo en ElevenLabs ("Ready to practice…?"): en modo repaso esto la lleva
+   * directo a la clase en vez de ofrecer charla o mock interview.
+   */
+  openingMessage?: string;
 }
 
 interface VoiceState {
@@ -30,12 +51,32 @@ interface VoiceState {
   connected: boolean;
   connecting: boolean;
   isSpeaking: boolean;
+  mode: VoiceMode;
+  /** epoch ms del inicio de la llamada en curso (cronómetro). */
+  callStartedAt: number | null;
+  /** Líneas de la llamada con la tutora en curso (o la última). */
+  tutorLines: Line[];
+  tutorSave: TutorSaveState;
   transcript: Line[];
   error: string | null;
   action: string | null;
-  connect: () => Promise<void>;
+  connect: (mode?: VoiceMode, opts?: ConnectOptions) => Promise<void>;
   disconnect: () => void;
 }
+
+/** Bajo esto, una práctica cortada de golpe no amerita auto-guardado (ruido). */
+const MIN_ABRUPT_LINES = 8;
+
+const todayLabel = () =>
+  new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
 
 const Ctx = createContext<VoiceState | null>(null);
 export function useVoice(): VoiceState {
@@ -70,6 +111,20 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [transcript, setTranscript] = useState<Line[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
+  const [mode, setModeState] = useState<VoiceMode>("hermes");
+  const modeRef = useRef<VoiceMode>("hermes");
+  const setMode = (m: VoiceMode) => {
+    modeRef.current = m;
+    setModeState(m);
+  };
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  const [tutorSave, setTutorSave] = useState<TutorSaveState>(null);
+  // Práctica con la tutora: dónde empezó en el transcript, cuándo y si ya se
+  // guardó (por end_practice_session o por el auto-guardado al cortar).
+  const tutorStartLineRef = useRef(0);
+  const tutorStartedAtRef = useRef<string | null>(null);
+  const tutorSavedRef = useRef(false);
+  const openingRef = useRef<string | null>(null);
   const connectedBefore = useRef(false);
   // Espejo del transcript + marca de lo ya plegado al chat: al colgar, las
   // líneas nuevas de la llamada se pliegan al hilo de texto (patrón ChatGPT).
@@ -103,10 +158,33 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       const text = str(m?.message) ?? str(m?.text);
       if (!text) return;
       const src = m?.source ?? m?.role;
-      pushLine({ who: src === "user" ? "TÚ" : "HERMES", text });
+      pushLine({
+        who: src === "user" ? "TÚ" : modeRef.current === "tutor" ? "TUTORA" : "HERMES",
+        text,
+      });
     },
     onConnect: () => {
       setError(null);
+      setCallStartedAt(Date.now());
+      if (modeRef.current === "tutor") {
+        tutorStartLineRef.current = transcriptRef.current.length;
+        tutorStartedAtRef.current = new Date().toISOString();
+        tutorSavedRef.current = false;
+        setTutorSave(null);
+        const opening = openingRef.current;
+        openingRef.current = null;
+        if (opening) {
+          setTimeout(() => {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (convRef.current as any)?.sendUserMessage?.(opening);
+            } catch {
+              /* sin canal: la tutora igual tiene el contexto del repaso */
+            }
+          }, 1200);
+        }
+        return;
+      }
       // Reconexión sin recargar: reinyecta contexto para no perder el hilo.
       if (connectedBefore.current && transcript.length) {
         const recap = transcript
@@ -127,15 +205,114 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       connectedBefore.current = true;
     },
     onDisconnect: () => {
-      // Pliega lo hablado en ESTA llamada al hilo de chat (queda unificado).
+      setCallStartedAt(null);
       const fresh = transcriptRef.current.slice(foldedRef.current);
       foldedRef.current = transcriptRef.current.length;
-      if (fresh.length) chat.addVoiceLines(fresh);
+      if (modeRef.current === "tutor") {
+        // La práctica NO va al hilo de Hermes: vive en Inglés. Si la llamada se
+        // cortó sin end_practice_session, se guarda igual lo hablado.
+        const lines = transcriptRef.current.slice(tutorStartLineRef.current);
+        if (!tutorSavedRef.current && tutorStartedAtRef.current && lines.length >= MIN_ABRUPT_LINES) {
+          tutorSavedRef.current = true;
+          void api
+            .saveEnglishSession({
+              started_at: tutorStartedAtRef.current,
+              duration_sec: tutorDurationSec(),
+              transcript: tutorTranscript(),
+              source: "mobile",
+            })
+            .then(() => setTutorSave("autosaved"))
+            .catch(() => setTutorSave("error"));
+        }
+        return;
+      }
+      // Pliega lo hablado en ESTA llamada al hilo de chat (queda unificado).
+      const hermesLines = fresh.filter(
+        (l): l is { who: "TÚ" | "HERMES"; text: string } => l.who !== "TUTORA",
+      );
+      if (hermesLines.length) chat.addVoiceLines(hermesLines);
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (msg: any) => setError(typeof msg === "string" ? msg : "Error de la llamada."),
   });
   convRef.current = conv;
+
+  const tutorLinesNow = () => transcriptRef.current.slice(tutorStartLineRef.current);
+  // Mismo formato que la web ("TUTOR:"/"TÚ:"): el reporte del agente lo lee igual.
+  const tutorTranscript = () =>
+    tutorLinesNow()
+      .map((l) => `${l.who === "TÚ" ? "TÚ" : "TUTOR"}: ${l.text}`)
+      .join("\n");
+  const tutorDurationSec = () =>
+    tutorStartedAtRef.current
+      ? Math.max(0, Math.round((Date.now() - Date.parse(tutorStartedAtRef.current)) / 1000))
+      : 0;
+
+  // ── Tools de la tutora de inglés (mismo contrato que EnglishTutorTools web) ──
+  useConversationClientTool("save_vocab", async (p: any) => {
+    const term = str(p?.term);
+    const meaning = str(p?.meaning_es);
+    if (!term || !meaning) return "Missing term or meaning.";
+    try {
+      await api.saveVocab({ term, meaning_es: meaning, example: str(p?.example) });
+      flashAction(`Guardado: ${term}`);
+      return `Saved "${term}".`;
+    } catch {
+      return "Could not save it (agent offline) — keep going.";
+    }
+  });
+
+  useConversationClientTool("recall_vocab", async () => {
+    try {
+      const due = await api.englishVocab(true, 6);
+      if (!due.length) return "No vocabulary due for review — nothing pending.";
+      return `Vocabulary due for review: ${due
+        .map((v) =>
+          v.meaning_es
+            ? `${v.term} (${v.meaning_es})`
+            : `${v.term} (no meaning saved yet — explain it and re-save it with save_vocab)`,
+        )
+        .join(" · ")}. Quiz him conversationally on a few of these.`;
+    } catch {
+      return "Could not fetch the vocabulary list (agent offline).";
+    }
+  });
+
+  useConversationClientTool("end_practice_session", async (p: any) => {
+    const errors = Array.isArray(p?.errors)
+      ? (p.errors as Record<string, unknown>[])
+          .map((e) => ({
+            quote: str(e.quote) ?? "",
+            correction: str(e.correction) ?? "",
+            note_es: str(e.note_es),
+          }))
+          .filter((e) => e.quote && e.correction)
+      : [];
+    try {
+      await api.saveEnglishSession({
+        started_at: tutorStartedAtRef.current ?? new Date().toISOString(),
+        duration_sec: tutorDurationSec(),
+        topics: Array.isArray(p?.topics) ? (p.topics as unknown[]).map(String) : [],
+        fluency: typeof p?.fluency === "number" ? p.fluency : undefined,
+        errors,
+        wins: Array.isArray(p?.wins) ? (p.wins as unknown[]).map(String) : [],
+        transcript: tutorTranscript(),
+        source: "mobile",
+      });
+      tutorSavedRef.current = true;
+      setTutorSave("saved");
+      return "Session saved — the full report will show up in his app in a minute.";
+    } catch {
+      return "Could not save the session (agent offline). Tell him the summary out loud instead.";
+    }
+  });
+
+  // Hermes → "quiero practicar inglés": cuelga y conecta con la tutora.
+  useConversationClientTool("start_english_practice", async () => {
+    app.setTab("ingles");
+    setTimeout(() => void connectRef.current?.("tutor"), 1200);
+    return "Listo, te paso con tu tutora de inglés.";
+  });
 
   // ── Registro de client tools (mismos nombres que el agente de voz) ─────
   useConversationClientTool("focus_project", async (p: any) => {
@@ -157,6 +334,8 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     const raw = (str(p?.panel) ?? "").toLowerCase();
     const tab: Tab | null = raw.includes("reuni") || raw.includes("junta") || raw.includes("meet")
       ? "reuniones"
+      : raw.includes("ingl") || raw.includes("english") || raw.includes("clase") || raw.includes("tutor")
+        ? "ingles"
       : raw.includes("tarea") || raw.includes("task") || raw.includes("mision") || raw.includes("misión")
         ? "tareas"
         : raw.includes("finan") || raw.includes("dinero") || raw.includes("plata") || raw.includes("gasto")
@@ -470,8 +649,19 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   });
 
   // ── Conexión ───────────────────────────────────────────────────────────
-  const connect = useCallback(async () => {
+  const connectRef = useRef<((m?: VoiceMode, o?: ConnectOptions) => Promise<void>) | null>(null);
+  const connect = useCallback(async (target: VoiceMode = "hermes", opts?: ConnectOptions) => {
     setError(null);
+    // Una sola conversación a la vez (un ConversationProvider): cambiar de
+    // agente cuelga la actual primero.
+    if (conv.status === "connected" || conv.status === "connecting") {
+      try {
+        conv.endSession();
+      } catch {
+        /* noop */
+      }
+      await new Promise((r) => setTimeout(r, 700));
+    }
     const ok = await ensureMic();
     if (!ok) {
       setError("Sin permiso de micrófono no puedo escucharte.");
@@ -483,20 +673,34 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       } catch {
         /* algunos entornos la manejan solos */
       }
-      const creds = await api.voiceToken();
+      const creds = await api.voiceToken(target === "tutor" ? "tutor" : undefined);
       if (creds.error || creds.notConfigured) {
         setError(creds.error ?? "Voz no configurada en el agente.");
         return;
       }
+      const today = todayLabel();
+      const dynamicVariables: Record<string, string> =
+        target === "tutor"
+          ? {
+              practice_context:
+                opts?.practiceContext ??
+                (await api.englishContext().catch(() => "First session — no history yet.")),
+              today,
+            }
+          : { session_scope: "El usuario te habla desde la app del celular.", today };
+      // El modo se fija ANTES de conectar: onConnect/onMessage ya etiquetan bien.
+      setMode(target);
+      openingRef.current = target === "tutor" ? (opts?.openingMessage ?? null) : null;
       if (creds.conversationToken) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         conv.startSession({
           conversationToken: creds.conversationToken,
           connectionType: "webrtc",
+          dynamicVariables,
         } as any);
       } else if (creds.signedUrl) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        conv.startSession({ signedUrl: creds.signedUrl, connectionType: "websocket" } as any);
+        conv.startSession({ signedUrl: creds.signedUrl, connectionType: "websocket", dynamicVariables } as any);
       } else {
         setError("El agente no devolvió credenciales de voz.");
       }
@@ -504,6 +708,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       setError(e instanceof Error ? e.message : "No pude conectar la voz.");
     }
   }, [conv]);
+  connectRef.current = connect;
 
   const disconnect = useCallback(() => {
     try {
@@ -523,6 +728,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     connected: conv.status === "connected",
     connecting: conv.status === "connecting",
     isSpeaking: conv.isSpeaking,
+    mode,
+    callStartedAt,
+    tutorLines: mode === "tutor" ? transcript.slice(Math.max(0, tutorStartLineRef.current)) : [],
+    tutorSave,
     transcript,
     error,
     action,

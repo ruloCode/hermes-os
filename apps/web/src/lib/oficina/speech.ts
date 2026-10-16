@@ -39,7 +39,7 @@ export function spokenSummary(text: string): string {
   return t;
 }
 
-function spanishVoice(): SpeechSynthesisVoice | null {
+export function spanishVoice(): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis?.getVoices() ?? [];
   const es = voices.filter((v) => v.lang.toLowerCase().startsWith("es"));
   const byPref = (names: string[]) => es.find((v) => names.some((n) => v.name.includes(n)));

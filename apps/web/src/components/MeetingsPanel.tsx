@@ -77,7 +77,8 @@ export function MeetingsPanel({
   // cambió, deja un aviso honesto en vez de secuestrar la navegación.
   const liveResult = live.result;
   useEffect(() => {
-    if (!liveResult) return;
+    // Una clase de inglés no es una reunión: su cierre lo consume /ingles.
+    if (!liveResult || liveResult.englishSessionId) return;
     if (liveResult.project === project) {
       setSelected(liveResult.meetingId);
       refresh();

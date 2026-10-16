@@ -39,6 +39,8 @@ import { InglesView } from "@/components/views/InglesView";
 import { AgendaView } from "@/components/views/AgendaView";
 import { EstudioView } from "@/components/views/EstudioView";
 import { ComposicionView } from "@/components/views/ComposicionView";
+import { EntenderView } from "@/components/views/EntenderView";
+import { GymView } from "@/components/views/GymView";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -66,6 +68,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/agenda": "agenda",
     "/estudio": "estudio",
     "/composicion": "composicion",
+    "/entender": "entender",
+    "/gimnasio": "gimnasio",
   };
   const view = WORKSPACE_VIEWS[pathname];
   if (!view) return <>{children}</>;
@@ -129,6 +133,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className={`min-h-0 flex-1 ${view === "composicion" ? "flex flex-col" : "hidden"}`}>
               <ComposicionView active={view === "composicion"} />
+            </div>
+            <div className={`min-h-0 flex-1 ${view === "entender" ? "flex flex-col" : "hidden"}`}>
+              <EntenderView />
+            </div>
+            <div className={`min-h-0 flex-1 ${view === "gimnasio" ? "flex flex-col" : "hidden"}`}>
+              <GymView active={view === "gimnasio"} />
             </div>
           </div>
         </main>

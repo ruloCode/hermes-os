@@ -61,10 +61,14 @@ export async function generatePracticeReport(sessionId: number): Promise<void> {
       .map((e) => `- "${e.quote}" → "${e.correction}"${e.note_es ? ` (${e.note_es})` : ""}`)
       .join("\n");
 
+    const isClass = session.source === "class";
+    const header = isClass
+      ? `CLASE REAL de HOY, 1 a 1 con su profesora humana (no con el tutor de IA). En el transcript "Yo" es ${OWNER} y "Profe" la profesora; la primera línea trae sus métricas de speaking. Analiza SOLO lo que dijo ${OWNER}.`
+      : `Sesión de HOY (fluidez ${session.fluency ?? "?"}/5, temas: ${session.topics.join(", ") || "—"}):`;
     const q = query({
-      prompt: `Sesión de HOY (fluidez ${session.fluency ?? "?"}/5, temas: ${session.topics.join(", ") || "—"}):
+      prompt: `${header}
 
-Errores anotados por el tutor:
+Errores ${isClass ? "detectados en vivo por el corrector" : "anotados por el tutor"}:
 ${sessionErrors || "(ninguno anotado)"}
 
 Aciertos: ${session.wins.join(" · ") || "—"}

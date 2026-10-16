@@ -21,7 +21,8 @@
  *   "off" desactiva la capa y todo queda como antes.
  */
 import { query, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { LiveSuggestionLang } from "@hermes/shared";
+import { articulationRules, guessLang } from "@hermes/shared";
+import type { LiveHelpIntent, LiveSuggestionKind, LiveSuggestionLang } from "@hermes/shared";
 import { env } from "../env.js";
 import type { NormalizedTurn } from "./live-stt.js";
 import { OWNER } from "../owner.js";
@@ -45,17 +46,8 @@ const ES_LEAD =
 const EN_LEAD =
   /^(?:so |and |ok |okay |well |now |but )?(?:what|what's|how|why|when|which|who|where|could you|can you|would you|will you|do you|did you|does|have you|are you|is there|tell me|walk me through|talk me through|describe|explain)\b/i;
 
-/** Heurística barata de idioma para elegir el idioma de la respuesta. */
-export function guessLang(text: string): "es" | "en" {
-  const t = ` ${text.toLowerCase()} `;
-  let es = 0;
-  let en = 0;
-  for (const w of [" el ", " la ", " de ", " que ", " y ", " en ", " los ", " para ", " con ", " qué ", " cómo ", " tienes "])
-    if (t.includes(w)) es += 1;
-  for (const w of [" the ", " and ", " you ", " your ", " what ", " how ", " is ", " are ", " to ", " of ", " with ", " do "])
-    if (t.includes(w)) en += 1;
-  return en > es ? "en" : "es";
-}
+/** Heurística barata de idioma (vive en shared: la usan también las métricas de clase). */
+export { guessLang };
 
 /** Última oración interrogativa de un texto final formateado (con "?"). */
 export function lastQuestion(text: string): string | null {
@@ -76,12 +68,21 @@ export function detectQuestion(text: string): { hit: boolean; lang: "es" | "en" 
 }
 
 // ── Modos de coaching ──────────────────────────────────────────────────
-// Hook para modos futuros (p.ej. "entrevista" con formato STAR): cada modo
-// puede extender el prompt de la capa rápida y/o el del loop estratégico.
-// Solo "junta" existe hoy (sin overrides = comportamiento base).
+// Cada modo puede extender el prompt de la capa rápida y/o el del loop
+// estratégico. "clase-ingles" no usa estos textos: trae su propio controller
+// (english/class-companion.ts) y apaga el loop estratégico — la key está aquí
+// para que resolveCoachMode la acepte.
 
 export const COACH_MODES: Record<string, { fastExtra?: string; deepExtra?: string }> = {
   junta: {},
+  "clase-ingles": {},
+  // Reunión de equipo: la capa rápida es TeamCopilotController (live-team.ts),
+  // que ya cubre aportar y entender. El loop estratégico se queda con lo que
+  // ella no tiene fresco: el dato del proyecto y el rumbo.
+  equipo: {
+    deepExtra: `## Reunión de equipo
+Otra capa ya le sopla a ${OWNER} qué APORTAR (con su ángulo) y le explica los conceptos nuevos. No dupliques eso: prioriza \`dato\` (lo que el proyecto, sus tareas o el historial dicen del tema que se discute — es lo único que esa capa no tiene fresco) y \`rumbo\` (la reunión da vueltas o se fue del objetivo). Usa \`decir\` solo para amarrar un compromiso que le toca a ${OWNER}. Normalmente 0 o 1 sugerencia: en una reunión de equipo, menos tarjetas es más atención para escuchar.`,
+  },
 };
 
 export function resolveCoachMode(mode: string | undefined): string {
@@ -91,9 +92,17 @@ export function resolveCoachMode(mode: string | undefined): string {
 // ── Interfaz pública ───────────────────────────────────────────────────
 
 export type FastCopilotEvent =
-  | { type: "start"; id: string; trigger: string }
+  | { type: "start"; id: string; trigger: string; kind?: LiveSuggestionKind }
   | { type: "delta"; id: string; text: string }
-  | { type: "done"; id: string; text: string; trigger: string; manual: boolean; elapsedMs: number }
+  | {
+      type: "done";
+      id: string;
+      text: string;
+      trigger: string;
+      manual: boolean;
+      elapsedMs: number;
+      kind?: LiveSuggestionKind;
+    }
   | { type: "aborted"; id: string }
   | { type: "error"; message: string };
 
@@ -108,28 +117,50 @@ export interface FastCopilotDeps {
 export interface FastCopilot {
   /** Alimentar cada turno del STT (parciales incluidos: el gatillo temprano vive ahí). */
   onTurn(turn: NormalizedTurn, selfSpeaker: string | undefined): void;
-  /** Botón "Soplar ahora": sin debounce, el manual siempre gana. */
-  triggerNow(reason?: string): void;
+  /** Botón "Soplar ahora": sin debounce, el manual siempre gana. `intent` solo lo usa la clase. */
+  triggerNow(reason?: string, intent?: LiveHelpIntent): void;
   destroy(): void;
 }
 
 /** null = capa rápida desactivada (HERMES_COPILOT=off); live.ts sigue como hoy. */
 export function createFastCopilot(deps: FastCopilotDeps): FastCopilot | null {
+  const engine = createFastEngine(deps.systemStatic, deps.onEvent);
+  return engine ? new FastCopilotController(engine, deps) : null;
+}
+
+export interface FastEngineOptions {
+  /**
+   * true (default) = un request nuevo pisa al anterior (la pregunta más
+   * reciente gana). false = cola: cada request se responde en orden — para
+   * correcciones, donde la de hace 5 s sigue sirviendo.
+   */
+  interrupt?: boolean;
+  /** Sin interrupción: máximo de requests esperando; el más viejo se descarta. */
+  maxQueue?: number;
+  /** Mensaje del warm-up silencioso que paga el arranque del CLI. */
+  warmup?: string;
+  /** Modelo de ESTE motor (default HERMES_COPILOT_MODEL). */
+  model?: string;
+}
+
+/** Motor de la capa rápida (real o fake según HERMES_COPILOT); null = apagado. */
+export function createFastEngine(
+  systemStatic: string,
+  onEvent: (ev: FastCopilotEvent) => void,
+  opts: FastEngineOptions = {},
+): FastEngine | null {
   if (env.COPILOT_PROVIDER === "off") return null;
-  const engine: FastEngine =
-    env.COPILOT_PROVIDER === "fake"
-      ? new FakeFastEngine(deps.onEvent)
-      : new SdkFastEngine(deps.systemStatic, deps.onEvent);
-  return new FastCopilotController(engine, deps);
+  return env.COPILOT_PROVIDER === "fake"
+    ? new FakeFastEngine(onEvent, opts)
+    : new SdkFastEngine(systemStatic, onEvent, opts);
 }
 
 /** System prompt estático de la capa rápida (se construye UNA vez por junta). */
 export function buildFastSystemPrompt(p: {
   slug: string;
   name?: string;
-  briefing?: string;
-  estadoActual?: string;
-  knowledge?: string;
+  /** Nota, tareas, actas anteriores e historial del proyecto (meetingContextBlocks). */
+  contextBlocks: string[];
   suggestionLang: LiveSuggestionLang;
   /** Key de COACH_MODES (default "junta"). */
   coachMode?: string;
@@ -151,28 +182,34 @@ Eres el apuntador de **${OWNER}** (dev senior) en una junta del proyecto **${p.n
 - No inventes datos: cifras, fechas y decisiones solo si salen del contexto de abajo o del transcript.
 - Si el momento NO amerita soplo (charla trivial, la pregunta no era para ${OWNER}, ya la respondió), responde EXACTAMENTE: —
 - Velocidad sobre perfección: una buena respuesta ya es mejor que una perfecta tarde.`,
+    articulationRules(OWNER),
   ];
   const modeExtra = COACH_MODES[resolveCoachMode(p.coachMode)]?.fastExtra;
   if (modeExtra) parts.push(modeExtra);
-  if (p.briefing?.trim()) parts.push(`## Briefing del proyecto\n${p.briefing.trim()}`);
-  if (p.estadoActual?.trim()) parts.push(`## Estado actual\n${p.estadoActual.slice(0, 800)}`);
-  if (p.knowledge?.trim())
-    parts.push(`## Conocimiento del historial de Hermes\n${p.knowledge.trim()}`);
+  parts.push(...p.contextBlocks);
   return parts.join("\n\n");
 }
 
 // ── Controller: reglas de disparo ──────────────────────────────────────
 
-interface FastGenRequest {
+export interface FastGenRequest {
   id: string;
   trigger: string;
   manual: boolean;
   prompt: string;
+  /** Viaja en start/done (ausente = "decir"). */
+  kind?: LiveSuggestionKind;
 }
 
-interface FastEngine {
+export interface FastEngine {
   generate(req: FastGenRequest): void;
   destroy(): void;
+  /**
+   * Sube cada vez que la sesión del modelo arranca de cero (la primera vez o
+   * tras morir). Quien manda solo líneas nuevas lo usa para saber cuándo
+   * reenviar la conversación entera.
+   */
+  epoch?(): number;
 }
 
 class FastCopilotController implements FastCopilot {
@@ -295,15 +332,28 @@ class SdkFastEngine implements FastEngine {
   private active: TurnOwner | null = null;
   private wake: (() => void) | null = null;
   private closed = false;
+  private readonly interrupt: boolean;
+  private readonly maxQueue: number;
+  private readonly model: string;
+  private sessions = 0;
 
   constructor(
     private readonly systemStatic: string,
     private readonly onEvent: (ev: FastCopilotEvent) => void,
+    opts: FastEngineOptions = {},
   ) {
+    this.interrupt = opts.interrupt ?? true;
+    this.maxQueue = Math.max(1, opts.maxQueue ?? 2);
+    this.model = opts.model || env.COPILOT_MODEL;
     this.ensureSession();
     // Warm-up: paga el arranque del proceso CLI antes del primer trigger real.
     this.enqueue(
-      { id: "warmup", trigger: "warmup", manual: false, prompt: 'Junta iniciada. Responde únicamente "OK".' },
+      {
+        id: "warmup",
+        trigger: "warmup",
+        manual: false,
+        prompt: opts.warmup ?? 'Junta iniciada. Responde únicamente "OK".',
+      },
       true,
     );
   }
@@ -312,9 +362,20 @@ class SdkFastEngine implements FastEngine {
     this.enqueue(req, false);
   }
 
+  epoch(): number {
+    // Si la sesión murió, la próxima generate la recrea: el que pregunta
+    // ANTES de mandar ya tiene que saber que va a una sesión nueva.
+    return this.q ? this.sessions : this.sessions + 1;
+  }
+
   private enqueue(req: FastGenRequest, silent: boolean): void {
     if (this.closed) return;
-    this.cancelActive(); // la pregunta nueva pisa a la anterior
+    if (this.interrupt) this.cancelActive(); // la pregunta nueva pisa a la anterior
+    else {
+      // En cola: si ya hay demasiados esperando, el más viejo sobra.
+      const waiting = this.queue.filter((o) => !o.silent);
+      if (waiting.length >= this.maxQueue) this.cancelOwner(waiting[0]);
+    }
     const owner: TurnOwner = {
       req,
       silent,
@@ -330,7 +391,7 @@ class SdkFastEngine implements FastEngine {
     owner.timer = setTimeout(() => this.cancelOwner(owner), TURN_TIMEOUT_MS);
     this.active = owner;
     this.queue.push(owner);
-    if (!silent) this.onEvent({ type: "start", id: req.id, trigger: req.trigger });
+    if (!silent) this.onEvent({ type: "start", id: req.id, trigger: req.trigger, kind: req.kind });
     this.ensureSession(); // recrea la sesión si murió (best-effort)
     this.wake?.();
   }
@@ -348,7 +409,7 @@ class SdkFastEngine implements FastEngine {
       // Nunca llegó al CLI: basta sacarlo de la cola (no gasta turno).
       this.queue = this.queue.filter((o) => o !== owner);
       owner.settled = true;
-    } else {
+    } else if (this.interrupt || this.yielded[0] === owner) {
       // En vuelo: el interrupt lo corta; su `result` (error_during_execution)
       // desplaza el FIFO solo — no hay que esperar nada antes del siguiente push.
       void this.q?.interrupt().catch(() => undefined);
@@ -396,12 +457,13 @@ class SdkFastEngine implements FastEngine {
         self.wake = null;
       }
     }
+    this.sessions += 1;
     const q = query({
       prompt: input(),
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt: this.systemStatic,
-        model: env.COPILOT_MODEL,
+        model: this.model,
         includePartialMessages: true,
         thinking: { type: "disabled" }, // mínima latencia: aquí manda el TTFT
         maxTurns: 1000, // toda la junta vive en UNA sesión
@@ -459,6 +521,7 @@ class SdkFastEngine implements FastEngine {
                   trigger: owner.req.trigger,
                   manual: owner.req.manual,
                   elapsedMs: Date.now() - owner.startedAt,
+                  kind: owner.req.kind,
                 });
               else this.onEvent({ type: "aborted", id: owner.req.id });
             }
@@ -488,7 +551,8 @@ class SdkFastEngine implements FastEngine {
     const owner = this.yielded[0];
     if (!owner || owner.cancelled || owner.settled) return;
     owner.buf += text;
-    if (owner.silent || owner !== this.active) return; // warm-up o turno pisado
+    // warm-up o turno pisado (en cola no hay "pisados": todos streamean)
+    if (owner.silent || (this.interrupt && owner !== this.active)) return;
     owner.pending += text;
     if (!owner.flush) {
       owner.flush = setTimeout(() => {
@@ -522,6 +586,7 @@ class SdkFastEngine implements FastEngine {
       trigger: owner.req.trigger,
       manual: owner.req.manual,
       elapsedMs: Date.now() - owner.startedAt,
+      kind: owner.req.kind,
     });
   }
 
@@ -538,45 +603,74 @@ class SdkFastEngine implements FastEngine {
 const FAKE_ANSWER =
   "Claro, tengo experiencia directa con eso: en Hermes construí el pipeline de streaming con reconexión y buffer acotado. Puedo detallar la arquitectura y los trade-offs si les sirve.";
 
-class FakeFastEngine implements FastEngine {
-  private timers: NodeJS.Timeout[] = [];
-  private currentId: string | null = null;
+/** Respuestas enlatadas de la clase de inglés (el sim valida el formato de cada kind). */
+const FAKE_BY_KIND: Partial<Record<LiveSuggestionKind, string>> = {
+  corregir: "yesterday I go → yesterday I went | Pasado simple: go → went cuando hablas de ayer.",
+  andamio: 'Clave: weekend (fin de semana) · relaxing (relajante)\nArranca: "Last weekend I spent some time…"',
+  explicar: "Te preguntó cómo estuvo tu fin de semana y qué hiciste.\nClave: weekend = fin de semana",
+  // Solo la clase/práctica pide `decir` con kind; la junta va sin kind → FAKE_ANSWER.
+  decir: "It was great, thanks! I went to the park with my family and we had empanadas.",
+  // Reunión de equipo (live-team.ts): ángulo + frase · pregunta · conceptos.
+  aportar:
+    "Riesgo\nAntes de mover pagos a la cola, definamos qué pasa con un mensaje que falla tres veces: si no hay dead-letter, perdemos transacciones sin enterarnos.",
+  preguntar: "Pregunta\n¿Qué métrica nos diría en una semana que la migración salió bien?",
+  // Loop estratégico persistente (live.ts lo parsea «tipo | texto | por qué»).
+  dato: "dato | El 7 de octubre quedó pendiente validar el backfill antes de tocar los constraints. | están decidiendo el orden sin ese pendiente",
+  // "Dilo más claro" (live-articulation.ts): fragmento → mejor | principio.
+  pulir:
+    "solo quería comentar que creo que tal vez deberíamos mover la fecha → Propongo mover la entrega al viernes para probar con datos reales | El punto primero, sin pedir permiso",
+  entender:
+    "Idempotencia — repetir la misma operación da el mismo resultado; evita cobrar dos veces si el mensaje llega duplicado.\nDead-letter queue — cola aparte donde caen los mensajes que fallaron varias veces, para revisarlos sin perderlos.",
+};
 
-  constructor(private readonly onEvent: (ev: FastCopilotEvent) => void) {}
+class FakeFastEngine implements FastEngine {
+  private readonly timers = new Map<string, NodeJS.Timeout[]>();
+  private currentId: string | null = null;
+  private readonly interrupt: boolean;
+
+  constructor(
+    private readonly onEvent: (ev: FastCopilotEvent) => void,
+    opts: FastEngineOptions = {},
+  ) {
+    this.interrupt = opts.interrupt ?? true;
+  }
 
   generate(req: FastGenRequest): void {
-    if (this.currentId) {
+    if (this.interrupt && this.currentId) {
       this.onEvent({ type: "aborted", id: this.currentId });
-      this.clear();
+      this.clear(this.currentId);
     }
     this.currentId = req.id;
+    const answer = (req.kind && FAKE_BY_KIND[req.kind]) || FAKE_ANSWER;
     const startedAt = Date.now();
-    const half = Math.ceil(FAKE_ANSWER.length / 2);
-    this.onEvent({ type: "start", id: req.id, trigger: req.trigger });
-    this.timers = [
-      setTimeout(() => this.onEvent({ type: "delta", id: req.id, text: FAKE_ANSWER.slice(0, half) }), 150),
-      setTimeout(() => this.onEvent({ type: "delta", id: req.id, text: FAKE_ANSWER.slice(half) }), 300),
+    const half = Math.ceil(answer.length / 2);
+    this.onEvent({ type: "start", id: req.id, trigger: req.trigger, kind: req.kind });
+    this.timers.set(req.id, [
+      setTimeout(() => this.onEvent({ type: "delta", id: req.id, text: answer.slice(0, half) }), 150),
+      setTimeout(() => this.onEvent({ type: "delta", id: req.id, text: answer.slice(half) }), 300),
       setTimeout(() => {
-        this.currentId = null;
+        this.timers.delete(req.id);
+        if (this.currentId === req.id) this.currentId = null;
         this.onEvent({
           type: "done",
           id: req.id,
-          text: FAKE_ANSWER,
+          text: answer,
           trigger: req.trigger,
           manual: req.manual,
           elapsedMs: Date.now() - startedAt,
+          kind: req.kind,
         });
       }, 400),
-    ];
+    ]);
   }
 
   destroy(): void {
-    this.clear();
+    for (const id of [...this.timers.keys()]) this.clear(id);
     this.currentId = null;
   }
 
-  private clear(): void {
-    for (const t of this.timers) clearTimeout(t);
-    this.timers = [];
+  private clear(id: string): void {
+    for (const t of this.timers.get(id) ?? []) clearTimeout(t);
+    this.timers.delete(id);
   }
 }

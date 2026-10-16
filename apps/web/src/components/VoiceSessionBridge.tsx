@@ -5,6 +5,12 @@ import type { AgentActivityEvent } from "@hermes/shared";
 import { useConversation, useConversationControls, useConversationStatus } from "@elevenlabs/react";
 import { hermesGet } from "@/lib/hermes";
 import { salaAgentKey, useVoice } from "./VoiceBusyContext";
+import {
+  agentPartialClear,
+  agentPartialDelta,
+  agentPartialStart,
+  agentPartialStop,
+} from "@/lib/voice-partials";
 
 /**
  * Puente de sesión de voz (no renderiza nada). Tres trabajos:
@@ -40,7 +46,15 @@ export function VoiceSessionBridge({
   modeRef.current = mode;
 
   useConversation({
-    onMessage: (p) =>
+    // Texto del agente en streaming (solo si el agente tiene el client event
+    // agent_chat_response_part: hoy la tutora). Va por lib/voice-partials.
+    onAgentChatResponsePart: (part) => {
+      if (part.type === "start") agentPartialStart();
+      else if (part.type === "delta") agentPartialDelta(part.text);
+      else agentPartialStop();
+    },
+    onMessage: (p) => {
+      if (p.role !== "user") agentPartialClear();
       pushLine({
         who:
           p.role === "user"
@@ -49,7 +63,8 @@ export function VoiceSessionBridge({
               ? "TUTOR"
               : (salaAgentKey(modeRef.current)?.toUpperCase() ?? "HERMES"),
         text: p.message,
-      }),
+      });
+    },
     onConnect: () => {
       onConnectedRef.current?.();
       // Reconexión (ya hubo una conexión antes en esta carga de página) con

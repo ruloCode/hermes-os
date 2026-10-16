@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import matter from "gray-matter";
 import type {
+  LiveClientKind,
   LiveSuggestion,
   Meeting,
   MeetingActionable,
@@ -40,6 +41,24 @@ export interface MeetingDraft {
   liveSuggestions?: LiveSuggestion[];
   /** coach de la junta EN VIVO (métricas reales + evaluación si hubo selfSpeaker). */
   coach?: MeetingCoach;
+  /** Reunión de equipo: "## Repaso" en markdown (ventanas para aportar + para estudiar). */
+  review?: string;
+  /** Desde dónde se grabó (dashboard o Hermes Phone) → frontmatter `client`. */
+  client?: LiveClientKind;
+  /**
+   * Reescribir un acta EXISTENTE (re-ingesta con el audio completo del
+   * teléfono): mismo id → mismo .md en el vault y misma fila en Supabase
+   * (upsert por local_key). Sin esto el id sale de fecha+título (acta nueva).
+   */
+  rewrite?: {
+    id: string;
+    /** "## Sugerencias en vivo" tal cual estaba (la sesión ya no existe en memoria). */
+    suggestionsMarkdown?: string;
+    /** Frontmatter que se conserva (sugerencias_vivo, participantes…). */
+    keepFrontmatter?: Record<string, unknown>;
+    /** Línea de constancia bajo el título (p.ej. "Transcripción rehecha…"). */
+    notice?: string;
+  };
 }
 
 // ── Helpers de ruta / id / idempotencia ────────────────────────────────
@@ -128,6 +147,7 @@ function summaryFromFrontmatter(
     stt_provider: data.stt ? String(data.stt) : null,
     duracion_min: typeof data.duracion_min === "number" ? data.duracion_min : null,
     accionables_count: acc,
+    ...(data.client === "phone" || data.client === "web" ? { client: data.client } : {}),
   };
 }
 
@@ -140,7 +160,7 @@ function summaryFromFrontmatter(
  */
 export async function saveMeeting(draft: MeetingDraft): Promise<Meeting> {
   const slug = await realSlug(draft.projectSlug);
-  const id = makeMeetingId(draft.fecha, draft.title);
+  const id = draft.rewrite?.id ?? makeMeetingId(draft.fecha, draft.title);
   const dir = meetingsDir(slug);
   await mkdir(dir, { recursive: true });
   const path = join(dir, `${id}.md`);
@@ -157,6 +177,7 @@ export async function saveMeeting(draft: MeetingDraft): Promise<Meeting> {
   const duracion_min = draft.durationSec != null ? Math.round(draft.durationSec / 60) : null;
   const liveSuggestions = draft.liveSuggestions ?? [];
   const frontmatter = {
+    ...(draft.rewrite?.keepFrontmatter ?? {}),
     tipo: "reunion",
     proyecto: slug,
     titulo: draft.title,
@@ -176,14 +197,20 @@ export async function saveMeeting(draft: MeetingDraft): Promise<Meeting> {
     ...(liveSuggestions.length ? { sugerencias_vivo: liveSuggestions.length } : {}),
     // Coach estructurado (leerlo de vuelta sin re-parsear el cuerpo).
     ...(draft.coach ? { coach: draft.coach } : {}),
+    ...(draft.client ? { client: draft.client } : {}),
   };
 
   // Lo que el copiloto sopló durante la junta, con su minuto (mm:ss): queda
   // entre Accionables y Transcripción para leerse como cronología del acta.
-  const suggestionsBlock = liveSuggestions.length
+  const suggestionsBlock = draft.rewrite?.suggestionsMarkdown
+    ? draft.rewrite.suggestionsMarkdown
+    : liveSuggestions.length
     ? `## Sugerencias en vivo
 ${liveSuggestions
-  .map((sg) => `- **[${sg.kind} · ${fmtAtMs(sg.atMs)}]** ${sg.text} — _${sg.why}_`)
+  .map(
+    (sg) =>
+      `- **[${sg.kind}${sg.angle ? ` · ${sg.angle}` : ""} · ${fmtAtMs(sg.atMs)}]** ${sg.text.replace(/\n+/g, " · ")} — _${sg.why}_`,
+  )
   .join("\n")}
 
 `
@@ -191,18 +218,19 @@ ${liveSuggestions
 
   const coachBlock = draft.coach ? renderCoachBlock(draft.coach) : "";
 
+  const notice = draft.rewrite?.notice ? `> ${draft.rewrite.notice}\n\n` : "";
   const body = `# ${draft.title}
 
-## Resumen
+${notice}## Resumen
 ${draft.summary.trim()}
 
 ## Accionables
 ${actionables.map((a) => `- [ ] ${a.title} — ${a.one_liner}`).join("\n")}
 
-${suggestionsBlock}${coachBlock}## Transcripción
+${suggestionsBlock}${coachBlock}${draft.review ?? ""}## Transcripción
 ${draft.transcript.trim()}
 `;
-  await writeFile(path, matter.stringify(body, frontmatter), "utf8");
+  await writeFile(path, matter.stringify(body, yamlSafe(frontmatter)), "utf8");
 
   // Los accionables NO se anexan al vault aquí: se decide en el triage (cada uno
   // → ejecutar / pendiente / ignorar), que crea la tarea y su espejo si aplica.
@@ -278,6 +306,119 @@ export async function getMeeting(slugIn: string, id: string): Promise<Meeting | 
     coach:
       data.coach && typeof data.coach === "object" ? (data.coach as Meeting["coach"]) : undefined,
   };
+}
+
+// ── Reescritura de un acta existente (audio completo del teléfono) ─────
+
+/** Lo que una re-ingesta tiene que conservar del acta en vivo. */
+export interface MeetingRewriteBase {
+  slug: string;
+  id: string;
+  title: string;
+  fecha: Date;
+  client?: LiveClientKind;
+  coach?: MeetingCoach;
+  /** "## Sugerencias en vivo" crudo (con su título), o "" si no había. */
+  suggestionsMarkdown: string;
+  /** "## Repaso" crudo de la reunión de equipo, o "". */
+  reviewMarkdown: string;
+  keepFrontmatter: Record<string, unknown>;
+  /** Accionables ya triados (hay tareas con meeting_idx): no se pueden reemplazar. */
+  actionables: { title: string; one_liner: string; exec_prompt: string }[];
+  triaged: boolean;
+}
+
+/** Bloque `## <título>` completo hasta el siguiente `## ` (los `###` van adentro). */
+/**
+ * El YAML del frontmatter no admite `undefined` (gray-matter lanza "unacceptable
+ * kind of an object to dump"). El coach de una junta SIN «soy yo» lleva
+ * `selfSpeaker: undefined` (y `performance: undefined`): el acta entera se
+ * perdía al escribirla. Se quitan las llaves vacías en cualquier nivel.
+ */
+export function yamlSafe<T>(value: T): T {
+  if (Array.isArray(value)) return value.filter((v) => v !== undefined).map(yamlSafe) as T;
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, yamlSafe(v)]),
+    ) as T;
+  }
+  return value;
+}
+
+export function extractH2Block(content: string, title: RegExp): string {
+  const lines = content.split("\n");
+  const start = lines.findIndex((l) => /^##\s/.test(l) && title.test(l));
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return `${lines.slice(start, end).join("\n").trim()}\n\n`;
+}
+
+export async function readMeetingForRewrite(
+  slugIn: string,
+  id: string,
+): Promise<MeetingRewriteBase | null> {
+  const slug = await realSlug(slugIn);
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId) return null;
+  let raw: string;
+  try {
+    raw = await readFile(join(meetingsDir(slug), `${safeId}.md`), "utf8");
+  } catch {
+    return null;
+  }
+  const { data, content } = matter(raw);
+  const fm = Array.isArray(data.accionables) ? (data.accionables as Record<string, unknown>[]) : [];
+  const keep: Record<string, unknown> = {};
+  for (const k of ["sugerencias_vivo", "participantes"]) if (data[k] != null) keep[k] = data[k];
+  return {
+    slug,
+    id: safeId,
+    title: String(data.titulo ?? data.title ?? safeId),
+    fecha: new Date(toIso(data.fecha) || Date.now()),
+    client: data.client === "phone" || data.client === "web" ? data.client : undefined,
+    coach: data.coach && typeof data.coach === "object" ? (data.coach as MeetingCoach) : undefined,
+    suggestionsMarkdown: extractH2Block(content, /Sugerencias en vivo/i),
+    reviewMarkdown: extractH2Block(content, /Repaso/i),
+    keepFrontmatter: keep,
+    actionables: fm.slice(0, 2).map((a) => ({
+      title: String(a.title ?? ""),
+      one_liner: String(a.one_liner ?? ""),
+      exec_prompt: String(a.exec_prompt ?? a.title ?? ""),
+    })),
+    triaged: (await tasksForMeeting(safeId)).length > 0,
+  };
+}
+
+/**
+ * Agrega campos al frontmatter de un acta sin tocar el cuerpo (p.ej. el audio
+ * de custodia que llegó del teléfono). false si el acta no existe.
+ */
+export async function annotateMeeting(
+  slugIn: string,
+  id: string,
+  fields: Record<string, unknown>,
+): Promise<boolean> {
+  const slug = await realSlug(slugIn);
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId) return false;
+  const path = join(meetingsDir(slug), `${safeId}.md`);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return false;
+  }
+  const { data, content } = matter(raw);
+  await writeFile(path, matter.stringify(content, yamlSafe({ ...data, ...fields })), "utf8");
+  return true;
 }
 
 // ── Exportación (descargas del detalle de reunión) ─────────────────────

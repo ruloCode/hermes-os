@@ -31,6 +31,8 @@ export interface CommandContext {
   stopLiveMeeting: () => void;
   /** Conecta la voz con el tutor de inglés (corta la llamada Hermes si la hay). */
   startEnglishPractice: () => void;
+  /** Compañera de clase de inglés en vivo (Google Meet) en /ingles. */
+  startEnglishClass: () => void;
   /** Entrada canónica a la voz: navega a Voz en vivo y conecta si hace falta. */
   startVoiceCall: () => void;
   /** Control por gestos activo (cambia el label del comando a "apagar"). */
@@ -147,6 +149,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.startEnglishPractice(),
   },
   {
+    id: "clase-ingles",
+    label: "Clase de inglés en vivo",
+    slash: "/clase de inglés",
+    hint: "Compañera en tu clase de Google Meet: correcciones, ayuda para responder y reporte",
+    run: (ctx) => ctx.startEnglishClass(),
+  },
+  {
     id: "ver-finanzas",
     label: "Ver finanzas",
     hint: "Saldo, movimientos y asesor financiero",
@@ -163,6 +172,18 @@ export const COMMANDS: HermesCommand[] = [
     label: "Ver inglés",
     hint: "Progreso de la práctica: reportes, drills, vocabulario y tareas",
     run: (ctx) => ctx.navigate("/ingles"),
+  },
+  {
+    id: "ver-gimnasio",
+    label: "Gimnasio de articulación",
+    hint: "9 minutos al día: decir tus ideas con el punto primero, en español e inglés",
+    run: (ctx) => ctx.navigate("/gimnasio"),
+  },
+  {
+    id: "ver-entender",
+    label: "Entender un proyecto",
+    hint: "Tutor que lee los repos y las actas y te explica dibujando",
+    run: (ctx) => ctx.navigate("/entender"),
   },
   {
     id: "ver-estudio",
@@ -183,6 +204,13 @@ export const COMMANDS: HermesCommand[] = [
     slash: "/oficina",
     hint: "Oficina 3D: cada run de Claude es un personaje en su escritorio, por proyecto",
     run: (ctx) => ctx.navigate("/oficina"),
+  },
+  {
+    id: "ver-ruloview",
+    label: "RuloView",
+    slash: "/ruloview",
+    hint: "Tu cuarto en 3D: presencia con la señal WiFi de 3 nodos ESP32 + esqueleto por cámara",
+    run: (ctx) => ctx.navigate("/ruloview"),
   },
   {
     id: "ver-sala",
@@ -370,6 +398,11 @@ export function useCommandContext(): CommandContext {
       // (LivePractice) + drills y vocabulario a la mano.
       router.push("/ingles");
       void voice.switchToTutor();
+    },
+    startEnglishClass: () => {
+      // La clase vive en /ingles; si ya hay una sesión en vivo, solo navega.
+      router.push("/ingles");
+      if (!live.active) void live.startClass();
     },
     startVoiceCall: () => {
       ws.showPanel("voz");

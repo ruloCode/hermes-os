@@ -110,6 +110,34 @@ export async function checkinHabit(
   return data as HabitCheckin;
 }
 
+/** ¿Hay check-in hecho de este hábito en ese día? null = sin Supabase (no se sabe). */
+export async function habitDoneOn(habitId: number, date: string): Promise<boolean | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("habit_checkins")
+    .select("done")
+    .eq("habit_id", habitId)
+    .eq("date", date)
+    .maybeSingle();
+  if (error) return null;
+  return data?.done === true;
+}
+
+/** Días (AAAA-MM-DD) con check-in hecho del hábito entre `from` y `to`. null = sin Supabase o error. */
+export async function habitDoneDates(habitId: number, from: string, to: string): Promise<string[] | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("habit_checkins")
+    .select("date")
+    .eq("habit_id", habitId)
+    .eq("done", true)
+    .gte("date", from)
+    .lte("date", to)
+    .order("date");
+  if (error) return null;
+  return (data ?? []).map((r) => String((r as { date: string }).date));
+}
+
 async function recentCheckins(habitId: number, limit = 120): Promise<HabitCheckin[]> {
   if (!supabase) return [];
   const { data } = await supabase
@@ -181,4 +209,16 @@ export async function habitsToday(): Promise<HabitToday[]> {
     });
   }
   return out;
+}
+
+/**
+ * Días con AL MENOS un hábito cumplido, acumulados desde siempre (no seguidos):
+ * la métrica del jardín del foco. Perder un día no resta nada (P7). null = sin
+ * Supabase (no se inventa un 0).
+ */
+export async function habitDaysCount(): Promise<number | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("habit_checkins").select("date").eq("done", true).limit(10_000);
+  if (error) return null;
+  return new Set((data ?? []).map((r) => (r as { date: string }).date)).size;
 }

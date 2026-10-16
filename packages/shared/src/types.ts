@@ -49,6 +49,11 @@ export interface ProjectStatus {
   estado: string;
   rama?: string;
   ruta_local?: string;
+  /**
+   * Repos del proyecto cuando son varios (frontmatter `repos:`). `ruta_local`
+   * sigue siendo donde corren las ejecuciones; estos se indexan y se leen.
+   */
+  repos?: string[];
   estado_actual: string;
   tareas_pendientes: string[];
   actualizado?: string;
@@ -265,8 +270,10 @@ export interface AgentActivityEvent {
     | "browser"
     | "lights"
     | "metro"
+    | "ruloview"
     | "scheduled"
-    | "learning";
+    | "learning"
+    | "phone";
   taskId?: string;
   sessionId?: string;
   toolName?: string;
@@ -440,6 +447,8 @@ export interface MeetingSummary {
   duracion_min?: number | null;
   /** cuántos accionables tiene (normalmente 2). */
   accionables_count: number;
+  /** Desde dónde se grabó (frontmatter `client`); ausente en actas viejas. */
+  client?: LiveClientKind;
 }
 
 /** Detalle completo de una reunión (resumen + accionables + transcripción). */
@@ -495,8 +504,38 @@ export interface LiveSegment {
   final: boolean;
 }
 
-/** decir=dilo ya · preguntar=pregunta que destraba · dato=dato del contexto · rumbo=re-encauzar. */
-export type LiveSuggestionKind = "decir" | "preguntar" | "dato" | "rumbo";
+/**
+ * decir=dilo ya · preguntar=pregunta que destraba · dato=dato del contexto · rumbo=re-encauzar.
+ * Clase de inglés: corregir=error de lo que acabas de decir · andamio=palabras clave + arranque
+ * de frase para responder tú · explicar=lo último de la profe en español simple.
+ * Reunión de equipo: aportar=una intervención con criterio (con su ángulo) · entender=un
+ * concepto que acaba de salir, en una línea.
+ * Cualquier junta con «soy yo»: pulir=lo que acabas de decir, dicho más claro (articulación).
+ */
+export type LiveSuggestionKind =
+  | "decir"
+  | "preguntar"
+  | "dato"
+  | "rumbo"
+  | "corregir"
+  | "andamio"
+  | "explicar"
+  | "aportar"
+  | "entender"
+  | "pulir";
+
+/**
+ * Qué ayuda se pide a mano. Clase: andamio (default) · explicar lo último · la frase completa.
+ * Reunión de equipo: full = qué aportar · explain = de qué están hablando · question = una
+ * pregunta con criterio.
+ */
+export type LiveHelpIntent = "scaffold" | "explain" | "full" | "question";
+
+/**
+ * Ayuda AUTOMÁTICA cuando te preguntan algo (clase y práctica):
+ * full = la frase completa · scaffold = palabras clave + arranque · off = solo a mano.
+ */
+export type AutoHelpMode = "full" | "scaffold" | "off";
 
 /** Una sugerencia del copiloto durante la junta. */
 export interface LiveSuggestion {
@@ -512,6 +551,8 @@ export interface LiveSuggestion {
   manual?: boolean;
   /** "fast" = capa rápida (pregunta detectada, streaming) · ausente/"deep" = loop estratégico. */
   source?: "fast" | "deep";
+  /** Reunión de equipo: el ángulo del aporte ("Riesgo", "Trade-off", "Responde"…). */
+  angle?: string;
 }
 
 /** Estado del enlace con el proveedor de STT streaming. */
@@ -526,6 +567,12 @@ export interface LiveSpeakerStats {
   wpm: number;
   /** Muletillas contadas por regex es/en (este, o sea, um, like…). */
   fillers: number;
+  /**
+   * Señales de articulación débil (pedir permiso, disculparse, «pero» que
+   * borra, certeza de relleno, duda) — `detectWeakPhrases` de shared/articulation.
+   * Opcional: los snapshots viejos no la traen.
+   */
+  weak?: number;
 }
 
 export interface LiveCoachMetrics {
@@ -533,13 +580,66 @@ export interface LiveCoachMetrics {
   atMs: number;
   bySpeaker: Record<string, LiveSpeakerStats>;
   selfSpeaker?: string;
+  /** Solo en clase de inglés y con selfSpeaker marcado. */
+  class?: LiveClassMetrics;
 }
+
+/** Métricas de speaking de una clase de inglés (del transcript real + correcciones en vivo). */
+export interface LiveClassMetrics {
+  /** Fracción 0-1 del tiempo hablado que fue tuyo. */
+  selfShare: number;
+  selfWords: number;
+  selfTurns: number;
+  /** Turnos tuyos que salieron en español. */
+  spanishTurns: number;
+  corrections: number;
+  /** Correcciones por cada 100 palabras tuyas (1 decimal). */
+  correctionsPer100: number;
+}
+
+/**
+ * Compañera en "Practicar ahora" (tutora de voz): el browser ya tiene el texto
+ * de cada turno (ElevenLabs), así que no hay audio ni STT — sube las líneas por
+ * WS `/english/practice/ws` y recibe las mismas tarjetas que la clase en vivo.
+ */
+export type PracticeCompanionMessage =
+  | { type: "turn"; role: "user" | "tutor"; text: string }
+  | { type: "help"; intent?: LiveHelpIntent }
+  | { type: "config"; autoHelp: AutoHelpMode }
+  /** Lo que la tutora VA diciendo (streaming): la ayuda arranca antes de que termine. */
+  | { type: "partial"; text: string };
+
+export type PracticeCompanionEvent =
+  | { type: "ready"; enabled: boolean; reason?: string }
+  /** Lo que dijiste no tenía nada que corregir (la UI lo marca como bien dicho). */
+  | { type: "checked"; said: string }
+  | Extract<
+      LiveServerEvent,
+      {
+        type:
+          | "suggestion"
+          | "suggestion_start"
+          | "suggestion_delta"
+          | "suggestion_done"
+          | "suggestion_aborted";
+      }
+    >;
 
 /** Fuente de audio de la junta: sala física (mic) o llamada remota (mic + pestaña). */
 export type LiveAudioMode = "presencial" | "remoto";
 
 /** Idioma de las sugerencias: auto = el idioma de la pregunta/última intervención. */
 export type LiveSuggestionLang = "auto" | "es" | "en";
+
+/** Qué app abrió la junta / manda el audio: el dashboard o Hermes Phone. */
+export type LiveClientKind = "web" | "phone";
+
+/**
+ * Rol de una conexión al WS de la junta (`?role=`): `audio` es el dueño del
+ * micrófono (uno solo: el nuevo desplaza al anterior con 4001) · `viewer` solo
+ * mira y controla (sus frames binarios se ignoran y nunca desplaza a nadie).
+ */
+export type LiveClientRole = "audio" | "viewer";
 
 /** Foto completa de la sesión (respuesta REST y evento `hello` del WS). */
 export interface LiveMeetingSnapshot {
@@ -567,14 +667,27 @@ export interface LiveMeetingSnapshot {
   suggestionLang?: LiveSuggestionLang;
   /** true si la capa rápida (sugerencias streaming) está activa en esta sesión. */
   fastCopilot?: boolean;
+  /** Key de COACH_MODES: "junta" (default) · "clase-ingles" · "equipo". */
+  coachMode?: string;
+  /** Clase de inglés terminada: la sesión de english_sessions que generó. */
+  englishSessionId?: number;
+  /** Quién ARRANCÓ la junta (POST start `client`). Ausente en snapshots viejos = "web". */
+  client?: LiveClientKind;
+  /** Quién manda el audio AHORA (undefined = nadie conectado con role=audio). */
+  audioClient?: LiveClientKind;
+  /** Conexiones con role=viewer abiertas. */
+  viewers?: number;
+  /** Ayuda automática vigente (clase de inglés). */
+  autoHelp?: AutoHelpMode;
 }
 
 /** Protocolo WS browser→agente (los frames binarios son audio PCM16LE 16kHz mono de ~100ms). */
 export type LiveClientMessage =
   | { type: "stop" }
   | { type: "rename"; speaker: string; name: string }
-  | { type: "suggest_now" }
-  | { type: "mark_self"; speaker: string };
+  | { type: "suggest_now"; intent?: LiveHelpIntent }
+  | { type: "mark_self"; speaker: string }
+  | { type: "auto_help"; mode: AutoHelpMode };
 
 /** Protocolo WS agente→browser (siempre JSON). */
 export type LiveServerEvent =
@@ -596,9 +709,12 @@ export type LiveServerEvent =
   | { type: "coach_metrics"; metrics: LiveCoachMetrics }
   | { type: "stt_status"; state: LiveSttState; detail?: string }
   | { type: "stop_ack" }
-  | { type: "done"; meetingId: string; title: string }
+  | { type: "done"; meetingId: string; title: string; englishSessionId?: number }
   | { type: "error"; message: string; fatal: boolean }
-  | { type: "ping"; ts: number };
+  | { type: "ping"; ts: number }
+  // Cambió el dueño del audio o el número de viewers (los clientes que no lo
+  // conocen lo ignoran: el switch del dashboard no tiene default que falle).
+  | { type: "clients"; audioClient?: LiveClientKind; viewers: number };
 
 // ── Finanzas personales ────────────────────────────────────────────────
 // Registro de gastos/ingresos dictados por voz/chat, categorizados por el LLM.
@@ -749,7 +865,7 @@ export interface EnglishSession {
   /** Reporte post-sesión en markdown (análisis en español). */
   report_md: string | null;
   report_status: "pending" | "running" | "done" | "skipped" | "error";
-  /** web | mobile | meeting (sesión pasiva desde una junta en inglés). */
+  /** web | mobile | meeting (sesión pasiva desde una junta en inglés) | class (clase real en vivo). */
   source: string;
 }
 
@@ -1549,3 +1665,67 @@ export interface ScheduledTaskRun {
   duration_ms: number | null;
   attempt: number;
 }
+
+// ── Tutor de proyecto (Entender) ───────────────────────────────────────
+// Conversación con un agente de SOLO LECTURA sobre los repos, el vault y las
+// actas de un proyecto, que explica dibujando: cada diagrama llega a la
+// pizarra por su tool (la pantalla nunca parsea el texto del modelo) y trae
+// sus fuentes — lo que no sale de un archivo, commit o acta no se dibuja.
+
+/** De dónde sale algo que el tutor afirmó o dibujó. */
+export interface TutorSource {
+  /** Lo que se ve: "SDK · src/tx_agentic/server.py:42", "Acta 2026-10-07". */
+  label: string;
+  /** Ruta absoluta o relativa al repo (con :línea) o id de acta. */
+  ref: string;
+}
+
+export interface TutorDiagram {
+  id: string;
+  title: string;
+  /** Fuente Mermaid (flowchart, sequenceDiagram, erDiagram, timeline…). */
+  mermaid: string;
+  /** Una línea: qué muestra y cómo leerlo. */
+  caption?: string;
+  sources: TutorSource[];
+}
+
+export interface TutorMessage {
+  role: "user" | "assistant";
+  text: string;
+  at: string;
+  /** Diagramas que dibujó en este turno (en orden). */
+  diagrams?: TutorDiagram[];
+  /** Herramientas que usó (lo que leyó), para mostrar el "cómo lo sé". */
+  tools?: string[];
+}
+
+export interface TutorConversationSummary {
+  id: string;
+  project: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: number;
+}
+
+export interface TutorConversation extends TutorConversationSummary {
+  /** Sesión del Agent SDK para retomar con memoria. */
+  sessionId?: string;
+  history: TutorMessage[];
+}
+
+export interface TutorProject {
+  slug: string;
+  name: string;
+  repos: { name: string; graph: string }[];
+  meetings: number;
+}
+
+/** Eventos del SSE de un turno del tutor. */
+export type TutorStreamEvent =
+  | { type: "conversation"; id: string; title: string }
+  | { type: "delta"; text: string }
+  | { type: "tool"; name: string; detail?: string }
+  | { type: "diagram"; diagram: TutorDiagram }
+  | { type: "done"; error?: string };

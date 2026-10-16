@@ -7,6 +7,7 @@ import { ChatProvider } from "./src/chat";
 import { VoiceProvider } from "./src/voice";
 import { RecordingProvider } from "./src/recording";
 import { AppShell } from "./src/AppShell";
+import { CrashGuard } from "./src/crash";
 
 /**
  * Raíz de Hermes móvil. Orden de providers:
@@ -18,6 +19,7 @@ import { AppShell } from "./src/AppShell";
  */
 export default function App() {
   return (
+    <CrashGuard>
     <SafeAreaProvider>
       <StatusBar style="light" />
       <AppProvider>
@@ -32,5 +34,6 @@ export default function App() {
         </ChatProvider>
       </AppProvider>
     </SafeAreaProvider>
+    </CrashGuard>
   );
 }

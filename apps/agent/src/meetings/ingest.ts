@@ -14,6 +14,7 @@ import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join as joinPath } from "node:path";
 import type {
+  LiveClientKind,
   LiveCoachMetrics,
   LiveSuggestion,
   Meeting,
@@ -25,7 +26,7 @@ import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
 import { setPresence } from "../presence.js";
 import { getProjectBriefing, readProjects } from "../vault/projects.js";
-import { saveMeeting } from "./store.js";
+import { saveMeeting, type MeetingRewriteBase } from "./store.js";
 import { transcribe } from "./stt.js";
 import { OWNER } from "../owner.js";
 
@@ -52,6 +53,22 @@ export interface IngestOptions {
   /** Métricas del coach en vivo — activa la evaluación de desempeño SOLO si
    *  traen selfSpeaker (sin saber quién es el dueño no hay a quién evaluar). */
   coachMetrics?: LiveCoachMetrics | null;
+  /** Reunión de equipo: sección "## Repaso" ya armada (ventanas + para estudiar). */
+  review?: string;
+  /** Desde dónde se grabó (dashboard o Hermes Phone) → frontmatter `client`. */
+  client?: LiveClientKind;
+  /**
+   * Re-ingesta SOBRE un acta existente (mismo id, mismo .md, misma fila de
+   * Supabase): nuevo resumen desde la transcripción nueva, conservando título,
+   * fecha, sugerencias en vivo, coach, repaso y client. Si los accionables ya
+   * se triaron, también se conservan (las tareas apuntan a su índice).
+   */
+  rewrite?: {
+    base: MeetingRewriteBase;
+    /** Constancia visible bajo el título del acta. */
+    notice: string;
+    extraFrontmatter?: Record<string, unknown>;
+  };
 }
 
 export async function ingestMeeting(opts: IngestOptions): Promise<Meeting> {
@@ -131,7 +148,10 @@ export async function ingestMeeting(opts: IngestOptions): Promise<Meeting> {
 
   try {
     const q = query({
-      prompt: buildUserPrompt(opts.title, transcript.slice(0, MAX_TRANSCRIPT_CHARS)),
+      prompt: buildUserPrompt(
+        opts.rewrite?.base.title ?? opts.title,
+        transcript.slice(0, MAX_TRANSCRIPT_CHARS),
+      ),
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt,
@@ -179,20 +199,39 @@ export async function ingestMeeting(opts: IngestOptions): Promise<Meeting> {
     throw new Error("El análisis no produjo un resumen con accionables.");
   }
 
+  const rw = opts.rewrite;
   const meeting = await saveMeeting({
-    projectSlug: opts.project,
-    // Título: el que puso el usuario > el breve del modelo > primera frase.
-    title: opts.title?.trim() || captured.title?.trim() || deriveTitle(captured.summary),
-    fecha: new Date(),
+    projectSlug: rw?.base.slug ?? opts.project,
+    // Título: el del acta que se reescribe > el que puso el usuario > el breve
+    // del modelo > primera frase.
+    title:
+      rw?.base.title ??
+      (opts.title?.trim() || captured.title?.trim() || deriveTitle(captured.summary)),
+    fecha: rw?.base.fecha ?? new Date(),
     summary: captured.summary,
     transcript,
-    actionables: captured.actionables,
+    // Accionables ya triados: las tareas apuntan a su índice → no se reemplazan.
+    actionables: rw?.base.triaged ? rw.base.actionables : captured.actionables,
     source: opts.source,
     sttProvider: opts.sttProvider ?? null,
     durationSec: opts.durationSec ?? null,
     liveSuggestions: opts.liveSuggestions,
-    coach: opts.coachMetrics
-      ? { metrics: opts.coachMetrics, performance: captured.performance }
+    review: rw ? rw.base.reviewMarkdown || undefined : opts.review,
+    // El coach de la reescritura es el medido EN VIVO (las etiquetas de
+    // hablante del STT batch no son las mismas: re-evaluar sería inventar).
+    coach: rw
+      ? rw.base.coach
+      : opts.coachMetrics
+        ? { metrics: opts.coachMetrics, performance: captured.performance }
+        : undefined,
+    client: opts.client ?? rw?.base.client,
+    rewrite: rw
+      ? {
+          id: rw.base.id,
+          suggestionsMarkdown: rw.base.suggestionsMarkdown,
+          keepFrontmatter: { ...rw.base.keepFrontmatter, ...(rw.extraFrontmatter ?? {}) },
+          notice: rw.notice,
+        }
       : undefined,
   });
 
@@ -235,8 +274,9 @@ Tu tarea: producir (1) un TÍTULO breve del tema, (2) un RESUMEN ejecutivo claro
     const totalMs = Object.values(p.coach.bySpeaker).reduce((a, s) => a + s.talkMs, 0);
     const pct = self && totalMs > 0 ? Math.round((self.talkMs / totalMs) * 100) : 0;
     parts.push(`## Evalúa el desempeño de ${OWNER} (campo \`performance\`)
-${OWNER} habló en esta junta (en el transcript es el hablante "${p.coach.selfSpeaker}"). Métricas REALES medidas en vivo: ${pct}% del tiempo hablado, ${self?.wpm ?? 0} palabras/min, ${self?.fillers ?? 0} muletillas contadas.
-Con el transcript + estas métricas, llena también \`performance\`: score 1-10, 2-3 highlights y 2-3 mejoras concretas (claridad, estructura, si amarró compromisos, si respondió bien las preguntas). Honesto y específico — cita momentos del transcript, no generalidades.`);
+${OWNER} habló en esta junta (en el transcript es el hablante "${p.coach.selfSpeaker}"). Métricas REALES medidas en vivo: ${pct}% del tiempo hablado, ${self?.wpm ?? 0} palabras/min, ${self?.fillers ?? 0} muletillas contadas, ${self?.weak ?? 0} arranques débiles (pedir permiso, disculparse, «pero» que borra, «obviamente», «creo que tal vez»).
+Con el transcript + estas métricas, llena también \`performance\`: score 1-10, 2-3 highlights y 2-3 mejoras concretas (claridad, estructura, si amarró compromisos, si respondió bien las preguntas). Honesto y específico — cita momentos del transcript, no generalidades.
+Evalúa también la ARTICULACIÓN: ¿abrió con el punto o lo enterró al final? ¿pidió permiso o se disculpó por hablar? ¿sonó convencido de sus ideas? Al menos una mejora debe ser una frase REAL suya reescrita, en el idioma en que la dijo: «dijiste: … → mejor: …».`);
   }
   parts.push(`## Reglas
 - El título: 3-6 palabras sobre EL TEMA (lo que se lee en la lista del historial). Nada de "Reunión de…" ni quiénes hablaron: el tema. Ej: "Cambio de backend y pruebas".
@@ -302,7 +342,11 @@ function deriveTitle(summary: string): string {
 export interface MeetingJob {
   id: string;
   project: string;
-  status: "running" | "done" | "error";
+  /**
+   * `unknown` = job de antes de que los jobs se guardaran en disco: el agente
+   * se reinició y no sabe cómo terminó, pero SÍ tiene el audio (audioPath).
+   */
+  status: "running" | "done" | "error" | "unknown";
   startedAt: string;
   finishedAt?: string;
   /** id de la reunión creada (cuando status === done). */
@@ -313,12 +357,172 @@ export interface MeetingJob {
   retryable?: boolean;
   /** Copia en disco del audio subido (existe aunque el STT falle). */
   audioPath?: string;
+  /** Desde dónde se grabó (va al acta). */
+  client?: LiveClientKind;
+  /** "live-completion" = completa una junta EN VIVO con el archivo del teléfono. */
+  kind?: "live-completion";
+  /** Solo live-completion: lo necesario para retomar el job tras un reinicio. */
+  live?: LiveCompletionInfo;
+  /** Solo live-completion: en qué va (ver live-completion.ts). */
+  stage?: LiveCompletionStage;
+  /** Solo live-completion: cómo terminó. */
+  outcome?: "attached" | "reingested" | "new_meeting";
+  /** Constancia legible de lo que pasó (hueco, por qué cayó al flujo normal…). */
+  note?: string;
+}
+
+export type LiveCompletionStage =
+  | "esperando_junta"
+  | "adjuntando"
+  | "retranscribiendo"
+  | "flujo_normal";
+
+export interface LiveCompletionInfo {
+  /** id de la sesión en vivo (`POST /meetings/live/start` → snapshot.id). */
+  sessionId: string;
+  /** ms de audio que NO llegaron en vivo (lo mide el teléfono). */
+  gapMs: number;
+  durationSec: number | null;
+  title?: string;
+  /** ISO de cuándo empezó a esperar la junta (el tope de 20 min sobrevive reinicios). */
+  waitingSince: string;
 }
 
 const jobs = new Map<string, MeetingJob>();
 
+// Los jobs vivían SOLO en memoria: cada reinicio del agente dejaba al teléfono
+// preguntando por jobs que respondían 404 para siempre, y sus audios se
+// apilaban en PENDIENTES sin poder resolverse (40 el 2026-10-08). Ahora cada
+// cambio de estado se escribe a disco.
+const JOBS_DIR = joinPath(homedir(), ".hermes-os", "meeting-jobs");
+
+// Escrituras en cadena por job: una escritura vieja que termina tarde no puede
+// pisar el estado final.
+const jobWrites = new Map<string, Promise<void>>();
+
+function persistJob(job: MeetingJob): void {
+  const snapshot = JSON.stringify(job, null, 2);
+  const prev = jobWrites.get(job.id) ?? Promise.resolve();
+  const next = prev
+    .then(() => mkdir(JOBS_DIR, { recursive: true }))
+    .then(() => writeFile(joinPath(JOBS_DIR, `${job.id}.json`), snapshot))
+    .catch((e) => console.error("[meetings] no pude guardar el job:", e));
+  jobWrites.set(job.id, next);
+}
+
+/** Solo memoria (para quien necesita el job vivo, p.ej. el ingest en curso). */
 export function getMeetingJob(id: string): MeetingJob | undefined {
   return jobs.get(id);
+}
+
+/** Registra (o actualiza) un job en memoria + disco. Lo usa live-completion.ts. */
+export function trackMeetingJob(job: MeetingJob): void {
+  jobs.set(job.id, job);
+  persistJob(job);
+}
+
+/** Jobs guardados en disco (para retomar los live-completion al arrancar). */
+export async function listPersistedMeetingJobs(): Promise<MeetingJob[]> {
+  const files = (await readdir(JOBS_DIR).catch(() => [] as string[])).filter((f) =>
+    f.endsWith(".json"),
+  );
+  const out: MeetingJob[] = [];
+  for (const f of files) {
+    try {
+      out.push(JSON.parse(await readFile(joinPath(JOBS_DIR, f), "utf8")) as MeetingJob);
+    } catch {
+      /* archivo corrupto: lo salteamos */
+    }
+  }
+  return out;
+}
+
+/** Id de job seguro para usar en rutas de disco (8 hex de randomUUID). */
+const isJobId = (id: string) => /^[0-9a-f]{8}$/i.test(id);
+
+/**
+ * Estado de un job sobreviviendo reinicios: memoria → disco → evidencia en
+ * disco (audio de custodia y transcripción guardada) para los jobs de antes
+ * de la persistencia. Un job "running" en disco sin proceso vivo murió con
+ * el agente: se reporta como error reprocesable si hay audio.
+ */
+export async function getMeetingJobDurable(id: string): Promise<MeetingJob | undefined> {
+  const live = jobs.get(id);
+  if (live) return live;
+  if (!isJobId(id)) return undefined;
+
+  const audioPath = await findCustodyAudio(id);
+  try {
+    const saved = JSON.parse(await readFile(joinPath(JOBS_DIR, `${id}.json`), "utf8")) as MeetingJob;
+    if (saved.status === "running") {
+      return {
+        ...saved,
+        status: "error",
+        error: "el agente se reinició a mitad del análisis",
+        audioPath: saved.audioPath ?? audioPath,
+      };
+    }
+    return saved;
+  } catch {
+    /* job de antes de la persistencia: inferir */
+  }
+
+  const failed = (await readdir(FAILED_DIR).catch(() => [] as string[])).find(
+    (f) => f.includes(id) && f.endsWith(".json"),
+  );
+  if (failed) {
+    return {
+      id,
+      project: "",
+      status: "error",
+      startedAt: "",
+      error: "el análisis falló; la transcripción quedó guardada en la Mac",
+      retryable: true,
+      audioPath,
+    };
+  }
+  if (audioPath) {
+    return { id, project: "", status: "unknown", startedAt: "", audioPath };
+  }
+  return undefined;
+}
+
+/** Audio de custodia de un job (`<fecha>-<proyecto>-<id>.<ext>`), si existe. */
+async function findCustodyAudio(id: string): Promise<string | undefined> {
+  const files = await readdir(AUDIO_DIR).catch(() => [] as string[]);
+  const f = files.find((name) => name.replace(/\.[^.]+$/, "").endsWith(`-${id}`));
+  return f ? joinPath(AUDIO_DIR, f) : undefined;
+}
+
+/**
+ * Reprocesa un job desde el audio que la Mac ya tiene. Sirve para las
+ * pendientes del teléfono cuyo job se perdió: no hay que volver a subir nada.
+ */
+export async function retryMeetingJobFromAudio(
+  id: string,
+  project: string,
+  durationSec: number | null,
+): Promise<MeetingJob> {
+  // Si la transcripción ya está guardada, solo se re-analiza: transcribir
+  // otra vez cuesta créditos y minutos sin aportar nada.
+  const failed = (await readdir(FAILED_DIR).catch(() => [] as string[])).find(
+    (f) => f.includes(id) && f.endsWith(".json"),
+  );
+  if (failed) return retryFailedTranscript(id);
+
+  const job = await getMeetingJobDurable(id);
+  const audioPath = job?.audioPath ?? (await findCustodyAudio(id));
+  if (!audioPath) throw new Error(`la Mac no tiene el audio del job ${id}`);
+  const data = await readFile(audioPath);
+  const ext = audioPath.split(".").pop() ?? "m4a";
+  const mime = ext === "webm" ? "audio/webm" : ext === "mp3" ? "audio/mpeg" : "audio/mp4";
+  return startMeetingJob({
+    project: project || job?.project || "",
+    audio: new Blob([data], { type: mime }),
+    source: "audio",
+    durationSec,
+    existingAudioPath: audioPath,
+  });
 }
 
 // ── Red de seguridad: transcripciones huérfanas ────────────────────────
@@ -363,6 +567,7 @@ interface FailedTranscript {
   durationSec: number | null;
   error: string;
   createdAt: string;
+  client?: LiveClientKind;
 }
 
 async function saveFailedTranscript(t: FailedTranscript): Promise<string> {
@@ -411,6 +616,7 @@ export async function retryFailedTranscript(id: string): Promise<MeetingJob> {
     source: saved.source,
     durationSec: saved.durationSec,
     sttProvider: saved.sttProvider,
+    client: saved.client,
     onSuccess: () => unlink(path).catch(() => {}), // ya es una reunión de verdad
   });
   return job;
@@ -429,18 +635,51 @@ export interface StartMeetingJobInput {
   sttProvider?: string | null;
   /** Hook del reintento: limpiar la transcripción guardada al lograrlo. */
   onSuccess?: () => void;
+  /** El audio YA está en disco (subida por partes, reproceso): no se duplica. */
+  existingAudioPath?: string;
+  /** Id fijado por quien ya nombró el audio de custodia con él (newMeetingJobId). */
+  id?: string;
+  /** Desde dónde se grabó (dashboard o Hermes Phone) → acta. */
+  client?: LiveClientKind;
+  /** Campos extra del job (live-completion cae aquí al flujo normal con su mismo id). */
+  meta?: Pick<MeetingJob, "kind" | "live" | "stage" | "note">;
+}
+
+export const newMeetingJobId = (): string => randomUUID().slice(0, 8);
+
+/** Bajo esto una transcripción no es una junta (ruido, silencio, "Mm-hmm"). */
+export const MIN_SPOKEN_WORDS = 12;
+
+/** Palabras habladas, sin etiquetas de hablante (**Hablante 0:**) ni marcas. */
+export function spokenWords(transcript: string): number {
+  return transcript
+    .replace(/\*\*[^*]{1,40}:\*\*/g, " ")
+    .replace(/^[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ ]{0,20}\d{0,2}:\s/gm, " ")
+    .replace(/[\[(][^\])]{0,40}[\])]/g, " ")
+    .split(/\s+/)
+    .filter((w) => /[a-záéíóúñ0-9]/i.test(w)).length;
+}
+
+/** Ruta de custodia de un audio (misma convención que saveAudioBackup). */
+export async function custodyAudioPath(project: string, id: string, ext: string): Promise<string> {
+  await mkdir(AUDIO_DIR, { recursive: true });
+  return joinPath(AUDIO_DIR, `${new Date().toISOString().slice(0, 10)}-${project}-${id}.${ext}`);
 }
 
 export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
-  const id = randomUUID().slice(0, 8);
+  const id = input.id ?? newMeetingJobId();
   const job: MeetingJob = {
+    ...input.meta,
     id,
     project: input.project,
     status: "running",
     startedAt: new Date().toISOString(),
     title: input.title,
+    ...(input.client ? { client: input.client } : {}),
   };
+  if (input.existingAudioPath) job.audioPath = input.existingAudioPath;
   jobs.set(id, job);
+  persistJob(job);
   emit({ kind: "task_start", taskId: id, detail: `reunión: ${input.title || input.project}` });
 
   void (async () => {
@@ -452,11 +691,14 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
       transcript = input.transcript?.trim() ?? "";
       if (!transcript && input.audio) {
         // Primero el respaldo: si transcribir falla, el audio ya está a salvo.
-        try {
-          job.audioPath = await saveAudioBackup(input.audio, input.project, id, job.startedAt);
-          console.log(`[meetings] audio a salvo en ${job.audioPath}`);
-        } catch (e) {
-          console.error("[meetings] no pude guardar el audio:", e);
+        if (!job.audioPath) {
+          try {
+            job.audioPath = await saveAudioBackup(input.audio, input.project, id, job.startedAt);
+            console.log(`[meetings] audio a salvo en ${job.audioPath}`);
+            persistJob(job);
+          } catch (e) {
+            console.error("[meetings] no pude guardar el audio:", e);
+          }
         }
         emit({ kind: "tool_call", taskId: id, toolName: "transcribir", detail: `${Math.round(input.audio.size / 1024)} KB` });
         const r = await transcribe(input.audio);
@@ -464,6 +706,15 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
         sttProvider = r.provider;
       }
       if (!transcript) throw new Error("Sin audio ni transcripción utilizable.");
+      // Audio mudo (micrófono silenciado por una llamada, teléfono en el
+      // bolsillo) daba una "junta" con accionables INVENTADOS a partir del
+      // contexto del proyecto (2026-10-09, prueba en emulador). Sin voz real no
+      // hay junta: falla con motivo y el audio queda guardado.
+      if (spokenWords(transcript) < MIN_SPOKEN_WORDS) {
+        throw new Error(
+          `La grabación casi no tiene voz (${spokenWords(transcript)} palabras): no creo una junta inventada. El audio quedó guardado.`,
+        );
+      }
 
       const meeting = await ingestMeeting({
         project: input.project,
@@ -473,12 +724,15 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
         sttProvider,
         durationSec: input.durationSec ?? null,
         taskId: id,
+        client: input.client,
       });
 
       job.status = "done";
       job.meetingId = meeting.id;
+      if (job.kind === "live-completion") job.outcome = "new_meeting";
       job.title = meeting.title;
       job.finishedAt = new Date().toISOString();
+      persistJob(job);
       input.onSuccess?.();
       emit({
         kind: "task_done",
@@ -503,6 +757,7 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
             durationSec: input.durationSec ?? null,
             error: job.error,
             createdAt: job.startedAt,
+            client: input.client,
           });
           job.retryable = true;
           console.error(`[meetings] análisis falló; transcripción a salvo en ${path}`);
@@ -510,6 +765,7 @@ export function startMeetingJob(input: StartMeetingJobInput): MeetingJob {
           console.error("[meetings] no pude guardar la transcripción:", e);
         }
       }
+      persistJob(job);
       if (job.audioPath) console.error(`[meetings] el audio de esta junta quedó en ${job.audioPath}`);
       emit({ kind: "error", taskId: id, detail: `reunión falló: ${job.error}` });
       notifyMac(

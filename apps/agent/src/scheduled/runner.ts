@@ -4,6 +4,7 @@ import { env } from "../env.js";
 import { emit } from "../events.js";
 import { registerOfficeWorker } from "../office/state.js";
 import { notifyMac } from "../notify.js";
+import { phoneLink } from "../phone/link.js";
 import { saveMemory } from "../memory.js";
 import { supabase } from "../supabase.js";
 import { runAgentTurn } from "../agent/session.js";
@@ -152,6 +153,14 @@ export async function runScheduledTask(task: ScheduledTask, attempt = 1): Promis
         task.title,
         ok ? output.slice(0, 160) || "listo" : `falló: ${(output || "sin salida").slice(0, 120)}`,
       );
+      // Al teléfono va el resultado COMPLETO (se lee en el hilo). Sin teléfono
+      // conectado queda en cola; pasado el presupuesto del día, se descarta.
+      void phoneLink.notify({
+        title: ok ? task.title : `${task.title}: falló`,
+        body: ok ? output || "Listo." : (output || "Sin salida.").slice(0, 600),
+        source: "scheduled",
+        ref: task.id,
+      });
     }
   }
 

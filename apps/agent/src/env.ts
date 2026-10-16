@@ -13,6 +13,9 @@ export const env = {
   CLAWD_PATH: process.env.CLAWD_PATH || "",
   MACHINE_NAME: process.env.MACHINE_NAME || "local",
   HERMES_API_KEY: process.env.HERMES_API_KEY || "",
+  // Usuarios de Supabase Auth (ids o emails, separados por coma) que pueden
+  // entrar con su JWT (app móvil). Vacío = ningún JWT entra (auth.ts).
+  HERMES_ALLOWED_USERS: process.env.HERMES_ALLOWED_USERS || "",
   // Multi-máquina: dirección con la que OTROS PCs de la red alcanzan a este
   // agente. Sin ella se deriva de la IP LAN real (presence.ts) — se pone a
   // mano solo si hay un nombre/puerto de por medio (Tailscale, reverse proxy).
@@ -34,6 +37,9 @@ export const env = {
   ELEVENLABS_AGENT_ID: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || "",
   // Tutor de inglés (segundo agente; token vía GET /elevenlabs/token?agent=tutor).
   ELEVENLABS_TUTOR_AGENT_ID: process.env.NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID || "",
+  // Hermes Phone (agente de voz del teléfono; token vía ?agent=phone). Lo crea
+  // `pnpm setup:elevenlabs --phone`.
+  ELEVENLABS_PHONE_AGENT_ID: process.env.ELEVENLABS_PHONE_AGENT_ID || "",
   // Proveedor de STT preferido para reuniones: "whisper" | "scribe".
   // Default: scribe primero, Whisper de fallback. Ponlo en "whisper" si
   // ElevenLabs se queda sin créditos para no gastar la llamada fallida a Scribe.
@@ -48,6 +54,28 @@ export const env = {
   // gastar) | "off" (solo queda el loop estratégico de 20-45 s).
   COPILOT_PROVIDER: (process.env.HERMES_COPILOT || "").toLowerCase(),
   COPILOT_MODEL: process.env.HERMES_COPILOT_MODEL || "claude-haiku-4-5",
+  // Reunión de equipo: modelo del motor que propone QUÉ APORTAR. Sonnet: en el
+  // replay de una junta real fue igual de rápido que Haiku (1,4-2,1 s al primer
+  // token) y trajo continuidad (actas anteriores, nombres, pendientes) donde
+  // Haiku daba preguntas genéricas. Los conceptos van con HERMES_COPILOT_MODEL.
+  COPILOT_TEAM_MODEL: process.env.HERMES_COPILOT_TEAM_MODEL || "sonnet",
+  // Loop estratégico de juntas (dato/rumbo/preguntar cada 20-45 s y en cada
+  // ventana del modo equipo), sin razonamiento extendido.
+  COPILOT_DEEP_MODEL: process.env.HERMES_COPILOT_DEEP_MODEL || "sonnet",
+  // "Dilo más claro" (meetings/live-articulation.ts): reescribe TUS
+  // intervenciones con el punto primero, en juntas y equipo con «soy yo».
+  // "" = activado (con HERMES_COPILOT_MODEL) · "off" = apagado.
+  ARTICULATION: (process.env.HERMES_ARTICULATION || "").toLowerCase(),
+  // Gimnasio de articulación (gym/analyze.ts): evalúa cada repetición.
+  GYM_MODEL: process.env.HERMES_GYM_MODEL || "sonnet",
+  // Tutor de proyecto (Entender): explica leyendo repos y actas y dibujando.
+  TUTOR_MODEL: process.env.HERMES_TUTOR_MODEL || "sonnet",
+  // Otras formas en que te llaman en las reuniones (coma): "te nombraron" las
+  // reconoce además de HERMES_OWNER_NAME.
+  OWNER_ALIASES: (process.env.HERMES_OWNER_ALIASES || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
   // Dashboard: calendario (URL iCal SECRETA de Google Calendar) y clima
   // (Open-Meteo sin API key; defaults: Medellín).
   GOOGLE_CALENDAR_ICS_URL: process.env.GOOGLE_CALENDAR_ICS_URL || "",
@@ -78,6 +106,14 @@ export const env = {
   // GTFS en ~/.hermes-os/gtfs/metro y de los JSON del humano (ver
   // docs/estacion-metro.md); sin feed las rutas responden el motivo.
   ESTACION_ENABLED: (process.env.HERMES_ESTACION || "").toLowerCase() !== "off",
+  // RuloView (/ruloview): presencia con la señal WiFi de 3 nodos ESP32 (fork
+  // ruloCode/RuView). RUVIEW_PATH = clon del repo (su start-rulostark-rust.sh
+  // arranca el servidor en Docker); vacío = no hay servidor que arrancar y la
+  // página lo dice. El token sale de <repo>/docker/.env salvo RUVIEW_API_TOKEN.
+  RULOVIEW_ENABLED: (process.env.HERMES_RULOVIEW || "").toLowerCase() !== "off",
+  RUVIEW_PATH: process.env.RUVIEW_PATH || "",
+  RUVIEW_URL: process.env.RUVIEW_URL || "http://127.0.0.1:3000",
+  RUVIEW_API_TOKEN: process.env.RUVIEW_API_TOKEN || "",
   // Linear (manejo de tareas). Personal API key (Settings → API en Linear).
   // Sin key, las tools de Linear responden con el CTA de configuración.
   LINEAR_API_KEY: process.env.LINEAR_API_KEY || "",
@@ -122,6 +158,9 @@ export const env = {
   LEARNING_MODEL: process.env.HERMES_LEARNING_MODEL || "claude-haiku-4-5",
   // Zona horaria por defecto de las tareas programadas (cron en hora local).
   SCHEDULED_TZ: process.env.HERMES_SCHEDULED_TZ || process.env.GOOGLE_CALENDAR_TZ || "America/Bogota",
+  // Avisos al teléfono (Hermes Phone) por día: el que se pasa se descarta con
+  // motivo, no se encola. Lo fija el dueño; 0 = Hermes nunca habla primero.
+  PHONE_NOTICES_PER_DAY: Number(process.env.HERMES_PHONE_NOTICES_PER_DAY || 3),
   // Composición (/composicion): "off" apaga /composicion/* con 404.
   COMPOSICION_ENABLED: (process.env.HERMES_COMPOSICION || "").toLowerCase() !== "off",
   // Carpeta madre de las sesiones grabadas (video de la cámara / memos): cada

@@ -166,7 +166,7 @@ export function LiveTranscript() {
                       style={{ borderColor: color, color }}
                     >
                       {liveSpeakerName(s.speaker, live.speakerNames, live.speakerOrder)}
-                      {live.selfSpeaker === s.speaker ? " · yo" : ""}
+                      {live.selfSpeaker === s.speaker && !live.isClass ? " · yo" : ""}
                     </button>
                   )}
                   <p
