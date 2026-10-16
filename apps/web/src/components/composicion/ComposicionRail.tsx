@@ -8,8 +8,7 @@
  * escrito, para que Hermes y tú lo tengan enfrente.
  */
 import { useState } from "react";
-import { Panel } from "@/components/ui/Panel";
-import { StatBlock } from "@/components/ui/StatBlock";
+import { Rail, RailRow, RailSection } from "@/components/ui/Rail";
 import { useComposicion } from "./ComposicionContext";
 import { DAILY_RITUAL, WRITING_DAYS } from "./mock";
 import { STAGES, fmtRelative } from "./labels";
@@ -36,80 +35,156 @@ export function ComposicionRail() {
   const today = [...songs].filter((s) => s.stage !== "terminada").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const stale = songs.filter((s) => s.stage !== "terminada" && Date.now() - new Date(s.updatedAt).getTime() > 7 * 86_400_000);
 
+  const sueltas = notebook.filter((n) => !n.songId).length;
+  const tarareos = notebook.filter((n) => n.kind === "tarareo").length;
+
   return (
-    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain">
-      <Panel title="Ritual de hoy" tone="accent" delay={60} className="shrink-0">
-        <div className="flex flex-col gap-1.5">
-          <div className="grid grid-cols-2 gap-2">
-            <StatBlock label="racha" value={streak} unit="días" tone="accent" />
-            <StatBlock label="esta semana" value={`${weekDays}/7`} tone="cyan" />
+    // v5: secciones sin caja (Rail). Los números van en el color del texto;
+    // el acento queda para lo que se marca (los días escritos, el ritual hecho).
+    <Rail>
+      <RailSection
+        label="Ritual de hoy"
+        right={
+          <span className="text-2xs text-text-faint tabular-nums">
+            {done}/{ritual.length}
+          </span>
+        }
+      >
+        <div className="flex flex-col gap-3 px-2">
+          <div className="flex items-baseline gap-6">
+            <div>
+              <div className="text-lg leading-tight font-semibold text-text tabular-nums">
+                {streak} <span className="text-sm font-normal text-text-dim">{streak === 1 ? "día" : "días"}</span>
+              </div>
+              <div className="text-xs text-text-faint">Racha</div>
+            </div>
+            <div>
+              <div className="text-lg leading-tight font-semibold text-text tabular-nums">
+                {weekDays}/7
+              </div>
+              <div className="text-xs text-text-faint">Esta semana</div>
+            </div>
           </div>
-          <div className="flex gap-0.5">
+          <div className="flex gap-0.5" aria-label="Últimos 28 días">
             {WRITING_DAYS.slice(-28).map((d, i) => (
-              <span key={i} className={`h-2 flex-1 rounded-xs ${d ? "bg-accent" : "bg-line"}`} title={d ? "escribiste" : "—"} />
+              <span
+                key={i}
+                className={`h-1.5 flex-1 rounded-full ${d ? "bg-accent" : "bg-selected"}`}
+                title={d ? "escribiste" : "—"}
+              />
             ))}
           </div>
-          <ul className="mt-1 flex flex-col gap-1">
-            {ritual.map((r) => (
-              <li key={r.id}>
-                <button
-                  onClick={() => setRitual((prev) => prev.map((x) => (x.id === r.id ? { ...x, done: !x.done } : x)))}
-                  className="flex w-full items-start gap-2 text-left"
-                >
-                  <span className={`mt-0.5 grid h-3.5 w-3.5 shrink-0 place-items-center rounded-xs border text-2xs ${r.done ? "border-accent bg-accent/20 text-accent" : "border-line text-transparent"}`}>✓</span>
-                  <span className="min-w-0">
-                    <span className={`block text-xs ${r.done ? "text-text-dim line-through" : "text-text"}`}>{r.label}</span>
-                    <span className="block text-2xs text-text-faint">{r.hint}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <span className="text-2xs text-text-faint">{done}/{ritual.length} · 15 minutos bastan (la racha es mock: irá al hábito "Componer").</span>
         </div>
-      </Panel>
-
-      <Panel title="Hoy toca" tone="cyan" delay={90} className="shrink-0">
-        {today ? (
-          <button onClick={() => setSelectedId(today.id)} className="flex w-full flex-col gap-1 text-left">
-            <span className="font-display text-sm tracking-title text-text uppercase hover:text-accent">{today.title}</span>
-            <span className="text-2xs text-text-dim">
-              {STAGES[today.stage].label}: {STAGES[today.stage].hint}
-            </span>
-            <span className="text-2xs text-text-faint">tocada {fmtRelative(today.updatedAt)}</span>
-          </button>
-        ) : (
-          <p className="text-xs text-text-dim">Sin canciones abiertas.</p>
-        )}
-        {stale.length > 0 && (
-          <div className="mt-2 border-t border-line pt-2">
-            <span className="text-2xs tracking-label text-amber uppercase">durmiendo +7 días</span>
-            {stale.map((s) => (
-              <button key={s.id} onClick={() => setSelectedId(s.id)} className="block text-xs text-text-dim hover:text-text">
-                {s.title} · {fmtRelative(s.updatedAt)}
+        <ul className="mt-2 flex flex-col">
+          {ritual.map((r) => (
+            <li key={r.id}>
+              <button
+                onClick={() => setRitual((prev) => prev.map((x) => (x.id === r.id ? { ...x, done: !x.done } : x)))}
+                role="checkbox"
+                aria-checked={r.done}
+                className="flex w-full cursor-pointer items-start gap-2.5 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-hover"
+              >
+                <span
+                  aria-hidden
+                  className={`mt-0.5 grid h-3.5 w-3.5 shrink-0 place-items-center rounded-xs border ${
+                    r.done ? "border-accent-solid bg-accent-solid text-on-accent" : "border-line-2"
+                  }`}
+                >
+                  {r.done && <CheckIcon />}
+                </span>
+                <span className="min-w-0">
+                  <span className={`block text-sm ${r.done ? "text-text-faint line-through" : "text-text"}`}>
+                    {r.label}
+                  </span>
+                  <span className="block text-xs text-text-faint">{r.hint}</span>
+                </span>
               </button>
+            </li>
+          ))}
+        </ul>
+        {/* Honestidad: la racha todavía no sale de un dato real. */}
+        <p className="mt-1 px-2 text-xs text-text-faint">
+          15 minutos bastan. La racha es de prueba: irá al hábito "Componer".
+        </p>
+      </RailSection>
+
+      <RailSection label="Hoy toca">
+        {today ? (
+          <>
+            <RailRow
+              title={today.title}
+              sub={`${STAGES[today.stage].label} · tocada ${fmtRelative(today.updatedAt)}`}
+              onClick={() => setSelectedId(today.id)}
+            />
+            {/* Qué significa la etapa: guía, no dato — en su propia línea, sin truncar. */}
+            <p className="px-2 text-xs text-text-faint">{STAGES[today.stage].hint}.</p>
+          </>
+        ) : (
+          <p className="px-2 text-sm text-text-faint">Sin canciones abiertas.</p>
+        )}
+      </RailSection>
+
+      {/* Durmiendo = estado (atención): el punto ámbar va en la fila, no en la etiqueta. */}
+      {stale.length > 0 && (
+        <RailSection
+          label="Durmiendo +7 días"
+          right={<span className="text-2xs text-text-faint tabular-nums">{stale.length}</span>}
+        >
+          <div className="flex flex-col">
+            {stale.map((s) => (
+              <RailRow
+                key={s.id}
+                tone="amber"
+                title={s.title}
+                value={fmtRelative(s.updatedAt)}
+                onClick={() => setSelectedId(s.id)}
+              />
             ))}
           </div>
-        )}
-      </Panel>
+        </RailSection>
+      )}
 
-      <Panel title="Cuaderno" tone="amber" delay={120} className="shrink-0">
-        <p className="text-xs text-text-dim">
-          <span className="font-mono text-text">{notebook.filter((n) => !n.songId).length}</span> ideas sueltas · <span className="font-mono text-text">{notebook.filter((n) => n.kind === "tarareo").length}</span> tarareos
-        </p>
-        <p className="mt-1 text-2xs text-text-faint italic">"{notebook[0]?.text}"</p>
-      </Panel>
+      <RailSection label="Cuaderno">
+        <div className="px-2">
+          <p className="text-sm text-text-dim">
+            <span className="text-text tabular-nums">{sueltas}</span>{" "}
+            {sueltas === 1 ? "idea suelta" : "ideas sueltas"} ·{" "}
+            <span className="text-text tabular-nums">{tarareos}</span>{" "}
+            {tarareos === 1 ? "tarareo" : "tarareos"}
+          </p>
+          {notebook[0]?.text && (
+            <p className="mt-1 line-clamp-2 text-xs text-text-faint italic">“{notebook[0].text}”</p>
+          )}
+        </div>
+      </RailSection>
 
-      <Panel title="Principios" delay={150} className="shrink-0">
-        <ol className="flex flex-col gap-1.5">
+      <RailSection label="Principios">
+        <ol className="flex flex-col gap-2 px-2">
           {PRINCIPLES.map((p, i) => (
-            <li key={i} className="flex gap-2 text-2xs leading-relaxed text-text-dim">
-              <span className="font-mono text-accent">{i + 1}</span>
+            <li key={i} className="flex gap-2.5 text-xs leading-relaxed text-text-dim">
+              <span className="w-3 shrink-0 text-text-faint tabular-nums">{i + 1}</span>
               <span>{p}</span>
             </li>
           ))}
         </ol>
-      </Panel>
-    </div>
+      </RailSection>
+    </Rail>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
   );
 }

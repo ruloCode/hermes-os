@@ -204,7 +204,7 @@ function PrivacyBody({ info, intro, onDone }: { info: PrivacyInfo; intro: boolea
         <button
           type="button"
           onClick={onDone}
-          className="self-end rounded-sm border border-accent bg-accent px-3 py-1 text-xs font-medium text-white hover:opacity-90"
+          className="self-end rounded-sm border border-accent bg-accent-solid px-3 py-1 text-xs font-medium text-on-accent hover:opacity-90"
         >
           Entendido
         </button>

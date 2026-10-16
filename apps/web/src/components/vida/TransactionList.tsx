@@ -9,17 +9,15 @@ import {
   type Wallet,
 } from "@hermes/shared";
 import { Badge } from "@/components/ui/Badge";
-import { CmdButton } from "@/components/ui/CmdButton";
+import { Button } from "@/components/ui/Button";
 import { PanelState } from "@/components/ui/PanelState";
+import { Segmented } from "@/components/ui/Segmented";
 import { CategoryIcon, categoryLabel } from "./categories";
 import { money } from "./FinanceSummary";
+import { FIELD, IconPencil } from "./kit";
 import { TransactionDetail } from "./TransactionDetail";
 
 const DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-
-// Campos de la captura manual: mismo borde/focus para inputs y selects.
-const FIELD =
-  "rounded-sm border border-line bg-transparent outline-none transition-colors focus:border-line-2";
 
 /** "2026-07-09" → "jue 09 jul" (sin Date local para no correrse de día). */
 function dayLabel(date: string): string {
@@ -42,19 +40,23 @@ interface EditDraft {
  * Movimientos agrupados POR DÍA (seguimiento diario: cada día con su total
  * gastado), con captura manual compacta — fecha de pago opcional (default
  * hoy) y billetera opcional (descuenta su saldo) — y edición/anulación inline.
+ *
+ * v5: la fila se lee de izquierda a derecha como un extracto — categoría (gris,
+ * con su icono), QUÉ fue (la nota, en tinta plena: es lo que buscas con los
+ * ojos), billetera como etiqueta neutra y el monto alineado a la derecha. Un
+ * gasto va en tinta normal con su "−"; solo el ingreso se pinta de verde: en
+ * un extracto casi todo es gasto, y una columna roja entera no avisa de nada.
+ * Sin borde por fila (eran 30 cajitas apiladas): hover y nada más.
  */
 export function TransactionList({
   transactions,
   wallets,
-  categoryColor,
   onAdd,
   onEdit,
   onVoid,
 }: {
   transactions: Transaction[];
   wallets: Wallet[];
-  /** color de los donuts por categoría — el icono mantiene la identidad. */
-  categoryColor?: (category: string) => string | undefined;
   onAdd: (input: {
     kind: TransactionKind;
     amount: number;
@@ -79,7 +81,7 @@ export function TransactionList({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Edición inline: un movimiento a la vez (✎ en la fila).
+  // Edición inline: un movimiento a la vez (lápiz en la fila).
   const [editingId, setEditingId] = useState<number | null>(null);
   const [edit, setEdit] = useState<EditDraft | null>(null);
 
@@ -193,146 +195,144 @@ export function TransactionList({
   }, [filtered]);
 
   return (
-    <div className="flex h-full flex-col gap-2">
-      {/* Captura manual */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <select
-          value={kind}
-          onChange={(e) => setKind(e.target.value as TransactionKind)}
-          className={`${FIELD} px-1.5 py-1 text-2xs ${kind === "income" ? "text-green" : "text-red"}`}
-        >
-          <option value="expense" className="bg-bg">Gasto</option>
-          <option value="income" className="bg-bg">Ingreso</option>
-        </select>
-        <input
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void add()}
-          placeholder="Monto"
-          inputMode="numeric"
-          className={`${FIELD} w-20 px-2 py-1 text-xs text-text tabular-nums`}
-        />
-        <select
-          value={currency}
-          onChange={(e) => setCurrency(e.target.value as Currency)}
-          className={`${FIELD} px-1.5 py-1 text-2xs text-text`}
-        >
-          <option value="COP" className="bg-bg">COP</option>
-          <option value="USD" className="bg-bg">USD</option>
-        </select>
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className={`${FIELD} px-1.5 py-1 text-2xs text-text`}
-        >
-          {FINANCE_CATEGORIES.map((c) => (
-            <option key={c} value={c} className="bg-bg">
-              {c}
-            </option>
-          ))}
-        </select>
-        {/* Billetera opcional: descuenta/suma su saldo */}
-        <select
-          value={account}
-          onChange={(e) => setAccount(e.target.value)}
-          title="Billetera (opcional): descuenta o suma su saldo"
-          className={`${FIELD} px-1.5 py-1 text-2xs ${account ? "text-cyan" : "text-text-dim"}`}
-        >
-          <option value="" className="bg-bg">sin billetera</option>
-          {wallets.map((w) => (
-            <option key={w.id} value={w.name} className="bg-bg">
-              {w.name}
-            </option>
-          ))}
-        </select>
-        {/* Fecha de pago opcional (default hoy) */}
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          title="Fecha de pago (opcional, default hoy)"
-          className={`${FIELD} px-1.5 py-[3px] text-2xs [color-scheme:dark] ${date ? "text-text" : "text-text-dim"}`}
-        />
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void add()}
-          placeholder="Nota…"
-          className={`${FIELD} min-w-0 flex-1 px-2 py-1 text-xs text-text`}
-        />
-        {/* Wrapper shrink-0: .cmd-btn trae width:100% y aquí va inline */}
-        <div className="shrink-0">
-          <CmdButton
-            size="sm"
-            onClick={() => void add()}
-            disabled={!amount.trim()}
-            loading={saving}
+    <div className="flex h-full flex-col">
+      {/* Captura manual: dos líneas que no se desarman — qué, cuánto y de dónde
+          arriba; cuándo, nota y el botón abajo. Todo a h-8, como <Button
+          size="md">; los selects crecen para cerrar la fila a ras. */}
+      <div className="flex flex-col gap-2 border-b border-line p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented
+            ariaLabel="Tipo de movimiento"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: "expense", label: "Gasto" },
+              { value: "income", label: "Ingreso" },
+            ]}
+          />
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void add()}
+            placeholder="Monto"
+            aria-label="Monto"
+            inputMode="numeric"
+            className={`${FIELD} w-24 tabular-nums`}
+          />
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Currency)}
+            aria-label="Moneda"
+            className={FIELD}
           >
-            Registrar
-          </CmdButton>
+            <option value="COP">COP</option>
+            <option value="USD">USD</option>
+          </select>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            aria-label="Categoría"
+            className={`${FIELD} min-w-28 flex-1`}
+          >
+            {FINANCE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {categoryLabel(c)}
+              </option>
+            ))}
+          </select>
+          {/* Billetera opcional: descuenta/suma su saldo */}
+          <select
+            value={account}
+            onChange={(e) => setAccount(e.target.value)}
+            title="Billetera (opcional): descuenta o suma su saldo"
+            aria-label="Billetera"
+            className={`${FIELD} min-w-28 flex-1 ${account ? "" : "text-text-faint"}`}
+          >
+            <option value="">Sin billetera</option>
+            {wallets.map((w) => (
+              <option key={w.id} value={w.name}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Fecha de pago opcional (default hoy) */}
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            title="Fecha de pago (opcional, default hoy)"
+            aria-label="Fecha de pago"
+            className={`${FIELD} ${date ? "" : "text-text-faint"}`}
+          />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void add()}
+            placeholder="Nota (opcional)…"
+            aria-label="Nota"
+            className={`${FIELD} min-w-40 flex-1`}
+          />
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => void add()}
+            disabled={!amount.trim() || saving}
+          >
+            {saving ? "Registrando…" : "Registrar"}
+          </Button>
         </div>
       </div>
 
       {/* Búsqueda + filtros + totales del conjunto visible */}
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-line pt-2">
+      <div className="flex flex-wrap items-center gap-2 px-3 pt-3">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar nota, categoría, billetera…"
           aria-label="Buscar movimientos"
-          className={`${FIELD} min-w-32 flex-1 px-2 py-1 text-xs text-text`}
+          className={`${FIELD} min-w-40 flex-1`}
         />
-        <div className="flex gap-1" role="group" aria-label="Filtrar por tipo">
-          {(
-            [
-              ["all", "Todos"],
-              ["expense", "Gastos"],
-              ["income", "Ingresos"],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setKindFilter(k)}
-              className={`rounded-sm border px-2 py-0.5 text-2xs tracking-label transition-colors ${
-                kindFilter === k
-                  ? "border-accent text-accent"
-                  : "border-line text-text-dim hover:border-line-2 hover:text-text"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          ariaLabel="Filtrar por tipo"
+          value={kindFilter}
+          onChange={setKindFilter}
+          options={[
+            { value: "all", label: "Todos" },
+            { value: "expense", label: "Gastos" },
+            { value: "income", label: "Ingresos" },
+          ]}
+        />
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
           aria-label="Filtrar por categoría"
-          className={`${FIELD} px-1.5 py-1 text-2xs ${categoryFilter ? "text-cyan" : "text-text-dim"}`}
+          className={`${FIELD} ${categoryFilter ? "" : "text-text-dim"}`}
         >
-          <option value="" className="bg-bg">todas las categorías</option>
+          <option value="">Todas las categorías</option>
           {presentCategories.map((c) => (
-            <option key={c} value={c} className="bg-bg">
+            <option key={c} value={c}>
               {categoryLabel(c)}
             </option>
           ))}
         </select>
       </div>
-      <div className="flex items-baseline justify-between px-1 text-2xs text-text-dim tabular-nums">
-        <span>
-          {filtered.length} mov{filtered.length === 1 ? "" : "s"}
+      <div className="flex items-baseline justify-between gap-3 px-5 pt-3 pb-1 text-xs tabular-nums">
+        <span className="text-text-faint">
+          {filtered.length} movimiento{filtered.length === 1 ? "" : "s"}
           {filtered.length !== transactions.length && ` de ${transactions.length}`}
         </span>
-        <span>
+        <span className="flex gap-3">
           {(totals.spentCop > 0 || totals.spentUsd > 0) && (
-            <span className="text-red">
+            <span className="text-text-dim">
               −{totals.spentCop > 0 && money(totals.spentCop, "COP")}
               {totals.spentCop > 0 && totals.spentUsd > 0 && " · "}
               {totals.spentUsd > 0 && money(totals.spentUsd, "USD")}
             </span>
           )}
           {(totals.inCop > 0 || totals.inUsd > 0) && (
-            <span className="ml-2 text-green">
+            <span className="text-green">
               +{totals.inCop > 0 && money(totals.inCop, "COP")}
               {totals.inCop > 0 && totals.inUsd > 0 && " · "}
               {totals.inUsd > 0 && money(totals.inUsd, "USD")}
@@ -342,29 +342,32 @@ export function TransactionList({
       </div>
 
       {/* Días */}
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {days.length === 0 && (
           <PanelState
             kind="empty"
             compact
             title={filtered.length === 0 && transactions.length > 0 ? "Sin resultados" : "Sin movimientos aún"}
+            hint={
+              filtered.length === 0 && transactions.length > 0
+                ? "Prueba con otra búsqueda o quita los filtros."
+                : "Regístralo arriba o díselo a Hermes: “gasté 20 mil en un almuerzo”."
+            }
           />
         )}
         {days.map((g) => (
-          <div key={g.date}>
-            {/* Header del día con su total gastado */}
-            <div className="mb-1 flex items-baseline justify-between border-b border-line px-1 pb-0.5">
-              <span className="text-2xs tracking-label text-accent uppercase">
-                {dayLabel(g.date)}
-              </span>
-              <span className="text-2xs text-text-dim tabular-nums">
+          <section key={g.date} className="pt-3">
+            {/* Encabezado del día con su total gastado */}
+            <div className="flex items-baseline justify-between gap-2 border-b border-line px-2 pb-1.5">
+              <span className="text-xs font-medium text-text-dim">{dayLabel(g.date)}</span>
+              <span className="text-xs text-text-faint tabular-nums">
                 {g.spentCop > 0 && <>gastado {money(g.spentCop, "COP")}</>}
                 {g.spentCop > 0 && g.spentUsd > 0 && " · "}
                 {g.spentUsd > 0 && <>{money(g.spentUsd, "USD")}</>}
                 {g.spentCop === 0 && g.spentUsd === 0 && "sin gastos"}
               </span>
             </div>
-            <div className="space-y-1">
+            <div className="flex flex-col pt-1">
               {g.items.map((t) =>
                 editingId === t.id && edit ? (
                   // Fila en edición: mismos campos de la captura, compactos.
@@ -374,62 +377,61 @@ export function TransactionList({
                       if (e.key === "Enter") void commitEdit(t);
                       if (e.key === "Escape") setEditingId(null);
                     }}
-                    className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-2 px-2 py-1"
+                    className="my-1 flex flex-col gap-2 rounded-sm bg-hover p-2"
                   >
-                    <select
-                      value={edit.kind}
-                      onChange={(e) => setEdit({ ...edit, kind: e.target.value as TransactionKind })}
-                      className={`${FIELD} px-1.5 py-1 text-2xs ${edit.kind === "income" ? "text-green" : "text-red"}`}
-                    >
-                      <option value="expense" className="bg-bg">Gasto</option>
-                      <option value="income" className="bg-bg">Ingreso</option>
-                    </select>
-                    <input
-                      autoFocus
-                      value={edit.amount}
-                      onChange={(e) => setEdit({ ...edit, amount: e.target.value })}
-                      inputMode="numeric"
-                      className={`${FIELD} w-24 px-2 py-1 text-xs text-text tabular-nums`}
-                    />
-                    <select
-                      value={edit.category}
-                      onChange={(e) => setEdit({ ...edit, category: e.target.value })}
-                      className={`${FIELD} px-1.5 py-1 text-2xs text-text`}
-                    >
-                      {FINANCE_CATEGORIES.map((c) => (
-                        <option key={c} value={c} className="bg-bg">
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      value={edit.date}
-                      onChange={(e) => setEdit({ ...edit, date: e.target.value })}
-                      className={`${FIELD} px-1.5 py-[3px] text-2xs text-text [color-scheme:dark]`}
-                    />
-                    <input
-                      value={edit.note}
-                      onChange={(e) => setEdit({ ...edit, note: e.target.value })}
-                      placeholder="Nota…"
-                      className={`${FIELD} min-w-24 flex-1 px-2 py-1 text-xs text-text`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void commitEdit(t)}
-                      title="Guardar cambios (Enter)"
-                      className="shrink-0 text-xs text-green transition-colors hover:text-text"
-                    >
-                      ✓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingId(null)}
-                      title="Cancelar (Esc)"
-                      className="shrink-0 text-xs text-text-dim transition-colors hover:text-text"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Segmented
+                        ariaLabel="Tipo de movimiento"
+                        value={edit.kind}
+                        onChange={(k) => setEdit({ ...edit, kind: k })}
+                        options={[
+                          { value: "expense", label: "Gasto" },
+                          { value: "income", label: "Ingreso" },
+                        ]}
+                      />
+                      <input
+                        autoFocus
+                        value={edit.amount}
+                        onChange={(e) => setEdit({ ...edit, amount: e.target.value })}
+                        inputMode="numeric"
+                        aria-label="Monto"
+                        className={`${FIELD} w-28 tabular-nums`}
+                      />
+                      <select
+                        value={edit.category}
+                        onChange={(e) => setEdit({ ...edit, category: e.target.value })}
+                        aria-label="Categoría"
+                        className={`${FIELD} min-w-28 flex-1`}
+                      >
+                        {FINANCE_CATEGORIES.map((c) => (
+                          <option key={c} value={c}>
+                            {categoryLabel(c)}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="date"
+                        value={edit.date}
+                        onChange={(e) => setEdit({ ...edit, date: e.target.value })}
+                        aria-label="Fecha"
+                        className={FIELD}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={edit.note}
+                        onChange={(e) => setEdit({ ...edit, note: e.target.value })}
+                        placeholder="Nota…"
+                        aria-label="Nota"
+                        className={`${FIELD} min-w-0 flex-1`}
+                      />
+                      <Button size="md" variant="ghost" onClick={() => setEditingId(null)}>
+                        Cancelar
+                      </Button>
+                      <Button size="md" variant="primary" onClick={() => void commitEdit(t)}>
+                        Guardar
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   // Fila clicable (patrón Monarch/Midday): abre el detalle con
@@ -446,28 +448,23 @@ export function TransactionList({
                       }
                     }}
                     title="Ver detalle"
-                    className="group flex cursor-pointer items-center gap-2 rounded-sm border border-line px-2 py-1 transition-colors hover:border-line-2 hover:bg-panel-2 focus-visible:border-line-2"
+                    className="group flex min-w-0 cursor-pointer items-center gap-3 rounded-sm px-2 py-1.5 transition-colors hover:bg-hover"
                   >
-                    <span className="flex w-24 shrink-0 items-center gap-1.5 text-2xs text-text-dim">
-                      <span
-                        className="shrink-0"
-                        style={{ color: categoryColor?.(t.category) ?? "var(--color-text-faint)" }}
-                      >
-                        <CategoryIcon category={t.category} className="h-3 w-3" />
-                      </span>
-                      <span className="truncate">{categoryLabel(t.category)}</span>
+                    <span className="flex w-32 shrink-0 items-center gap-2 text-text-dim">
+                      <CategoryIcon category={t.category} className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate text-xs">{categoryLabel(t.category)}</span>
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-text">
+                      {t.note || <span className="text-text-faint">Sin nota</span>}
                     </span>
                     {t.account && (
                       <Badge tone="neutral" size="sm">
                         {t.account}
                       </Badge>
                     )}
-                    <span className="min-w-0 flex-1 truncate text-2xs text-text-dim">
-                      {t.note ?? ""}
-                    </span>
                     <span
-                      className={`shrink-0 font-display text-xs tabular-nums ${
-                        t.kind === "income" ? "text-green" : "text-red"
+                      className={`w-28 shrink-0 text-right text-sm tabular-nums ${
+                        t.kind === "income" ? "text-green" : "text-text"
                       }`}
                     >
                       {t.kind === "income" ? "+" : "−"}
@@ -481,15 +478,15 @@ export function TransactionList({
                       }}
                       title="Editar movimiento"
                       aria-label="Editar movimiento"
-                      className="shrink-0 text-xs text-text-dim opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-text"
+                      className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-xs text-text-faint opacity-0 transition-[opacity,color,background-color] group-hover:opacity-100 hover:bg-hover hover:text-text focus-visible:opacity-100"
                     >
-                      ✎
+                      <IconPencil size={13} />
                     </button>
                   </div>
                 ),
               )}
             </div>
-          </div>
+          </section>
         ))}
       </div>
 
@@ -497,7 +494,6 @@ export function TransactionList({
       {selected && (
         <TransactionDetail
           transaction={selected}
-          categoryColor={categoryColor}
           onEdit={onEdit}
           onVoid={onVoid}
           onClose={() => setSelected(null)}

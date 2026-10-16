@@ -5,12 +5,17 @@
 // convertir en tarea del proyecto Inglés en Linear (Hermes la crea con
 // contexto + Copy prompt). Los drills además alimentan {{practice_context}}:
 // el tutor abre la próxima clase calentando con ellos.
+//
+// v5: los subtítulos dejan de ir en cyan/ámbar con mayúsculas (eran etiquetas,
+// no estados) y cada drill deja de ser una caja: filas con una hairline, el
+// texto en el color de lectura y la acción como botón fantasma.
 
 import { useMemo, useState } from "react";
 import type { EnglishSession } from "@hermes/shared";
+import { Button } from "@/components/ui/Button";
 import { PanelState } from "@/components/ui/PanelState";
 import { createLinearTask } from "@/lib/hermes";
-import { extractBullets, extractSection, fmtDate, latestReported } from "./report-utils";
+import { extractBullets, extractSection, fmtDate, fmtDay, latestReported } from "./report-utils";
 
 export function EnglishRecs({ sessions }: { sessions: EnglishSession[] }) {
   const [sent, setSent] = useState<Set<string>>(new Set());
@@ -48,32 +53,64 @@ export function EnglishRecs({ sessions }: { sessions: EnglishSession[] }) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain pr-1">
-      <div>
-        <h3 className="text-2xs tracking-label text-cyan uppercase">
-          Drills · próxima sesión
-        </h3>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col">
+        <h3 className="px-2 pb-1 text-xs font-medium text-text-dim">Drills para la próxima sesión</h3>
         {drills.length === 0 && (
-          <p className="mt-1 text-2xs text-text-dim">El último reporte no trae drills.</p>
+          <p className="px-2 text-xs text-text-faint">El último reporte no trae drills.</p>
         )}
-        <ul className="mt-1 space-y-1.5">
+        <ul className="flex flex-col">
           {drills.map((d) => (
-            <li key={d} className="flex items-start gap-2 rounded-sm border border-line px-2 py-1.5">
-              <span className="min-w-0 flex-1 text-xs leading-snug text-text">{d}</span>
+            <li
+              key={d}
+              className="flex flex-col gap-1.5 border-t border-line px-2 py-2.5 first:border-t-0"
+            >
+              <p className="text-sm leading-relaxed text-text">{d}</p>
               {sent.has(d) ? (
-                <span className="shrink-0 text-2xs text-green" title="Tarea creada en Linear">
-                  ✓ tarea
+                <span
+                  className="flex items-center gap-1.5 text-xs text-text-faint"
+                  title="Tarea creada en Linear"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                    className="text-green"
+                  >
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  Tarea creada en Linear
                 </span>
               ) : (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   onClick={() => void toTask(d)}
                   disabled={busy === d}
                   title="Crear tarea en Linear (proyecto Inglés)"
-                  className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-2xs tracking-label text-text-dim uppercase transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
+                  className="-ml-2.5 self-start"
+                  icon={
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      aria-hidden
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  }
                 >
-                  {busy === d ? "…" : "→ tarea"}
-                </button>
+                  {busy === d ? "Creando…" : "Convertir en tarea"}
+                </Button>
               )}
             </li>
           ))}
@@ -81,18 +118,18 @@ export function EnglishRecs({ sessions }: { sessions: EnglishSession[] }) {
       </div>
 
       {patterns.length > 0 && (
-        <div>
-          <h3 className="text-2xs tracking-label text-amber uppercase">Se repiten</h3>
-          <ul className="mt-1 space-y-1 text-xs leading-snug text-text-dim">
+        <div className="flex flex-col gap-1.5">
+          <h3 className="px-2 text-xs font-medium text-text-dim">Se repiten</h3>
+          <ul className="flex list-disc flex-col gap-1.5 pr-2 pl-6 text-sm leading-relaxed text-text-dim marker:text-text-faint">
             {patterns.map((p) => (
-              <li key={p}>• {p}</li>
+              <li key={p}>{p}</li>
             ))}
           </ul>
         </div>
       )}
 
-      <p className="mt-auto shrink-0 border-t border-line pt-1.5 text-2xs text-text-faint">
-        Del reporte del {fmtDate(source.started_at)} — el tutor abre la próxima sesión con estos
+      <p className="px-2 text-xs text-text-faint">
+        Del reporte del {fmtDay(source.started_at)}: el tutor abre la próxima sesión con estos
         drills.
       </p>
     </div>

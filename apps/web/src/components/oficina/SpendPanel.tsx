@@ -258,7 +258,7 @@ export function SpendPanel({
               <p className="text-xs text-text-dim">Por proyecto{data.byModel ? " y por modelo" : ""}</p>
               <div className="flex rounded-lg border border-line p-0.5 text-xs" role="tablist">
                 {(["today", "week"] as const).map((r) => (
-                  <button key={r} type="button" role="tab" aria-selected={range === r} onClick={() => setRange(r)} className={`rounded-md px-2.5 py-1 ${range === r ? "bg-accent text-white" : "text-text-dim hover:text-text"}`}>
+                  <button key={r} type="button" role="tab" aria-selected={range === r} onClick={() => setRange(r)} className={`rounded-md px-2.5 py-1 ${range === r ? "bg-accent-solid text-on-accent" : "text-text-dim hover:text-text"}`}>
                     {r === "today" ? "Hoy" : "7 días"}
                   </button>
                 ))}

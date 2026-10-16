@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClaudeExecConfig } from "@/lib/hermes";
 
 /**
@@ -63,53 +63,96 @@ export function ClaudeExecBar({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
+  // El popover se cierra con clic fuera o Esc (sin robarle el Esc al composer
+  // cuando está cerrado).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+
+  const ghost =
+    "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-xs px-2 text-xs text-text-dim transition-colors hover:bg-hover hover:text-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent";
+
+  // v5: vive DENTRO del composer, en su barra de herramientas (patrón del
+  // selector de modelo de Claude/ChatGPT/Cursor). Los ajustes se abren en un
+  // popover hacia arriba en vez de empujar la vista.
   return (
-    <div className="mt-2 rounded-sm border border-line">
-      {/* Barra resumen + acciones */}
-      <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex items-center gap-1.5 text-2xs tracking-[0.18em] text-accent uppercase"
-          title="Configurar cómo se ejecuta en Claude Code"
-        >
-          <span>⚡ Claude Code</span>
-          <span className="text-text-dim">
-            {labelOf(CLAUDE_MODELS, config.model)} · {labelOf(CLAUDE_EFFORTS, config.effort)} ·{" "}
-            {labelOf(CLAUDE_PERMISSIONS, config.permissionMode)}
+    <div ref={ref} className="relative flex min-w-0 items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={`${ghost} min-w-0`}
+        title="Configurar cómo se ejecuta en Claude Code"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="shrink-0 text-accent">
+          <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
+        </svg>
+        <span className="truncate">
+          {labelOf(CLAUDE_MODELS, config.model)}
+          <span className="text-text-faint">
+            {" "}
+            · {labelOf(CLAUDE_EFFORTS, config.effort)} · {labelOf(CLAUDE_PERMISSIONS, config.permissionMode)}
           </span>
-          <span className="text-text-dim">{open ? "▴" : "▾"}</span>
-        </button>
+        </span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 text-text-faint transition-transform ${open ? "rotate-180" : ""}`}>
+          <path d="m6 15 6-6 6 6" />
+        </svg>
+      </button>
 
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onRun("terminal")}
-            title="Abrir una Terminal.app real con claude corriendo"
-            className="rounded-sm border border-line-2 px-2 py-1 text-2xs tracking-[0.15em] text-text uppercase transition-colors disabled:opacity-40"
-          >
-            ▶ Terminal
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onRun("embedded")}
-            title="Ejecutar aquí, en el panel embebido"
-            className="rounded-sm bg-accent/15 px-2 py-1 text-2xs tracking-[0.15em] text-accent-hot uppercase transition-colors disabled:opacity-40"
-          >
-            ▣ Panel
-          </button>
-        </div>
-      </div>
+      <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-line" />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onRun("embedded")}
+        title="Ejecutar en Claude Code aquí, en la consola"
+        className={ghost}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+          <path d="m7.5 9.5 2.8 2.5-2.8 2.5" />
+        </svg>
+        Consola
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onRun("terminal")}
+        title="Abrir una Terminal.app real con claude corriendo"
+        className={`${ghost} max-sm:hidden`}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+        </svg>
+        Terminal
+      </button>
 
       {/* Controles */}
       {open && (
-        <div className="space-y-2 border-t border-line px-2 py-2">
+        <div
+          role="dialog"
+          aria-label="Ejecución de Claude Code"
+          className="absolute bottom-full left-0 z-40 mb-2 w-[min(400px,calc(100vw-48px))] space-y-3 rounded-md border border-line bg-panel p-3 shadow-[var(--shadow-pop)]"
+        >
+          <div className="text-xs font-medium text-text">Ejecutar con Claude Code</div>
           <Field label="Modelo">
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {CLAUDE_MODELS.map((m) => (
                 <Segment
                   key={m.value}
@@ -123,7 +166,7 @@ export function ClaudeExecBar({
           </Field>
 
           <Field label="Esfuerzo">
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {CLAUDE_EFFORTS.map((e) => (
                 <Segment
                   key={e.value}
@@ -138,7 +181,7 @@ export function ClaudeExecBar({
 
           <div>
             <Field label="Permisos">
-              <div className="flex gap-1">
+              <div className="flex flex-wrap gap-1">
                 {CLAUDE_PERMISSIONS.map((p) => (
                   <Segment
                     key={p.value}
@@ -151,8 +194,8 @@ export function ClaudeExecBar({
               </div>
             </Field>
             {config.permissionMode === "manual" && (
-              <p className="mt-1 pl-[72px] text-2xs tracking-[0.1em] text-amber">
-                “Manual” solo aplica en ▶ Terminal; en ▣ Panel (headless) equivale a “default”.
+              <p className="mt-1.5 pl-[76px] text-xs text-amber">
+                “Manual” solo aplica en Terminal; en la consola (headless) equivale a “default”.
               </p>
             )}
           </div>
@@ -164,10 +207,8 @@ export function ClaudeExecBar({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-2xs tracking-label text-text-dim uppercase">
-        {label}
-      </span>
+    <div className="flex items-start gap-2">
+      <span className="w-[68px] shrink-0 pt-1 text-xs text-text-faint">{label}</span>
       {children}
     </div>
   );
@@ -187,10 +228,10 @@ function Segment({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-sm px-1.5 py-0.5 text-2xs tracking-[0.1em] transition-colors ${
+      className={`h-7 cursor-pointer rounded-xs px-2 text-xs transition-colors ${
         active
-          ? "bg-cyan/15 text-cyan inset-ring inset-ring-cyan"
-          : "bg-transparent text-text-dim inset-ring inset-ring-line"
+          ? "bg-selected font-medium text-text ring-1 ring-line-2"
+          : "text-text-dim hover:bg-hover hover:text-text"
       }`}
     >
       {children}

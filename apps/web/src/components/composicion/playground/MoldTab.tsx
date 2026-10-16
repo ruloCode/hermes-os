@@ -324,7 +324,7 @@ function MoldRow({
           onBlur={commitRhyme}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           placeholder="—"
-          className={`${field} w-10 text-center font-mono uppercase ${ov.rhyme ? "border-accent/50" : ""}`}
+          className={`${field} w-10 text-center font-mono ${ov.rhyme ? "border-accent/50" : ""}`}
           aria-label="Letra de rima"
         />
       </td>

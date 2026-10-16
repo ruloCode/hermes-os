@@ -235,7 +235,7 @@ export function DonutChart({
             <span className="text-2xs text-text-faint">{emptyHint}</span>
           ) : hoveredArc ? (
             <>
-              <span className="flex items-center gap-1 text-2xs tracking-label text-text-dim uppercase">
+              <span className="flex items-center gap-1 text-2xs text-text-dim">
                 <span
                   aria-hidden
                   className="inline-block h-1.5 w-1.5 rounded-full"
@@ -254,7 +254,7 @@ export function DonutChart({
           ) : (
             <>
               {centerLabel && (
-                <span className="text-2xs tracking-label text-text-dim uppercase">
+                <span className="text-2xs text-text-dim">
                   {centerLabel}
                 </span>
               )}

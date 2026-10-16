@@ -55,7 +55,7 @@ export function Toggle({
         }}
       >
         <span
-          className={`absolute rounded-[3px] ${checked ? "glow-box-accent" : ""}`}
+          className="absolute rounded-[3px]"
           style={{
             top: s.pad,
             left: s.pad,
@@ -68,7 +68,7 @@ export function Toggle({
         />
       </span>
       {label && (
-        <span className="text-2xs tracking-label text-text-dim uppercase">{label}</span>
+        <span className="text-2xs text-text-dim">{label}</span>
       )}
     </button>
   );

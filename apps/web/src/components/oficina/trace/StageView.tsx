@@ -216,7 +216,7 @@ export function StageView({
               <p className="text-[19px] font-semibold text-text">{worker.approval.tool === "ExitPlanMode" ? "Propone un plan" : "Pide permiso para ejecutar"}</p>
               <p className="truncate font-mono text-[18px] text-text">{worker.approval.detail}</p>
             </div>
-            <button type="button" disabled={deciding} onClick={() => onDecide(true)} className="shrink-0 rounded-md bg-accent px-4 py-1.5 text-[19px] font-medium text-white disabled:opacity-50" data-stage-approve>
+            <button type="button" disabled={deciding} onClick={() => onDecide(true)} className="shrink-0 rounded-md bg-accent-solid px-4 py-1.5 text-[19px] font-medium text-on-accent disabled:opacity-50" data-stage-approve>
               Aprobar (A)
             </button>
             <button type="button" disabled={deciding} onClick={() => onDecide(false)} className="shrink-0 rounded-md border border-line px-4 py-1.5 text-[19px] text-text hover:border-red hover:text-red disabled:opacity-50">
@@ -261,7 +261,7 @@ export function StageView({
           >
             {dictating ? "■ Parar" : `🎤 Dictar (${padConnected ? "X" : "M"})`}
           </button>
-          <button type="submit" disabled={sending || !voice.text.trim() || dictating || simulated || !!replay} className="shrink-0 rounded-md bg-accent px-4 py-1.5 text-[18px] font-medium text-white disabled:opacity-40">
+          <button type="submit" disabled={sending || !voice.text.trim() || dictating || simulated || !!replay} className="shrink-0 rounded-md bg-accent-solid px-4 py-1.5 text-[18px] font-medium text-on-accent disabled:opacity-40">
             {sending ? "Enviando…" : `Enviar (${padConnected ? "A" : "Enter"})`}
           </button>
         </form>

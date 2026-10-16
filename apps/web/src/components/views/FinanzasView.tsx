@@ -21,16 +21,20 @@
 //    movimientos, porque ahí sí hay algo que se opera.
 //  - RIEL: billeteras, presupuestos y asesor, con la misma piel que el riel del
 //    home. El contexto se ve igual en las diez rutas.
+//
+// v5 (2026-10): la cabecera del mes pasó de dos donuts al 100 % y un gauge
+// con un "% de ahorro" negativo de cuatro cifras a una fila de cifras con
+// contexto real (ver FinanceSummary.tsx). En pantallas anchas el centro gana espacio (8/4): es
+// donde se lee y se registra; el riel es contexto.
 
-import { useMemo } from "react";
 import { useVidaContext } from "@/state/VidaProvider";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ScrollArea } from "@/components/ui/ScrollArea";
 import { RailSection } from "@/components/ui/Rail";
 import {
-  buildVidaSlices,
   CurrencyToggle,
   FinanceSummaryPanel,
+  monthLabel,
 } from "@/components/vida/FinanceSummary";
 import { WalletsPanel } from "@/components/vida/WalletsPanel";
 import { BudgetsPanel } from "@/components/vida/BudgetsPanel";
@@ -40,30 +44,32 @@ import { AdvisorChat } from "@/components/vida/AdvisorChat";
 
 export function FinanzasView() {
   const vida = useVidaContext();
-  // Mismo mapa categoría→color de los donuts, para pintar los movimientos.
-  const { colorFor } = useMemo(() => buildVidaSlices(vida.summary), [vida.summary]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader
         title="Finanzas"
-        meta={vida.summary?.month}
+        meta={vida.summary ? monthLabel(vida.summary.month) : undefined}
         actions={<CurrencyToggle currency={vida.currency} onCurrency={vida.setCurrency} />}
       />
 
       {/* lg: la fila mide el alto disponible, así las columnas scrollean
           adentro en vez de crecer con los movimientos. */}
-      <div className="grid min-h-0 flex-1 grid-cols-12 gap-x-6 gap-y-3 overflow-hidden max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-12 gap-x-8 gap-y-6 overflow-hidden max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
         {/* ── Centro: el mes, su ritmo, y la lista ───────────────────── */}
-        <div className="col-span-12 flex min-h-0 flex-col lg:col-span-7">
+        <div className="col-span-12 flex min-h-0 flex-col lg:col-span-7 xl:col-span-8">
           <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
-            <div className="flex flex-col gap-7">
+            <div className="flex flex-col gap-10 pt-1 pb-2">
               {/* Sin caja: esto ES el encabezado del mes, no un objeto más. */}
-              <FinanceSummaryPanel summary={vida.summary} currency={vida.currency} />
+              <FinanceSummaryPanel
+                summary={vida.summary}
+                prevSummary={vida.prevSummary}
+                currency={vida.currency}
+              />
 
-              {/* La dimensión TIEMPO que los donuts no dan: barras por día. */}
-              <section className="flex flex-col gap-2.5">
-                <span className="text-2xs text-text-faint">Ritmo del mes</span>
+              {/* La dimensión TIEMPO que la composición no da: barras por día. */}
+              <section className="flex flex-col gap-3">
+                <h2 className="text-sm font-medium text-text">Ritmo del mes</h2>
                 <MonthPulse
                   transactions={vida.transactions}
                   summary={vida.summary}
@@ -75,15 +81,12 @@ export function FinanzasView() {
 
               {/* La ÚNICA caja del centro: aquí sí hay un objeto que se opera
                   (registrar, filtrar, abrir el detalle de un movimiento). */}
-              <section className="overflow-hidden rounded-md border border-line bg-panel">
-                <h3 className="border-b border-line px-3 py-2.5 text-xs font-medium text-text-dim">
-                  Movimientos por día
-                </h3>
-                <div className="p-3">
+              <section className="flex flex-col gap-3">
+                <h2 className="text-sm font-medium text-text">Movimientos por día</h2>
+                <div className="overflow-hidden rounded-md border border-line bg-panel">
                   <TransactionList
                     transactions={vida.transactions}
                     wallets={vida.wallets}
-                    categoryColor={colorFor}
                     onAdd={vida.addTransaction}
                     onEdit={vida.editTransaction}
                     onVoid={vida.removeTransaction}
@@ -97,14 +100,14 @@ export function FinanzasView() {
         {/* ── Riel: saldo, presupuestos y asesor ─────────────────────── */}
         <aside
           aria-label="Contexto"
-          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-5 lg:border-l lg:pl-6"
+          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-5 lg:border-l lg:pl-6 xl:col-span-4"
         >
           <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
-            <div className="flex min-h-full flex-col gap-7">
-              <RailSection label="Saldo · billeteras">
+            <div className="flex min-h-full flex-col gap-8 pt-1">
+              <RailSection label="Saldo">
                 <WalletsPanel wallets={vida.wallets} fx={vida.fx} onSave={vida.saveWallet} />
               </RailSection>
-              <RailSection label="Presupuestos">
+              <RailSection label="Presupuestos del mes">
                 <BudgetsPanel
                   summary={vida.summary}
                   budgets={vida.budgets}

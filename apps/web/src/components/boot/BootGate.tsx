@@ -17,8 +17,9 @@ import { useHermesDataContext } from "@/state/HermesDataProvider";
 import { useDashboard } from "@/state/DashboardProvider";
 import { useAgentEventsContext } from "@/state/AgentEventsProvider";
 import { BootLoader } from "./BootLoader";
+import { BOOTED_SESSION_KEY } from "@/state/theme-init";
 
-const MIN_MS = 1200;   // exhibición mínima antes de completar (anti-parpadeo)
+const MIN_MS = 700;    // exhibición mínima antes de completar (anti-parpadeo)
 const SOFT_MS = 2400;  // ya hay datos críticos pero falta el snapshot → no esperes más
 const HARD_MS = 6500;  // tope: dispara aunque el agente esté offline
 
@@ -40,9 +41,17 @@ export function BootGate({ children }: { children: React.ReactNode }) {
   const [finish, setFinish] = useState(false);
   const startRef = useRef<number | null>(null);
 
-  // Marca de tiempo de arranque (cliente).
+  // Marca de tiempo de arranque (cliente). Si esta pestaña ya vio la cortina
+  // (recarga, ⌘R tras un deploy), no se repite: el script de <head> ya la
+  // ocultó con `data-booted` antes del primer paint; aquí solo se desmonta.
+  // Antes cada recarga costaba ~2,5 s de animación aunque todo estuviera listo.
   useEffect(() => {
     startRef.current = performance.now();
+    try {
+      if (sessionStorage.getItem(BOOTED_SESSION_KEY)) setShowLoader(false);
+    } catch {
+      /* modo privado: se ve la cortina, nada más */
+    }
   }, []);
 
   // Progreso ponderado por fuentes reales. Discreto (salta al resolver cada
@@ -103,7 +112,14 @@ export function BootGate({ children }: { children: React.ReactNode }) {
           progress={progress}
           finish={finish}
           labels={labels}
-          onDone={() => setShowLoader(false)}
+          onDone={() => {
+            try {
+              sessionStorage.setItem(BOOTED_SESSION_KEY, "1");
+            } catch {
+              /* sin storage: la próxima recarga la vuelve a mostrar */
+            }
+            setShowLoader(false);
+          }}
         />
       )}
     </>

@@ -21,7 +21,7 @@ export function DataRow({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-2 py-0.5">
-      <span className="flex items-baseline gap-1.5 text-2xs tracking-label text-text-dim uppercase">
+      <span className="flex items-baseline gap-1.5 text-2xs text-text-dim">
         {icon && <span aria-hidden>{icon}</span>}
         {label}
       </span>

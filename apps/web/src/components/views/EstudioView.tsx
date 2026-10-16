@@ -10,11 +10,19 @@
  * (Mistral Le Chat / Grok File Chat / Copilot Pages: documento al centro,
  * chat al lado, los cambios se aplican en vivo). Radar y Planeación viven en
  * sus propias secciones. Datos: EstudioProvider (poll /content/board).
+ *
+ * v5 (2026-10): la vista abre con ViewHeader y las secciones van en su
+ * Segmented. Antes no había título (la pantalla no decía dónde estabas) y
+ * cada sección envolvía su contenido en un Panel "hero" con título — una caja
+ * dentro del lienzo que ya es la hoja. Ahora la lista ES la pantalla; solo
+ * el chat de la pieza se separa, como columna con hairline (patrón del riel).
  */
 import { useEffect, useState } from "react";
 import { useEstudioContext } from "@/state/EstudioProvider";
-import { Panel } from "@/components/ui/Panel";
 import { PanelState } from "@/components/ui/PanelState";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { Segmented } from "@/components/ui/Segmented";
+import { ScrollArea } from "@/components/ui/ScrollArea";
 import { EstudioPipeline } from "@/components/estudio/EstudioPipeline";
 import { PieceWorkspace } from "@/components/estudio/PieceWorkspace";
 import { EstudioRadar } from "@/components/estudio/EstudioRadar";
@@ -54,122 +62,124 @@ export function EstudioView() {
 
   if (loaded && !online)
     return (
-      <Panel title="Estudio" variant="hero" className="flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ViewHeader title="Estudio" />
         <PanelState
           kind="offline"
           title="Agente fuera de línea"
           hint="El pipeline vive en el agente local."
         />
-      </Panel>
+      </div>
     );
   if (loaded && online && !board.available)
     return (
-      <Panel title="Estudio" variant="hero" className="flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ViewHeader title="Estudio" />
         <PanelState
           kind="empty"
           title="Sin Supabase"
           hint="Aplica las migraciones 016/017 para activar el Estudio."
         />
-      </Panel>
+      </div>
     );
 
   const activas = board.pieces.filter((p) => p.status !== "descartada").length;
+  const inPiece = section === "produccion" && selected != null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* Selector de sección: el resto de la pantalla es UNA cosa */}
-      <div className="flex shrink-0 gap-0.5 self-start rounded-sm border border-line p-0.5">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSection(s.id)}
-            title={s.hint}
-            className={`rounded-xs px-3 py-1 text-2xs tracking-label uppercase ${
-              section === s.id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      <ViewHeader
+        title="Estudio"
+        // En la pieza, el ← vuelve a la lista (el mismo Esc de siempre). La
+        // pieza pone su propio título grande debajo: aquí basta la etiqueta.
+        onBack={inPiece ? () => setSelectedId(null) : undefined}
+        backLabel="Piezas"
+        meta={
+          inPiece
+            ? (selected?.week_label ?? undefined)
+            : loaded
+              ? `${activas} ${activas === 1 ? "pieza activa" : "piezas activas"}`
+              : undefined
+        }
+        tabs={
+          <Segmented
+            ariaLabel="Secciones del Estudio"
+            value={section}
+            onChange={setSection}
+            options={SECTIONS.map((s) => ({
+              value: s.id,
+              label: s.label,
+              title: s.hint,
+              count:
+                !loaded || s.id === "planeacion"
+                  ? undefined
+                  : s.id === "produccion"
+                    ? activas
+                    : board.refs.length,
+            }))}
+          />
+        }
+      />
 
       {/* Producción SIN pieza: la lista ES la pantalla (entrada del takeover). */}
       {section === "produccion" && !selected && (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <Panel
-            title={`Piezas · ${activas}`}
-            variant="hero"
-            delay={40}
-            className="min-h-[320px] flex-1"
-            padding="sm"
-          >
-            <div className="mx-auto flex h-full w-full max-w-3xl min-h-0 flex-col">
-              <EstudioPipeline />
-            </div>
-          </Panel>
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
+          <EstudioPipeline />
         </div>
       )}
 
       {/* Producción CON pieza: takeover — la pieza a todo el ancho y el chat
-          de la pieza como panel derecho (colapsable). ← o Esc vuelven. */}
-      {section === "produccion" && selected && (
+          de la pieza como columna derecha (colapsable). ← o Esc vuelven. */}
+      {inPiece && (
         /* La fila lg va FIJADA a minmax(0,1fr): sin eso la fila del grid mide
-           su contenido, el overflow-hidden recorta el resto y el chat "no
-           scrollea". En angosto se apila y scrollea la página (auto-rows-min). */
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
+           su contenido y el chat "no scrollea". Sin overflow-hidden a
+           propósito: recortaría la columna del chat, que sale a sangre con
+           márgenes negativos. En angosto se apila y scrollea la página. */
+        <div
+          className={`grid min-h-0 flex-1 grid-cols-1 gap-x-6 gap-y-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] ${
+            chatOpen ? "lg:grid-cols-[minmax(0,1fr)_360px]" : ""
+          }`}
+        >
           {/* min-w-0: sin esto el contenido largo fija el ancho mínimo de la
               columna del grid y empuja el chat fuera de la pantalla. */}
-          <div className="flex min-h-0 min-w-0 flex-col">
-            <Panel
-              title={`Pieza · ${selected.week_label ?? selected.format}`}
-              variant="hero"
-              delay={40}
-              className="min-h-[520px] flex-1 lg:min-h-0"
-              padding="sm"
-            >
-              <PieceWorkspace
-                onBack={() => setSelectedId(null)}
-                chatOpen={chatOpen}
-                onToggleChat={() => setChatOpen(!chatOpen)}
-              />
-            </Panel>
+          <div className="flex min-h-[520px] min-w-0 flex-col lg:min-h-0">
+            <PieceWorkspace chatOpen={chatOpen} onToggleChat={() => setChatOpen(!chatOpen)} />
           </div>
           {chatOpen && (
-            <div className="flex min-h-0 min-w-0 flex-col">
-              <Panel
-                title="Chat de la pieza"
-                delay={80}
-                className="min-h-[320px] flex-1 lg:min-h-0"
-                padding="sm"
-              >
+            /* El chat es una columna con hairline (patrón del riel), no una
+               tarjeta: sube hasta la línea de la cabecera (-mt-8 = mb-5 del
+               ViewHeader + gap-3) y baja hasta el borde del lienzo. */
+            <aside
+              aria-label="Chat de la pieza"
+              className="flex min-h-[320px] min-w-0 flex-col border-line max-lg:border-t max-lg:pt-3 lg:-mt-8 lg:-mr-6 lg:-mb-5 lg:min-h-0 lg:border-l"
+            >
+              <p className="shrink-0 px-4 pt-4 pb-2 text-2xs font-medium text-text-faint">
+                Chat de la pieza
+              </p>
+              <div className="min-h-0 flex-1 px-3 pb-3">
                 <PieceChat piece={selected} />
-              </Panel>
-            </div>
+              </div>
+            </aside>
           )}
         </div>
       )}
 
+      {/* -mt-3/pt-3: el fade superior del ScrollArea no se come la primera
+          fila (los 12px de máscara caen sobre el aire, no sobre el contenido). */}
       {section === "radar" && (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <Panel
-            title="Radar · tendencias y referencias"
-            variant="hero"
-            delay={40}
-            className="h-full"
-            padding="sm"
-            scroll
-          >
-            <div className="mx-auto w-full max-w-3xl">
-              <EstudioRadar />
-            </div>
-          </Panel>
-        </div>
+        <ScrollArea rail fade="y" className="-mt-3 min-h-0 flex-1">
+          <div className="mx-auto w-full max-w-3xl pt-3 pb-4">
+            <EstudioRadar />
+          </div>
+        </ScrollArea>
       )}
 
       {section === "planeacion" && (
-        <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-1 gap-3 overflow-y-auto overscroll-contain md:grid-cols-2 xl:grid-cols-4">
-          <EstudioRail />
-        </div>
+        <ScrollArea rail fade="y" className="-mt-3 min-h-0 flex-1">
+          <div className="mx-auto w-full max-w-5xl pt-3 pb-4">
+            <EstudioRail />
+          </div>
+        </ScrollArea>
       )}
 
       {/* Modo grabación: takeover a pantalla completa (portal). Se abre desde

@@ -136,15 +136,15 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
             <Badge tone={STATUS_META[status ?? t.status].tone}>
               {STATUS_META[status ?? t.status].label}
             </Badge>
-            <span className="text-2xs tracking-label text-cyan uppercase">{t.project_slug}</span>
-            <span className="text-2xs tracking-label text-text-dim uppercase">
-              · {SOURCE_LABEL[t.source] ?? t.source}
-            </span>
+            <span className="text-xs text-text-dim">{t.project_slug}</span>
+            <span className="text-xs text-text-faint">· {SOURCE_LABEL[t.source] ?? t.source}</span>
           </div>
           {t.detail && <p className="text-xs leading-snug text-text-dim">{t.detail}</p>}
           {t.exec_prompt && (
-            <details className="text-2xs">
-              <summary className="cursor-pointer text-accent">prompt de ejecución</summary>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-xs text-text-dim hover:text-text">
+                Prompt de ejecución
+              </summary>
               <p className="mt-1 leading-snug whitespace-pre-wrap text-text-dim">
                 {t.exec_prompt}
               </p>
@@ -155,34 +155,34 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
             {status === "pending" && (
               <>
                 <ActBtn tone="green" disabled={busy || running} onClick={() => void execNow()}>
-                  ▶ Ejecutar
+                  Ejecutar
                 </ActBtn>
                 <ActBtn tone="green" onClick={() => void changeStatus("done")}>
-                  ✓ Marcar hecha
+                  Marcar hecha
                 </ActBtn>
                 <ActBtn tone="dim" onClick={() => void changeStatus("dismissed")}>
-                  ✕ Ignorar
+                  Ignorar
                 </ActBtn>
               </>
             )}
             {status === "running" && (
               <>
                 <ActBtn tone="green" onClick={() => void changeStatus("done")}>
-                  ✓ Marcar hecha
+                  Marcar hecha
                 </ActBtn>
                 <ActBtn tone="amber" onClick={() => void changeStatus("pending")}>
-                  ↩ Devolver a pendiente
+                  Devolver a pendiente
                 </ActBtn>
               </>
             )}
             {status === "done" && (
               <ActBtn tone="amber" onClick={() => void changeStatus("pending")}>
-                ↩ Reabrir
+                Reabrir
               </ActBtn>
             )}
             {status === "dismissed" && (
               <ActBtn tone="amber" onClick={() => void changeStatus("pending")}>
-                ↩ Reactivar
+                Reactivar
               </ActBtn>
             )}
           </div>
@@ -216,6 +216,7 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
           )
         ) : (
           <ClaudeTerminal
+            embedded
             project={target.project}
             runId={runId}
             sessionId={sessionId}
@@ -258,7 +259,7 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
                   ? "El run está activo… espera a que termine para continuar"
                   : "Continuar o enviar otro prompt a esta tarea…"
               }
-              className="max-h-[90px] min-h-[30px] flex-1 resize-none rounded-sm border border-line bg-transparent px-2 py-1 text-xs leading-snug text-text outline-none transition-colors focus:border-line-2 disabled:opacity-40"
+              className="max-h-[90px] min-h-8 flex-1 resize-none rounded-sm border border-line bg-panel px-3 py-1.5 text-sm leading-snug text-text outline-none transition-colors placeholder:text-text-faint focus:border-line-2 disabled:opacity-50"
             />
             {/* UN solo botón: sin texto continúa donde quedó; con texto envía
                 ese prompt (mismo send(), misma sesión — patrón follow-up). */}
@@ -270,12 +271,12 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
                   : "Continuar donde se quedó (resume la sesión)"
               }
               disabled={running || busy}
-              className="cmd-btn !w-auto !border-cyan !text-cyan disabled:opacity-40"
+              className="inline-flex h-8 shrink-0 cursor-pointer items-center rounded-sm bg-accent-solid px-3 text-sm font-medium text-on-accent transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:bg-selected disabled:text-text-faint"
             >
-              {busy ? "…" : draft.trim() ? "▶ Enviar" : "↻ Continuar"}
+              {busy ? "Enviando…" : draft.trim() ? "Enviar" : "Continuar"}
             </button>
           </div>
-          <p className="mt-1 text-2xs text-text-dim">
+          <p className="mt-1.5 text-xs text-text-faint">
             {running
               ? "El run sigue corriendo en el agente aunque navegues. Podrás continuar al terminar."
               : "Reanuda la MISMA conversación de la tarea con un run nuevo."}
@@ -286,11 +287,12 @@ export function TaskDetail({ target }: { target: DetailTarget | null }) {
   );
 }
 
-// Botón de acción del panel: icono + label completo (nunca glyph suelto).
+// Botón de acción del panel: label completo, sin glifos. `green` = la acción
+// principal (primario índigo), el resto secundario/fantasma.
 const ACT_CLASS = {
-  green: "border-green text-green",
-  amber: "border-amber text-amber",
-  dim: "border-text-dim text-text-dim",
+  green: "border border-line bg-panel text-text hover:border-line-2 hover:bg-hover",
+  amber: "border border-line bg-panel text-text hover:border-line-2 hover:bg-hover",
+  dim: "text-text-dim hover:bg-hover hover:text-text",
 } as const;
 
 function ActBtn({
@@ -309,7 +311,7 @@ function ActBtn({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-sm border bg-panel-2 px-2 py-1 text-2xs tracking-label uppercase opacity-85 transition-opacity hover:opacity-100 disabled:opacity-40 ${ACT_CLASS[tone]}`}
+      className={`inline-flex h-7 cursor-pointer items-center rounded-sm px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${ACT_CLASS[tone]}`}
     >
       {children}
     </button>
@@ -338,28 +340,36 @@ function ExecutionsList({
     );
   }
   return (
-    <div className="h-full space-y-1.5 overflow-y-auto pr-1">
+    <div className="h-full space-y-0.5 overflow-y-auto pr-1">
       {executions.map((e) => (
         <button
           key={e.id}
           type="button"
           onClick={() => onOpen(e.id)}
-          className="flex w-full items-start justify-between gap-2 rounded-sm border border-line bg-panel-2 px-2.5 py-2 text-left transition-colors hover:border-accent"
+          className="flex w-full min-w-0 cursor-pointer items-start justify-between gap-2 rounded-sm px-2 py-2 text-left transition-colors hover:bg-hover"
         >
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2 text-2xs tracking-label text-text-dim uppercase">
-              <span className={e.status === "done" ? "text-green" : "text-red"}>
-                ● {e.status === "done" ? "hecha" : "error"}
+            <span className="flex items-center gap-2 text-xs text-text-faint">
+              <span className="inline-flex items-center gap-1.5 text-text-dim">
+                <span
+                  aria-hidden
+                  className={`h-1.5 w-1.5 rounded-full ${e.status === "done" ? "bg-green" : "bg-red"}`}
+                />
+                {e.status === "done" ? "Hecha" : "Error"}
               </span>
-              <span>{e.kind === "continue" ? "continuación" : "ejecución"}</span>
-              <span>· {e.created_at.slice(0, 16).replace("T", " ")}</span>
+              <span>{e.kind === "continue" ? "Continuación" : "Ejecución"}</span>
+              <span className="font-mono tabular-nums">
+                {e.created_at.slice(0, 16).replace("T", " ")}
+              </span>
               {e.cost_usd != null && <span>· ${e.cost_usd.toFixed(2)}</span>}
             </span>
-            <span className="mt-1 block truncate text-xs text-text">
+            <span className="mt-1 block truncate text-sm text-text">
               {e.result_snippet || "—"}
             </span>
           </span>
-          <span className="text-2xs text-accent">→</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-1 shrink-0 text-text-faint">
+            <path d="m9 6 6 6-6 6" />
+          </svg>
         </button>
       ))}
     </div>

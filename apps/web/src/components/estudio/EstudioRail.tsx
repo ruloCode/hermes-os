@@ -1,21 +1,22 @@
 "use client";
 
 /**
- * Riel del ESTUDIO: próxima sesión de grabación (checklist vivo), colchón de
- * piezas programadas (regla: ≥3 SIEMPRE), agenda de publicación de los
- * próximos 7 días y progreso del pipeline.
+ * Planeación del ESTUDIO: próxima sesión de grabación (checklist vivo),
+ * colchón de piezas programadas (regla: ≥3 SIEMPRE), agenda de publicación
+ * de los próximos 7 días y progreso del pipeline.
  */
 import { useState } from "react";
 import { STAGES, daysInStage, isStuck, stageReady } from "@hermes/shared";
 import type { ContentSession } from "@hermes/shared";
 import { useEstudioContext } from "@/state/EstudioProvider";
-import { Panel } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { RailRow, RailSection } from "@/components/ui/Rail";
 import { pieceBeats, recordedCount } from "@/lib/script-beats";
 import { PILLARS, STATUSES, STATUS_ORDER, fmtDays, fmtPublish } from "./labels";
 
-const btnCls =
-  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent";
+const fieldCls =
+  "h-8 rounded-sm border border-line bg-panel px-3 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
 
 export function EstudioRail() {
   const { board, patchSession, createSession, buildBatch, setSelectedId, setRecording } =
@@ -64,63 +65,50 @@ export function EstudioRail() {
   const listas = board.pieces.filter((p) => p.status === "guion" && stageReady(p));
 
   return (
-    <>
-      {listas.length > 0 && (
-        <Panel title="Listas para grabar" delay={100} tone="accent" className="shrink-0">
-          <div className="flex flex-col">
-            {listas.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedId(p.id)}
-                className="flex items-baseline gap-2 rounded-xs px-0.5 py-0.5 text-left hover:bg-panel-2"
-              >
-                <span className="min-w-0 flex-1 truncate text-xs text-text-dim hover:text-text">
-                  {p.title}
-                </span>
-                <span className="shrink-0 text-2xs text-text-faint tabular-nums">
-                  {fmtDays(daysInStage(p))}
-                </span>
-                <Badge tone={PILLARS[p.pillar].tone} variant="solid" size="sm">
-                  {PILLARS[p.pillar].short}
-                </Badge>
-              </button>
-            ))}
-          </div>
-          <button
-            className={`${btnCls} mt-1.5 w-full`}
-            disabled={building}
-            onClick={() => {
-              setBuilding(true);
-              void buildBatch(listas.map((p) => p.id)).finally(() => setBuilding(false));
-            }}
-            title="Crea la sesión del sábado con estas piezas y las pasa a grabación"
+    // Dos columnas que se leen por tema: a la izquierda lo que toca GRABAR, a
+    // la derecha lo que va a SALIR. v5: secciones sin caja (RailSection) — la
+    // única con marco es la sesión, porque es la que se opera.
+    <div className="grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-2">
+      <div className="flex min-w-0 flex-col gap-8">
+        {listas.length > 0 && (
+          <RailSection
+            label="Listas para grabar"
+            right={<span className="text-2xs text-text-faint tabular-nums">{listas.length}</span>}
           >
-            {building ? "Armando…" : `⛭ Armar batch del sábado (${listas.length})`}
-          </button>
-        </Panel>
-      )}
-      <Panel title="Próxima sesión" delay={140} tone="cyan" className="shrink-0">
-        {upcoming ? (
-          <SessionCard session={upcoming} onPatch={patchSession} />
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs text-text-faint">Sin sesión planeada.</p>
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="Batch #N"
-              className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
-            />
-            <input
-              type="datetime-local"
-              value={newAt}
-              onChange={(e) => setNewAt(e.target.value)}
-              className="rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text tabular-nums focus:border-accent focus:outline-none"
-              aria-label="Fecha de la sesión"
-            />
-            <button
-              className={btnCls}
-              onClick={() => {
+            <div className="flex flex-col">
+              {listas.map((p) => (
+                <RailRow
+                  key={p.id}
+                  title={p.title}
+                  sub={`${PILLARS[p.pillar].short} · guion listo hace ${fmtDays(daysInStage(p))}`}
+                  onClick={() => setSelectedId(p.id)}
+                />
+              ))}
+            </div>
+            <div className="mt-2 px-2">
+              <Button
+                variant="primary"
+                disabled={building}
+                onClick={() => {
+                  setBuilding(true);
+                  void buildBatch(listas.map((p) => p.id)).finally(() => setBuilding(false));
+                }}
+                title="Crea la sesión del sábado con estas piezas y las pasa a grabación"
+              >
+                {building ? "Armando…" : `Armar batch del sábado (${listas.length})`}
+              </Button>
+            </div>
+          </RailSection>
+        )}
+
+        <RailSection label="Próxima sesión">
+          {upcoming ? (
+            <SessionCard session={upcoming} onPatch={patchSession} />
+          ) : (
+            <form
+              className="flex flex-col gap-2 rounded-md border border-line bg-panel p-3"
+              onSubmit={(e) => {
+                e.preventDefault();
                 if (!newTitle.trim()) return;
                 void createSession({
                   title: newTitle.trim(),
@@ -134,151 +122,155 @@ export function EstudioRail() {
                 setNewAt("");
               }}
             >
-              ＋ Planear sesión
-            </button>
-          </div>
-        )}
+              <p className="text-sm text-text-dim">Sin sesión planeada.</p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="Batch #N"
+                  aria-label="Nombre de la sesión"
+                  className={`${fieldCls} min-w-0 flex-1`}
+                />
+                <input
+                  type="datetime-local"
+                  value={newAt}
+                  onChange={(e) => setNewAt(e.target.value)}
+                  className={`${fieldCls} tabular-nums`}
+                  aria-label="Fecha de la sesión"
+                />
+              </div>
+              <div>
+                <Button type="submit" disabled={!newTitle.trim()}>
+                  Planear sesión
+                </Button>
+              </div>
+            </form>
+          )}
+        </RailSection>
 
         {/* Lista de rodaje: qué se graba y cuánto de su guion ya está grabado.
-            ▶ abre el teleprompter de esa pieza sin pasar por el workspace. */}
+            "Grabar" abre el teleprompter de esa pieza sin pasar por el workspace. */}
         {porGrabar.length > 0 && (
-          <div className="mt-2 border-t border-line pt-1.5">
-            <p className="text-2xs tracking-label text-text-faint uppercase">
-              Por grabar · {porGrabar.length}
-            </p>
-            <div className="mt-1 flex flex-col">
+          <RailSection
+            label="Por grabar"
+            right={<span className="text-2xs text-text-faint tabular-nums">{porGrabar.length}</span>}
+          >
+            <div className="flex flex-col">
               {porGrabar.map((p) => {
                 const beats = pieceBeats(p);
                 const done = recordedCount(p, beats);
+                const complete = beats.length > 0 && done === beats.length;
                 return (
-                  <div key={p.id} className="flex items-center gap-2 rounded-xs px-0.5 py-0.5">
+                  <div
+                    key={p.id}
+                    className="group flex items-center gap-2 rounded-sm px-2 py-1 transition-colors hover:bg-hover"
+                  >
                     <button
                       onClick={() => setSelectedId(p.id)}
-                      className="min-w-0 flex-1 truncate text-left text-xs text-text-dim hover:text-text"
+                      className="min-w-0 flex-1 cursor-pointer truncate py-0.5 text-left text-sm text-text"
                     >
                       {p.title}
                     </button>
                     <span
-                      className={`shrink-0 text-2xs tabular-nums ${
-                        beats.length && done === beats.length ? "text-green" : "text-text-faint"
-                      }`}
+                      className={`shrink-0 text-xs tabular-nums ${complete ? "text-green" : "text-text-faint"}`}
+                      title="Bloques del guion con toma"
                     >
                       {done}/{beats.length}
                     </span>
-                    <button
+                    <Button
+                      variant="ghost"
                       onClick={() => setRecording(p.id)}
                       title="Abrir el teleprompter de esta pieza"
                       disabled={!beats.length}
-                      className="shrink-0 rounded-xs border border-line-2 px-1.5 text-2xs text-text-dim hover:border-red hover:text-red disabled:opacity-35"
                     >
-                      ▶
-                    </button>
+                      Grabar
+                    </Button>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </RailSection>
         )}
-      </Panel>
+      </div>
 
-      <Panel
-        title="Colchón de piezas"
-        delay={180}
-        variant={buffer < 3 ? "alert" : "default"}
-        tone={buffer < 3 ? "amber" : "green"}
-        className="shrink-0"
-      >
-        <div className="flex items-center gap-3">
-          <div className="flex gap-1.5">
-            {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="h-2.5 w-7 rounded-xs"
-                style={{
-                  background:
-                    i < buffer
-                      ? buffer < 3
-                        ? "var(--color-amber)"
-                        : "var(--color-green)"
-                      : "var(--color-line-2)",
-                }}
-              />
-            ))}
-          </div>
-          <p className="text-xs text-text-dim">
-            <span className="font-display tabular-nums">{buffer}/3</span> programadas
-            {buffer < 3 ? " — bajo mínimo, el próximo batch debe reponer" : " — colchón sano"}
-          </p>
-        </div>
-      </Panel>
-
-      <Panel title="Próximos 7 días" delay={220} className="shrink-0">
-        {week.length ? (
-          <div className="flex flex-col gap-1">
-            {week.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedId(p.id)}
-                className="flex items-center gap-2 rounded-sm px-1 py-1 text-left hover:bg-panel-2"
-              >
-                <span className="w-24 shrink-0 text-2xs text-cyan uppercase tabular-nums">
-                  {fmtPublish(p.publish_at)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-xs text-text">{p.title}</span>
-                <Badge tone={PILLARS[p.pillar].tone} variant="solid" size="sm">
-                  {PILLARS[p.pillar].short}
-                </Badge>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-text-faint">Nada agendado los próximos 7 días.</p>
-        )}
-      </Panel>
-
-      <Panel title="Pipeline" delay={260} className="shrink-0">
-        <div className="grid grid-cols-3 gap-1.5">
-          {counts.map(({ status, n }) => (
-            <div
-              key={status}
-              className="rounded-sm bg-panel-2 px-2 py-1.5"
-              title={`${STAGES[status].meaning}\n${STAGES[status].work}`}
-            >
-              <div className="font-display text-sm text-text tabular-nums">{n}</div>
-              <div className="text-2xs tracking-label text-text-faint uppercase">
-                {STATUSES[status].label}
-              </div>
+      <div className="flex min-w-0 flex-col gap-8">
+        {/* Colchón: regla de la casa, ≥3 programadas SIEMPRE. Bajo mínimo es
+            estado (ámbar); sano, verde. */}
+        <RailSection label="Colchón de piezas">
+          <div className="flex items-center gap-3 px-2">
+            <div className="flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className={`h-1.5 w-8 rounded-full ${
+                    i < buffer ? (buffer < 3 ? "bg-amber" : "bg-green") : "bg-selected"
+                  }`}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+            <p className="text-sm text-text-dim">
+              <span className="font-medium text-text tabular-nums">{buffer}/3</span> programadas
+              {buffer < 3 ? " — bajo mínimo, el próximo batch debe reponer" : " — colchón sano"}
+            </p>
+          </div>
+        </RailSection>
+
+        <RailSection label="Próximos 7 días">
+          {week.length ? (
+            <div className="flex flex-col">
+              {week.map((p) => (
+                <RailRow
+                  key={p.id}
+                  title={p.title}
+                  sub={fmtPublish(p.publish_at)}
+                  value={PILLARS[p.pillar].short}
+                  onClick={() => setSelectedId(p.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="px-2 text-sm text-text-faint">Nada agendado los próximos 7 días.</p>
+          )}
+        </RailSection>
+
+        <RailSection label="Pipeline">
+          <div className="grid grid-cols-3 gap-x-4 gap-y-3 px-2 sm:grid-cols-6">
+            {counts.map(({ status, n }) => (
+              <div key={status} title={`${STAGES[status].meaning}\n${STAGES[status].work}`}>
+                <div
+                  className={`text-lg leading-tight font-semibold tabular-nums ${n ? "text-text" : "text-text-faint"}`}
+                >
+                  {n}
+                </div>
+                <div className="text-xs text-text-faint">{STATUSES[status].label}</div>
+              </div>
+            ))}
+          </div>
+        </RailSection>
+
         {/* Atascadas: llevan más días de los sanos en su etapa o ya se les pasó
             la fecha. Es el dato que evita que una pieza se muera en silencio. */}
         {stuck.length > 0 && (
-          <div className="mt-2 border-t border-line pt-1.5">
-            <p className="text-2xs tracking-label text-amber uppercase">
-              Atascadas · {stuck.length}
-            </p>
-            <div className="mt-1 flex flex-col">
+          <RailSection
+            label="Atascadas"
+            right={<span className="text-2xs text-text-faint tabular-nums">{stuck.length}</span>}
+          >
+            <div className="flex flex-col">
               {stuck.slice(0, 4).map((p) => (
-                <button
+                <RailRow
                   key={p.id}
+                  tone="amber"
+                  title={p.title}
+                  sub={STATUSES[p.status].label}
+                  value={fmtDays(daysInStage(p))}
                   onClick={() => setSelectedId(p.id)}
-                  className="flex items-baseline gap-2 rounded-xs px-0.5 py-0.5 text-left hover:bg-panel-2"
-                >
-                  <span className="w-16 shrink-0 text-2xs text-amber uppercase tabular-nums">
-                    {fmtDays(daysInStage(p))}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-text-dim">{p.title}</span>
-                  <span className="shrink-0 text-2xs text-text-faint uppercase">
-                    {STATUSES[p.status].label}
-                  </span>
-                </button>
+                />
               ))}
             </div>
-          </div>
+          </RailSection>
         )}
-      </Panel>
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -294,41 +286,65 @@ function SessionCard({
       checklist: session.checklist.map((c, i) => (i === idx ? { ...c, done: !c.done } : c)),
     });
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2 rounded-md border border-line bg-panel p-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-display text-sm text-text tabular-nums">
+        <span className="text-sm font-medium text-text tabular-nums">
           {session.scheduled_at ? fmtPublish(session.scheduled_at) : session.title}
         </span>
         {session.status === "en_curso" && (
-          <span className="text-2xs tracking-label text-red uppercase">● grabando</span>
+          <Badge tone="cyan" size="sm">
+            Grabando
+          </Badge>
         )}
       </div>
-      {session.scheduled_at && <p className="text-2xs text-text-dim">{session.title}</p>}
-      <div className="flex flex-col">
+      {session.scheduled_at && <p className="-mt-1 text-xs text-text-faint">{session.title}</p>}
+      <div className="-mx-1 flex flex-col">
         {session.checklist.map((c, i) => (
           <button
             key={`${c.label}-${i}`}
             onClick={() => toggle(i)}
-            className="flex items-baseline gap-2 px-0.5 py-0.5 text-left"
+            role="checkbox"
+            aria-checked={c.done}
+            className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-1 text-left transition-colors hover:bg-hover"
           >
-            <span className={`text-2xs ${c.done ? "text-green" : "text-text-faint"}`}>
-              {c.done ? "[✓]" : "[ ]"}
+            <span
+              aria-hidden
+              className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-xs border ${
+                c.done ? "border-accent-solid bg-accent-solid text-on-accent" : "border-line-2"
+              }`}
+            >
+              {c.done && (
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              )}
             </span>
-            <span className={`text-xs ${c.done ? "text-text-faint" : "text-text-dim"}`}>
+            <span className={`text-sm ${c.done ? "text-text-faint line-through" : "text-text"}`}>
               {c.label}
             </span>
           </button>
         ))}
       </div>
-      {session.status === "planeada" ? (
-        <button className={btnCls} onClick={() => void onPatch(session.id, { status: "en_curso" })}>
-          ▶ Iniciar sesión
-        </button>
-      ) : (
-        <button className={btnCls} onClick={() => void onPatch(session.id, { status: "completada" })}>
-          ✓ Completar sesión
-        </button>
-      )}
+      <div>
+        {session.status === "planeada" ? (
+          <Button variant="primary" onClick={() => void onPatch(session.id, { status: "en_curso" })}>
+            Iniciar sesión
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={() => void onPatch(session.id, { status: "completada" })}>
+            Completar sesión
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

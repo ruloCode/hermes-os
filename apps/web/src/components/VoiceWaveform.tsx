@@ -78,7 +78,7 @@ export function VoiceWaveform({
     }
 
     // Llamada activa: frecuencias reales del SDK a 60fps.
-    const accent = readToken("--color-accent-hot", "#e89a7d");
+    const accent = readToken("--color-accent-hot", "#a5a7fa");
     const cyan = readToken("--color-cyan", "#67e8f9");
     const faint = readToken("--color-text-faint", "#6b74a8");
     let raf = 0;

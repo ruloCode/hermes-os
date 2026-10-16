@@ -1,13 +1,27 @@
 "use client";
 
 import type { Goal } from "@hermes/shared";
-import { BarMeter } from "@/components/ui/BarMeter";
-import { CmdButton } from "@/components/ui/CmdButton";
+import { Button } from "@/components/ui/Button";
 import { PanelState } from "@/components/ui/PanelState";
+import { IconCheck, num, Progress } from "./kit";
+
+const MONTHS_SHORT = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/** "2026-12-31" → "31 dic" (sin Date local para no correrse de día). */
+function dueLabel(date: string): string {
+  const [, m, d] = date.split("-").map(Number);
+  return MONTHS_SHORT[m - 1] ? `${d} ${MONTHS_SHORT[m - 1]}` : date;
+}
 
 /**
- * Metas activas: BarMeter continuo current/target (o hitos como checklist
- * con dot para metas cualitativas) con +1 rápido para las numéricas.
+ * Metas activas: progreso current/target (o hitos como checklist para metas
+ * cualitativas) con +1 rápido para las numéricas.
+ *
+ * v5: eran tarjetas con borde, la cifra en cyan, la barra del acento y el
+ * "0 %" pintado del color de la barra. Un 0 % no es un error ni una señal: es
+ * el punto de partida, y va en gris tenue. La barra es neutra y solo se vuelve
+ * verde al cumplirse (eso SÍ es un estado). Las metas son filas del riel,
+ * separadas por una hairline, no cajas.
  */
 export function GoalsPanel({
   goals,
@@ -30,69 +44,84 @@ export function GoalsPanel({
   }
 
   return (
-    <div className="flex h-full flex-col gap-2 overflow-y-auto pr-1">
+    <ul className="flex flex-col divide-y divide-line">
       {goals.map((g) => {
         const doneMilestones = g.milestones.filter((m) => m.done).length;
         // Progreso real: numérico (current/target) o por hitos completados.
         const numeric = g.target_value != null && g.target_value > 0;
         const value = numeric ? g.current_value : doneMilestones;
-        const max = numeric ? (g.target_value as number) : g.milestones.length || 1;
-        const pct = Math.min(value / max, 1);
+        const max = numeric ? (g.target_value as number) : g.milestones.length;
+        const pct = max > 0 ? Math.min(value / max, 1) : 0;
+        const done = max > 0 && pct >= 1;
+        const pctLabel = Math.round(pct * 100);
 
         return (
-          <div key={g.id} className="rounded-sm border border-line px-2.5 py-2">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="min-w-0 truncate text-xs text-text">{g.title}</span>
-              <span className="shrink-0 font-display text-2xs text-cyan tabular-nums">
-                {g.target_value != null
-                  ? `${g.current_value}/${g.target_value}${g.unit ? ` ${g.unit}` : ""}`
-                  : `${doneMilestones}/${g.milestones.length} hitos`}
-                {g.due_date && <span className="ml-1 text-text-dim">· {g.due_date.slice(5)}</span>}
-              </span>
-            </div>
-
-            {/* Barra de progreso con % real */}
-            <div className="mt-1.5 flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <BarMeter
-                  value={value}
-                  max={max}
-                  segments={0}
-                  height={5}
-                  tone={pct >= 1 ? "green" : "accent"}
-                />
-              </div>
-              {g.target_value != null && (
-                /* Wrapper shrink-0: .cmd-btn trae width:100% y aquí va inline */
-                <div className="shrink-0">
-                  <CmdButton size="sm" onClick={() => void onBump(g.id, 1)} title="Sumar 1 al progreso">
-                    +1
-                  </CmdButton>
-                </div>
+          <li key={g.id} className="flex flex-col gap-2 px-2 py-3">
+            <div className="flex min-w-0 items-baseline justify-between gap-3">
+              <span className="min-w-0 text-sm text-text">{g.title}</span>
+              {g.due_date && (
+                <span className="shrink-0 text-xs text-text-faint tabular-nums">
+                  {dueLabel(g.due_date)}
+                </span>
               )}
             </div>
 
-            {/* Hitos como checklist con dot */}
+            {/* Progreso: cifra real · barra neutra · % · +1 */}
+            <div className="flex items-center gap-3">
+              <span className="shrink-0 text-xs text-text-dim tabular-nums">
+                {g.target_value != null
+                  ? `${num(g.current_value)} de ${num(g.target_value)}${g.unit ? ` ${g.unit}` : ""}`
+                  : `${doneMilestones} de ${g.milestones.length} hito${g.milestones.length === 1 ? "" : "s"}`}
+              </span>
+              <div className="min-w-0 flex-1">
+                <Progress value={value} max={max} done={done} label={`${g.title}: ${pctLabel} %`} />
+              </div>
+              <span
+                className={`w-9 shrink-0 text-right text-xs tabular-nums ${
+                  done ? "text-green" : pctLabel === 0 ? "text-text-faint" : "text-text-dim"
+                }`}
+              >
+                {pctLabel} %
+              </span>
+              {numeric && (
+                <Button
+                  variant="ghost"
+                  onClick={() => void onBump(g.id, 1)}
+                  title="Sumar 1 al progreso"
+                  aria-label={`Sumar 1 a ${g.title}`}
+                  className="-my-1 tabular-nums"
+                >
+                  +1
+                </Button>
+              )}
+            </div>
+
+            {/* Hitos como checklist */}
             {g.milestones.length > 0 && (
-              <div className="mt-1.5 space-y-0.5">
+              <div className="flex flex-col gap-0.5">
                 {g.milestones.map((m) => (
                   <button
                     key={m.title}
                     type="button"
                     disabled={m.done}
                     onClick={() => void onMilestone(g.id, m.title)}
-                    className="group flex w-full items-center gap-1.5 text-left text-2xs disabled:cursor-default"
+                    title={m.done ? "Hito cumplido" : "Marcar hito como cumplido"}
+                    className="group flex w-full cursor-pointer items-center gap-2 rounded-xs py-0.5 text-left text-xs disabled:cursor-default"
                   >
                     <span
                       aria-hidden
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        m.done ? "bg-green" : "border border-line-2 group-hover:border-green"
+                      className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border ${
+                        m.done
+                          ? "border-text-faint bg-text-faint text-bg"
+                          : "border-line-2 text-transparent group-hover:border-accent"
                       }`}
-                    />
+                    >
+                      <IconCheck size={9} />
+                    </span>
                     <span
                       className={
                         m.done
-                          ? "text-green line-through opacity-70"
+                          ? "text-text-faint line-through"
                           : "text-text-dim transition-colors group-hover:text-text"
                       }
                     >
@@ -102,9 +131,9 @@ export function GoalsPanel({
                 ))}
               </div>
             )}
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

@@ -42,6 +42,8 @@ interface Workspace {
   selectedProjectName: string | undefined;
   selectedProjectData: ReturnType<typeof useHermesDataContext>["projects"][number] | undefined;
   focusProject: (slug: string | null) => void;
+  /** Elige proyecto SIN moverte de tab (p. ej. en Reuniones). */
+  selectProject: (slug: string | null) => void;
 
   // Config de ejecución de Claude Code (modelo · esfuerzo · permisos) + run vivo.
   claudeConfig: ClaudeExecConfig;
@@ -132,6 +134,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setTab(t);
   };
 
+  // Elegir un proyecto en Reuniones es para ver SUS juntas, no para
+  // conversar: antes el riel llamaba a focusProject y te sacaba a la consola,
+  // así que el tab Reuniones no tenía forma de elegir proyecto (v5).
+  const selectProject = (slug: string | null) => setSelectedProject(slug);
+
   // Elegir un proyecto lleva a la consola para conversar sobre él.
   const focusProject = (slug: string | null) => {
     setSelectedProject(slug);
@@ -221,6 +228,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectedProjectName,
       selectedProjectData,
       focusProject,
+      selectProject,
       claudeConfig,
       setClaudeConfig,
       claudeRunId,

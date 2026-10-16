@@ -11,7 +11,7 @@ import { useMemo, useState } from "react";
 import type { VocabEntry } from "@hermes/shared";
 import { reviewVocabEntry } from "@/lib/hermes";
 import type { SessionWord } from "./LivePractice";
-import { isVocabDue, VocabTerm } from "./VocabPanel";
+import { GroupLabel, isVocabDue, VocabTerm } from "./VocabPanel";
 
 export function LiveWordBank({
   words,
@@ -38,50 +38,60 @@ export function LiveWordBank({
     onChanged();
   };
 
+  // v5: filas sin caja; "por definir" / "definida" como punto de estado + texto
+  // gris (antes ámbar parpadeante y verde, con un borde de acento por palabra).
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain pr-1">
-      <h3 className="text-2xs text-accent">
-        Esta sesión · {words.length}
-      </h3>
-      {words.length === 0 ? (
-        <p className="rounded-sm border border-line border-dashed px-2.5 py-3 text-2xs leading-relaxed text-text-faint">
-          Toca cualquier palabra de la tutora en la transcripción y aparece aquí al
-          instante. La tutora la explica en la charla y le pone su significado.
-        </p>
-      ) : (
-        words.map((w) => {
-          const entry = byTerm.get(w.term);
-          const defined = Boolean(entry?.meaning_es);
-          return (
-            <div key={w.term} className="hud-in rounded-sm border border-accent/30 px-2 py-1.5">
-              <div className="flex items-baseline gap-2">
-                <span className="min-w-0 flex-1 truncate text-xs text-text">{w.term}</span>
-                <span
-                  className={`shrink-0 text-2xs ${defined ? "text-green" : "animate-pulse text-amber"}`}
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain">
+      <div className="flex flex-col gap-px">
+        <GroupLabel>
+          Esta sesión{" "}
+          <span className="font-normal text-text-faint tabular-nums">{words.length}</span>
+        </GroupLabel>
+        {words.length === 0 ? (
+          <p className="mx-2 mt-1 rounded-sm border border-dashed border-line-2 px-3 py-3 text-xs leading-relaxed text-text-faint">
+            Toca cualquier palabra de la tutora en la transcripción y aparece aquí al instante. La
+            tutora la explica en la charla y le pone su significado.
+          </p>
+        ) : (
+          words.map((w) => {
+            const entry = byTerm.get(w.term);
+            const defined = Boolean(entry?.meaning_es);
+            return (
+              <div key={w.term} className="hud-in rounded-sm px-2 py-1.5 transition-colors hover:bg-hover">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm text-text">{w.term}</span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs text-text-faint">
+                    <span
+                      aria-hidden
+                      className={`h-1.5 w-1.5 rounded-full ${defined ? "bg-green" : "pulse-dot bg-amber"}`}
+                    />
+                    {defined ? "Definida" : "Por definir"}
+                  </span>
+                </div>
+                <p
+                  className="mt-0.5 truncate text-xs leading-snug text-text-dim"
+                  title={defined ? entry?.meaning_es : w.sentence}
                 >
-                  {defined ? "✓ definida" : "por definir"}
-                </span>
+                  {defined ? entry?.meaning_es : `“${w.sentence}”`}
+                </p>
               </div>
-              <p className="mt-0.5 truncate text-2xs leading-snug text-text-dim" title={defined ? entry?.meaning_es : w.sentence}>
-                {defined ? entry?.meaning_es : `“${w.sentence}”`}
-              </p>
-            </div>
-          );
-        })
-      )}
+            );
+          })
+        )}
+      </div>
 
       {due.length > 0 && (
-        <>
-          <h3 className="mt-1 text-2xs text-amber">
-            Repasa hoy · {due.length}
-          </h3>
-          <p className="text-2xs leading-snug text-text-faint">
+        <div className="flex flex-col gap-px">
+          <GroupLabel dot="amber">
+            Repasa hoy <span className="font-normal text-text-faint tabular-nums">{due.length}</span>
+          </GroupLabel>
+          <p className="px-2 pb-1 text-xs leading-snug text-text-faint">
             Pídele a la tutora un quiz (“let’s review my vocabulary”) y marca el repaso aquí.
           </p>
           {due.map((v) => (
             <VocabTerm key={v.id} v={v} due busy={busyId === v.id} onReview={(id) => void review(id)} />
           ))}
-        </>
+        </div>
       )}
     </div>
   );

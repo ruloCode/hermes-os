@@ -1,19 +1,24 @@
 "use client";
 
 // Historial de sesiones con el tutor: fila seleccionable (fecha · duración ·
-// fluidez · temas) + estado del reporte. La seleccionada abre su detalle en
-// el panel central de la vista.
+// fluidez · temas). La seleccionada abre su reporte en la columna central.
+//
+// v5: la fila seleccionada es una capa (`bg-selected`), no una caja con borde
+// de acento; las filas no llevan marco. El estado del reporte solo se dice
+// cuando NO es el normal (en cola, generando, falló, sin reporte): un
+// "reporte" verde en cada una de las trece filas no distinguía nada.
 
 import type { EnglishSession } from "@hermes/shared";
-import { PanelState } from "@/components/ui/PanelState";
-import { fmtDate, fmtDuration } from "./report-utils";
+import { Badge } from "@/components/ui/Badge";
+import { fmtDay, fmtDuration, fmtTime } from "./report-utils";
 
-const STATUS: Record<EnglishSession["report_status"], { label: string; cls: string }> = {
-  pending: { label: "en cola", cls: "text-text-dim" },
-  running: { label: "generando…", cls: "text-cyan" },
-  done: { label: "reporte", cls: "text-green" },
-  skipped: { label: "corta", cls: "text-text-faint" },
-  error: { label: "falló", cls: "text-red" },
+// Clases estáticas (Tailwind purga las interpoladas). `done` no figura: es el
+// estado normal y no necesita etiqueta.
+const STATUS: Partial<Record<EnglishSession["report_status"], { label: string; dot: string }>> = {
+  pending: { label: "En cola", dot: "bg-text-faint" },
+  running: { label: "Generando", dot: "bg-cyan pulse-dot" },
+  skipped: { label: "Sin reporte", dot: "" },
+  error: { label: "Falló", dot: "bg-red" },
 };
 
 export function SessionList({
@@ -25,56 +30,54 @@ export function SessionList({
   selectedId: number | null;
   onSelect: (id: number) => void;
 }) {
+  // Vacío discreto: la explicación (y qué hacer) la da la columna del reporte,
+  // que es donde se mira; dos tarjetas de vacío lado a lado decían lo mismo.
   if (sessions.length === 0) {
-    return (
-      <PanelState
-        kind="empty"
-        compact
-        title="Sin sesiones todavía"
-        hint='Practica con la tutora (⌘K → Practicar inglés) o abre la compañera en tu clase de Meet (● Clase en vivo).'
-      />
-    );
+    return <p className="px-2.5 text-sm text-text-faint">Aún no hay sesiones.</p>;
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
+    <div className="flex h-full min-h-0 flex-col gap-px overflow-y-auto overscroll-contain pr-1">
       {sessions.map((s) => {
         const active = s.id === selectedId;
         const st = STATUS[s.report_status];
+        const time = fmtTime(s.started_at);
         return (
           <button
             key={s.id}
             type="button"
             onClick={() => onSelect(s.id)}
             aria-current={active ? "true" : undefined}
-            className={`rounded-sm border px-2 py-1.5 text-left transition-colors ${
-              active ? "border-accent bg-accent/10" : "border-line hover:bg-panel-2"
+            className={`flex w-full cursor-pointer flex-col gap-0.5 rounded-sm px-2.5 py-2 text-left transition-colors ${
+              active ? "bg-selected" : "hover:bg-hover"
             }`}
           >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-display text-xs text-text tabular-nums">
-                {fmtDate(s.started_at)}
-              </span>
-              <span className={`shrink-0 text-2xs ${st.cls}`}>
-                {st.label}
-              </span>
-            </div>
-            <div className="mt-0.5 flex items-center gap-2 text-2xs text-text-dim">
-              {s.source === "class" && <span className="text-accent">Clase</span>}
-              <span className="tabular-nums">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-sm font-medium text-text">{fmtDay(s.started_at)}</span>
+              {time && <span className="shrink-0 text-xs text-text-faint tabular-nums">{time}</span>}
+              <span className="ml-auto shrink-0 text-xs text-text-dim tabular-nums">
                 {s.duration_sec ? fmtDuration(s.duration_sec) : "—"}
               </span>
-              {s.fluency != null && (
-                <span className="text-green tabular-nums">fluidez {s.fluency}/5</span>
-              )}
+            </span>
+            <span className="flex min-w-0 items-center gap-2 text-xs text-text-faint">
+              {s.source === "class" && <Badge size="sm">Clase</Badge>}
+              {s.fluency != null && <span className="shrink-0 tabular-nums">Fluidez {s.fluency}/5</span>}
               {s.errors.length > 0 && (
-                <span className="tabular-nums">{s.errors.length} err</span>
+                <span className="shrink-0 tabular-nums">
+                  {s.errors.length} {s.errors.length === 1 ? "error" : "errores"}
+                </span>
               )}
-            </div>
+              {st && (
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {st.dot && <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />}
+                  {st.label}
+                </span>
+              )}
+            </span>
             {s.topics.length > 0 && (
-              <p className="mt-0.5 truncate text-2xs text-text-faint">
+              <span className="block truncate text-xs text-text-faint">
                 {s.topics.slice(0, 3).join(" · ")}
-              </p>
+              </span>
             )}
           </button>
         );

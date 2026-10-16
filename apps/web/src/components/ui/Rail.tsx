@@ -21,8 +21,12 @@ export type RailTone = "line" | "accent" | "cyan" | "green" | "amber" | "red";
 
 // Tailwind purga las clases construidas por interpolación (`bg-${tone}`), así
 // que el mapa es estático a propósito.
-const BAR: Record<RailTone, string> = {
-  line: "bg-line-2",
+//
+// v5: el tono se pinta como un PUNTO y solo cuando dice algo (en curso, aquí,
+// error). v4 ponía una barra de 2px en CADA fila — una lista de proyectos era
+// una columna de rayitas azules que no distinguían nada. `line` = sin marca.
+const DOT: Record<RailTone, string> = {
+  line: "",
   accent: "bg-accent",
   cyan: "bg-cyan",
   green: "bg-green",
@@ -33,8 +37,8 @@ const BAR: Record<RailTone, string> = {
 /** Contenedor del riel: scroll propio y aire. Va dentro de un <aside>. */
 export function Rail({ children }: { children: ReactNode }) {
   return (
-    <ScrollArea rail fade="y" className="h-full px-5 py-5">
-      <div className="flex flex-col gap-6">{children}</div>
+    <ScrollArea rail fade="y" className="h-full px-4 py-5">
+      <div className="flex flex-col gap-7">{children}</div>
     </ScrollArea>
   );
 }
@@ -61,9 +65,9 @@ export function RailSection({
   grow?: boolean;
 }) {
   return (
-    <section className={`flex flex-col gap-2.5 ${grow ? "min-h-[320px] flex-1" : "shrink-0"}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-2xs text-text-faint">{label}</span>
+    <section className={`flex flex-col gap-1.5 ${grow ? "min-h-[320px] flex-1" : "shrink-0"}`}>
+      <div className="flex items-center justify-between gap-2 px-2">
+        <span className="text-2xs font-medium text-text-faint">{label}</span>
         {right}
       </div>
       <div className="min-h-0 flex-1">{children}</div>
@@ -71,7 +75,7 @@ export function RailSection({
   );
 }
 
-/** Fila del riel: hairline + aire. La jerarquía la da la barra de color. */
+/** Fila del riel: aire y hover; el punto de tono solo si dice algo. */
 export function RailRow({
   title,
   sub,
@@ -90,16 +94,18 @@ export function RailRow({
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      className="group flex w-full items-center gap-2.5 border-t border-line/50 py-2 text-left first:border-t-0 enabled:cursor-pointer"
+      className={`group flex w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-colors enabled:cursor-pointer enabled:hover:bg-hover ${
+        tone === "accent" ? "bg-selected" : ""
+      }`}
     >
-      <span className={`h-5.5 w-0.5 shrink-0 rounded-xs ${BAR[tone]}`} />
+      {DOT[tone] && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[tone]}`} />}
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm text-text transition-colors group-enabled:group-hover:text-accent">
-          {title}
-        </span>
-        {sub && <span className="mt-0.5 block truncate text-xs text-text-faint">{sub}</span>}
+        <span className="block truncate text-sm text-text">{title}</span>
+        {sub && <span className="mt-px block truncate text-xs text-text-faint">{sub}</span>}
       </span>
-      {value != null && <span className="shrink-0 text-xs text-text-dim">{value}</span>}
+      {value != null && (
+        <span className="shrink-0 text-xs text-text-faint tabular-nums">{value}</span>
+      )}
     </button>
   );
 }

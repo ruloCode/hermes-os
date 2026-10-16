@@ -10,10 +10,10 @@ const PADDING: Record<string, string> = {
 };
 
 /**
- * Panel v2 — bloque atómico de toda la HUD. API retrocompatible con el
- * Panel original (title/right/children/className/delay) + variantes:
- * - default: glass con brackets
- * - hero:    brackets grandes + línea de acento superior con glow
+ * Panel — tarjeta con borde (`hud-panel`). Regla v5: solo lleva marco lo que
+ * se OPERA; lo que se lee va sin caja. Variantes:
+ * - default: tarjeta (fondo de tarjeta + borde 1px + radio 12)
+ * - hero:    igual que default (queda por compatibilidad)
  * - ghost:   sin fondo ni borde (sub-secciones dentro de otro panel)
  * - alert:   borde teñido por `tone` (estados warning/error)
  */

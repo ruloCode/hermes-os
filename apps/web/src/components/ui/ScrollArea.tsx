@@ -4,10 +4,16 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 // Máscaras de fade por eje: el degradado a transparente en los bordes
 // señala visualmente que hay más contenido para scrollear.
+//
+// v5: cada borde se desvanece SOLO si hay contenido escondido de ese lado
+// (--fade-a / --fade-b los pone el scroll). Antes el fade era fijo: en
+// scrollTop 0 la primera línea (el título de una sección del riel) salía
+// lavada, como si hubiera algo arriba.
 const MASKS: Record<"y" | "x", string> = {
-  y: "linear-gradient(180deg, transparent 0, black 12px, black calc(100% - 12px), transparent 100%)",
-  x: "linear-gradient(90deg, transparent 0, black 12px, black calc(100% - 12px), transparent 100%)",
+  y: "linear-gradient(180deg, transparent 0, black var(--fade-a, 0px), black calc(100% - var(--fade-b, 0px)), transparent 100%)",
+  x: "linear-gradient(90deg, transparent 0, black var(--fade-a, 0px), black calc(100% - var(--fade-b, 0px)), transparent 100%)",
 };
+const FADE_PX = 14;
 
 /**
  * ScrollArea — contenedor scrolleable con fade en los bordes y riel propio.
@@ -36,6 +42,31 @@ export function ScrollArea({
   const elRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
+
+  // Fade por borde: solo donde hay contenido escondido.
+  useEffect(() => {
+    const el = elRef.current;
+    if (!el || fade === "none") return;
+    const update = () => {
+      const [pos, size, view] =
+        fade === "y"
+          ? [el.scrollTop, el.scrollHeight, el.clientHeight]
+          : [el.scrollLeft, el.scrollWidth, el.clientWidth];
+      el.style.setProperty("--fade-a", pos > 1 ? `${FADE_PX}px` : "0px");
+      el.style.setProperty("--fade-b", pos + view < size - 1 ? `${FADE_PX}px` : "0px");
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    const mo = new MutationObserver(update);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [fade]);
 
   useEffect(() => {
     const el = elRef.current;

@@ -145,67 +145,133 @@ export function MachineSelector() {
   // Una sola máquina y todo en orden: no hay nada que elegir.
   if (entries.length < 2 && !activeDown) return null;
 
-  return (
-    <div
-      className="flex items-center gap-3 text-2xs tracking-label uppercase"
-      role="radiogroup"
-      aria-label="Máquina activa"
-    >
-      {entries.map((e) => {
-        const dot = e.self
-          ? "text-green glow-text-green"
-          : e.reachable === undefined
-            ? "text-text-dim"
-            : e.reachable
-              ? "text-green"
-              : e.online
-                ? "text-amber" // late: hay heartbeat pero este browser no llega
-                : "text-red";
-        const title = [
-          e.baseUrl ?? "sin dirección publicada",
-          e.os ?? null,
-          e.self ? "esta es la máquina que responde" : null,
-          !e.self && e.reachable === false && e.online
-            ? "late en Supabase pero no responde desde este navegador"
-            : null,
-          !e.self && !e.online ? "sin heartbeat (offline)" : null,
-          e.currentTask,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return (
-          <button
-            key={e.machine}
-            type="button"
-            role="radio"
-            aria-checked={e.self}
-            title={title}
-            disabled={!e.baseUrl || e.self}
-            onClick={() => select(e)}
-            className={`flex items-center gap-1.5 transition-colors ${
-              e.self ? "text-cyan" : "text-text-dim enabled:hover:text-text"
-            }`}
-          >
-            <span className={dot}>●</span>
-            {e.machine}
-          </button>
-        );
-      })}
+  const current = entries.find((e) => e.self);
+  const dotCls = (e: Entry) =>
+    e.self
+      ? "bg-green"
+      : e.reachable === undefined
+        ? "bg-text-faint"
+        : e.reachable
+          ? "bg-green"
+          : e.online
+            ? "bg-amber" // late: hay heartbeat pero este browser no llega
+            : "bg-red";
+  const titleOf = (e: Entry) =>
+    [
+      e.baseUrl ?? "sin dirección publicada",
+      e.os ?? null,
+      e.self ? "esta es la máquina que responde" : null,
+      !e.self && e.reachable === false && e.online
+        ? "hay heartbeat pero este navegador no llega"
+        : null,
+      !e.self && !e.online ? "sin heartbeat (offline)" : null,
+      e.currentTask,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
-      {/* Salida de emergencia: el agente elegido no contesta y sin esto el
-          override de localStorage deja el dashboard ciego para siempre. */}
-      {activeDown && overrideRef.current && (
-        <button
-          type="button"
-          onClick={() => {
-            setHermesUrl(null);
-            location.reload();
-          }}
-          className="text-amber transition-colors hover:text-text"
-          title={`${getHermesUrl()} no responde — volver al agente por defecto`}
+  return (
+    <MachineMenu
+      label={current?.machine ?? (activeDown ? "Agente sin respuesta" : "Elegir máquina")}
+      warn={activeDown}
+    >
+      {(close) => (
+        <>
+          <div className="px-2 pt-1 pb-1.5 text-2xs text-text-faint">Máquina activa</div>
+          {entries.map((e) => (
+            <button
+              key={e.machine}
+              type="button"
+              role="menuitemradio"
+              aria-checked={e.self}
+              title={titleOf(e)}
+              disabled={!e.baseUrl || e.self}
+              onClick={() => {
+                close();
+                select(e);
+              }}
+              className="flex w-full items-center gap-2 rounded-xs px-2 py-1.5 text-left text-sm text-text transition-colors enabled:cursor-pointer enabled:hover:bg-hover disabled:cursor-default"
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls(e)}`} />
+              <span className="min-w-0 flex-1 truncate">{e.machine}</span>
+              <span className="shrink-0 text-2xs text-text-faint">
+                {e.self ? "✓ aquí" : !e.online ? "offline" : (e.os ?? "")}
+              </span>
+            </button>
+          ))}
+          {/* Salida de emergencia: el agente elegido no contesta y sin esto el
+              override de localStorage deja el dashboard ciego para siempre. */}
+          {activeDown && overrideRef.current && (
+            <button
+              type="button"
+              onClick={() => {
+                setHermesUrl(null);
+                location.reload();
+              }}
+              className="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-xs border-t border-line px-2 pt-2 pb-1.5 text-left text-sm text-amber transition-colors hover:bg-hover"
+              title={`${getHermesUrl()} no responde — volver al agente por defecto`}
+            >
+              ↺ Volver al agente local
+            </button>
+          )}
+        </>
+      )}
+    </MachineMenu>
+  );
+}
+
+/** Botón + menú desplegable (cierra con clic fuera o Esc). */
+function MachineMenu({
+  label,
+  warn,
+  children,
+}: {
+  label: string;
+  warn: boolean;
+  children: (close: () => void) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`flex h-7 w-full cursor-pointer items-center gap-2 rounded-xs pr-1.5 pl-2 text-xs transition-colors hover:bg-hover ${
+          warn ? "text-amber" : "text-text-dim hover:text-text"
+        }`}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-faint">
+          <rect x="3" y="4" width="18" height="12" rx="2" />
+          <path d="M8 20h8M12 16v4" />
+        </svg>
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-faint">
+          <path d="m7 10 5 5 5-5" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute top-full right-0 left-0 z-40 mt-1 rounded-sm border border-line bg-panel p-1 shadow-[var(--shadow-pop)]"
         >
-          ↺ local
-        </button>
+          {children(() => setOpen(false))}
+        </div>
       )}
     </div>
   );

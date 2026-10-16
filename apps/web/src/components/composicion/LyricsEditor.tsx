@@ -65,7 +65,7 @@ function SectionCard({ song, section, onAskHermes }: { song: Song; section: Song
           <input
             value={section.label}
             onChange={(e) => patchSection(song.id, section.id, { label: e.target.value })}
-            className="w-28 bg-transparent font-display text-sm tracking-title text-text uppercase focus:outline-none"
+            className="w-28 bg-transparent font-display text-sm text-text focus:outline-none"
             aria-label="Nombre de la sección"
           />
           <span className="font-mono text-2xs text-text-faint">{section.chords.map(show).join(" · ") || "sin acordes"}</span>
@@ -126,7 +126,7 @@ function SectionCard({ song, section, onAskHermes }: { song: Song; section: Song
 
       {rhymeFor && (
         <div className="flex flex-wrap items-center gap-1 rounded-sm border border-line bg-panel-2 px-2 py-1.5">
-          <span className="mr-1 text-2xs tracking-label text-text-dim uppercase">rima con -{rhymeFor}</span>
+          <span className="mr-1 text-2xs text-text-dim">rima con -{rhymeFor}</span>
           {rhymes.length === 0 && <span className="text-2xs text-text-faint">nada en el banco (mock chico)</span>}
           {rhymes.map((r) => (
             <span key={r.word} className={`rounded-xs px-1.5 py-0.5 font-mono text-2xs ${r.kind === "consonante" ? "bg-accent/16 text-accent" : "bg-cyan/10 text-cyan"}`} title={r.kind ?? ""}>

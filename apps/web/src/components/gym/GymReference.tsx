@@ -1,12 +1,16 @@
 "use client";
 
 import { referenceOf, type GymScenario } from "@hermes/shared";
-import { speak } from "./GymFeedback";
+import { Button } from "@/components/ui/Button";
+import { speak, SpeakerIcon } from "./GymFeedback";
 
 /**
  * La respuesta de referencia de un escenario: los pasos (la forma) y cómo
  * suena dicha bien. Se ve ANTES de responder para tener un modelo; los
  * [corchetes] son los datos que solo tú tienes.
+ *
+ * v5: los números de los pasos en gris (eran de acento, como si fueran
+ * enlaces) y las acciones como botones fantasma de la barra de la tarjeta.
  */
 export function GymReference({
   scenario,
@@ -21,46 +25,43 @@ export function GymReference({
   if (!ref) return null;
   if (!open)
     return (
-      <button
-        type="button"
-        onClick={onToggle}
-        className="self-start cursor-pointer text-xs text-text-dim hover:text-text"
-      >
+      <Button variant="ghost" onClick={onToggle} className="-ml-2.5 self-start">
         Ver la respuesta de referencia
-      </button>
+      </Button>
     );
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-line px-4 py-3">
-      <div className="flex items-center gap-3">
-        <span className="text-2xs text-text-faint">Referencia</span>
-        <button
-          type="button"
+    <section className="flex flex-col gap-3 rounded-md border border-line bg-panel px-4 pt-2.5 pb-3.5">
+      <div className="-mr-2 flex items-center gap-1">
+        <h3 className="text-xs font-medium text-text-faint">Referencia</h3>
+        <Button
+          variant="ghost"
           onClick={() => speak(ref.example, scenario.lang)}
-          className="ml-auto cursor-pointer rounded-sm border border-line px-2 py-0.5 text-xs text-text-dim hover:border-line-2 hover:text-text"
           title="Escucharla en voz alta"
+          icon={<SpeakerIcon />}
+          className="ml-auto"
         >
-          ▶ Escuchar
-        </button>
-        <button
-          type="button"
-          onClick={onToggle}
-          className="cursor-pointer text-xs text-text-faint hover:text-text"
-          title="Intentarlo sin ver la referencia"
-        >
+          Escuchar
+        </Button>
+        <Button variant="ghost" onClick={onToggle} title="Intentarlo sin ver la referencia">
           Ocultar
-        </button>
+        </Button>
       </div>
-      <ol className="flex flex-wrap gap-x-4 gap-y-1">
+      <ol className="flex flex-wrap gap-x-5 gap-y-1">
         {ref.steps.map((step, i) => (
-          <li key={step} className="text-xs text-text-dim">
-            <span className="text-accent tabular-nums">{i + 1}</span> {step}
+          <li key={step} className="flex items-baseline gap-1.5 text-xs text-text-dim">
+            <span className="text-text-faint tabular-nums">{i + 1}.</span>
+            {step}
           </li>
         ))}
       </ol>
       <p className="text-md leading-relaxed text-text">
         {ref.example.split(/(\[[^\]]+\])/g).map((part, i) =>
           part.startsWith("[") ? (
-            <span key={i} className="text-accent" title="Aquí va tu dato real">
+            <span
+              key={i}
+              className="rounded-xs bg-hover px-1 text-text-dim"
+              title="Aquí va tu dato real"
+            >
               {part}
             </span>
           ) : (

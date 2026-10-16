@@ -1,16 +1,15 @@
 "use client";
 
-// Shell del workspace: rail de iconos + topbar + vistas + voz.
+// Shell del workspace: barra lateral + lienzo enmarcado.
 // Vive en el layout, así que PERSISTE entre navegaciones: las vistas se montan
 // una vez y se alternan con CSS — la llamada de voz, los streams de la consola
 // y el canvas del grafo sobreviven al cambiar de vista.
 // Rutas fuera del workspace (p. ej. /dev/ui) se renderizan sin shell.
 //
-// Rediseño 2026-07: el header alto (wordmark + 3 rutas + strip de voz + reloj +
-// ring) y el strip de métricas se fundieron en una topbar de UNA línea y un
-// rail de 60px. El motivo es medido, no estético: la voz es el 88% del uso y
-// tenía una cajita del 2%, mientras ~15 paneles con el mismo peso visual
-// competían con la consola.
+// v5 (2026-10): TODO el cromo (marca, máquina, buscar, destinos, voz, estado)
+// vive en la barra lateral, y cada vista ocupa una hoja enmarcada (`app-canvas`)
+// que abre con su propio ViewHeader. Ya no hay topbar global ni barra de voz
+// flotante: el lienzo es 100% contenido.
 
 import { useCallback, useRef } from "react";
 import { usePathname } from "next/navigation";
@@ -18,12 +17,10 @@ import { useTheme } from "@/state/ThemeProvider";
 import { useWorkspace } from "@/state/WorkspaceContext";
 import { useOrbState } from "@/components/voice/orbState";
 import { VoiceOrb3D } from "@/components/voice/VoiceOrb3D";
-import { PresenceBar } from "./PresenceBar";
 import { useHermesData } from "@/hooks/useHermesData";
 import { useAgentEvents } from "@/hooks/useAgentEvents";
 import { useHotkeys } from "@/hooks/useHotkeys";
-import { SideRail } from "./SideRail";
-import { TopBar } from "./TopBar";
+import { Sidebar } from "./Sidebar";
 import { Toasts } from "@/components/Toasts";
 import { CommandPalette } from "@/components/CommandPalette";
 import { VoiceClientTools } from "@/components/VoiceClientTools";
@@ -52,8 +49,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Atajos globales: ⌘K palette · ⌘1..7 tabs · ⌘B sidebar · Esc.
   useHotkeys();
 
-  // El orbe 3D vive en el SHELL, no en el home: su ancla es el botón de la
-  // PresenceBar, que existe en todas las rutas. `simplified` va siempre en
+  // El orbe 3D vive en el SHELL, no en el home: su ancla es el botón del
+  // VoiceDock al pie de la barra lateral, que existe en todas las rutas. `simplified` va siempre en
   // true porque a ~19px de radio el relieve del ruido se lee como suciedad.
   const orbAnchorRef = useRef<HTMLButtonElement>(null);
   const getOrbAnchor = useCallback(() => orbAnchorRef.current, []);
@@ -107,12 +104,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
 
       <div className="relative z-2 flex h-screen">
-        <SideRail />
-        <main className="flex min-w-0 flex-1 flex-col">
-          <TopBar />
-          {/* pb-20 deja sitio a la PresenceBar fija: sin él, el último elemento
-              de cada vista queda debajo del orbe. */}
-          <div className="flex min-h-0 flex-1 flex-col p-3 pb-20">
+        <Sidebar anchorRef={orbAnchorRef} />
+        {/* El lienzo: una hoja enmarcada sobre el cromo. `px-6` es el margen
+            que el ViewHeader de cada vista anula (-mx-6) para ir a sangre. */}
+        <main className="app-canvas my-2 mr-2 flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col px-6 pb-5">
             <div className={`min-h-0 flex-1 ${view === "orquestador" ? "flex flex-col" : "hidden"}`}>
               <OrquestadorView />
             </div>
@@ -143,9 +139,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
-
-      {/* La voz, anclada al pie de todas las rutas: orbe + estado + hilo. */}
-      <PresenceBar anchorRef={orbAnchorRef} />
 
       {/* Avisos flotantes de tareas/runs terminados (mismo SSE de events) */}
       <Toasts events={events} />

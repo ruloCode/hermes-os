@@ -3,10 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { streamChat, type ChatMessage } from "@/lib/hermes";
 import { Markdown } from "@/components/Markdown";
+import { Button } from "@/components/ui/Button";
+import { IconArrowUp } from "./kit";
 
 // Sin datos del stream por este tiempo = turno colgado → se aborta solo.
 // Holgado a propósito: el asesor corre tools reales (consultas de finanzas).
 const STALL_MS = 120_000;
+
+// Marca interna de un turno fallido: se pinta como error, nunca se muestra.
+const ERROR_MARK = "\u26a0 ";
 
 // Preguntas de arranque: chips clicables (patrón asistente de finanzas).
 const STARTERS = [
@@ -23,9 +28,15 @@ const STARTERS = [
  * recalibrar saldos y analizar con cifras vivas desde el chat.
  *
  * Robustez (el input JAMÁS se bloquea): durante un turno el botón se vuelve
- * ⏹ detener (abort real), un watchdog corta streams colgados (agente
+ * detener (abort real), un watchdog corta streams colgados (agente
  * reiniciado a mitad de turno, red dormida) y un error deja el mensaje con
- * ↻ reintentar en vez de tragárselo.
+ * "Reintentar" en vez de tragárselo.
+ *
+ * v5: hilo tranquilo, patrón ChatGPT/Claude — lo tuyo en una burbuja gris a la
+ * derecha, la respuesta como texto corrido. Antes cada línea abría con
+ * el nombre del dueño en cyan y "ASESOR ›" en el acento (el nombre
+ * escrito a mano en el código); los arranques eran chips cuadrados que se teñían de
+ * acento al pasar el mouse.
  */
 export function AdvisorChat({
   online,
@@ -38,7 +49,7 @@ export function AdvisorChat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  /** Último mensaje que falló (para el chip ↻ reintentar). */
+  /** Último mensaje que falló (para el botón Reintentar). */
   const [failed, setFailed] = useState<string | null>(null);
   // Sesión: una clave estable por montaje; el SDK session id llega en el
   // primer turno y los siguientes resumen ESA conversación.
@@ -125,13 +136,13 @@ export function AdvisorChat({
         const last = out[out.length - 1];
         if (aborted && last.content) {
           // Se detuvo a mitad de respuesta: se conserva lo que alcanzó a decir.
-          out[out.length - 1] = { ...last, content: `${last.content} ⏹` };
+          out[out.length - 1] = { ...last, content: `${last.content}\n\n_(detenido)_` };
         } else {
           out[out.length - 1] = {
             role: "assistant",
             content: aborted
-              ? "⏹ detenido"
-              : `⚠ ${err instanceof Error ? err.message : String(err)}`,
+              ? "_Respuesta detenida._"
+              : `${ERROR_MARK}${err instanceof Error ? err.message : String(err)}`,
           };
         }
         return out;
@@ -166,72 +177,69 @@ export function AdvisorChat({
           if (!el) return;
           nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2"
       >
         {messages.length === 0 && (
-          <div className="flex flex-col items-center gap-2 pt-4 text-center">
-            <span className="text-xs leading-relaxed tracking-label text-text-dim">
-              {online ? "Tu asesor financiero — con tu saldo y gastos a la vista" : "Agente fuera de línea"}
-            </span>
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {STARTERS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => void send(s)}
-                  className="rounded-sm border border-line px-2 py-1 text-2xs text-text-dim transition-colors hover:border-accent hover:text-accent"
-                >
-                  “{s}”
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className="text-sm leading-relaxed">
-            <span
-              className={`mr-2 text-2xs font-semibold tracking-label ${
-                m.role === "user" ? "text-cyan" : "text-accent"
-              }`}
-            >
-              {m.role === "user" ? "RULO ›" : "ASESOR ›"}
-            </span>
-            {m.role === "assistant" && m.content && !m.content.startsWith("⚠") ? (
-              <div className="mt-0.5">
-                <Markdown source={m.content} />
+          <div className="flex flex-col gap-3 pt-1">
+            <p className="text-sm text-text-dim">
+              {online
+                ? "Pregúntale con tu saldo y tus gastos a la vista; también registra movimientos."
+                : "El agente está fuera de línea: el asesor vuelve cuando se conecte."}
+            </p>
+            {online && (
+              <div className="flex flex-wrap gap-1.5">
+                {STARTERS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => void send(s)}
+                    className="h-7 cursor-pointer rounded-full border border-line px-3 text-xs text-text-dim transition-colors hover:border-line-2 hover:bg-hover hover:text-text"
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
-            ) : (
-              <span className={`whitespace-pre-wrap ${m.content.startsWith("⚠") ? "text-amber" : ""}`}>
-                {m.content ||
-                  (busy && i === messages.length - 1 ? (
-                    <span className="pulse-dot">pensando…</span>
-                  ) : (
-                    ""
-                  ))}
-              </span>
             )}
           </div>
-        ))}
+        )}
+        {messages.map((m, i) => {
+          const isError = m.role === "assistant" && m.content.startsWith(ERROR_MARK);
+          if (m.role === "user") {
+            return (
+              <div key={i} className="flex justify-end">
+                <p className="max-w-[85%] rounded-md bg-selected px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-text">
+                  {m.content}
+                </p>
+              </div>
+            );
+          }
+          return (
+            <div key={i} className="text-sm leading-relaxed text-text">
+              {isError ? (
+                <p className="text-red">{m.content.slice(ERROR_MARK.length)}</p>
+              ) : m.content ? (
+                <Markdown source={m.content} />
+              ) : busy && i === messages.length - 1 ? (
+                <span className="pulse-dot text-text-faint">Pensando…</span>
+              ) : null}
+            </div>
+          );
+        })}
         {failed && !busy && (
-          <button
-            type="button"
-            onClick={retry}
-            className="rounded-sm border border-line px-2 py-1 text-2xs text-text-dim transition-colors hover:border-accent hover:text-accent"
-          >
-            ↻ Reintentar
-          </button>
+          <Button variant="secondary" onClick={retry}>
+            Reintentar
+          </Button>
         )}
       </div>
 
-      {/* Input: nunca se deshabilita — si hay turno en vuelo, el botón detiene. */}
+      {/* Composer: nunca se deshabilita — si hay turno en vuelo, el botón detiene. */}
       <form
-        className="mt-2 flex items-end gap-2 border-t border-line pt-2"
+        className="hud-field mt-3 flex items-end gap-2 rounded-md border border-line bg-panel py-1.5 pr-1.5 pl-3 transition-colors focus-within:border-accent/60"
         onSubmit={(e) => {
           e.preventDefault();
           void send();
         }}
       >
-        <span className="pb-1 text-accent">{busy ? "◌" : "❯"}</span>
         <textarea
           ref={inputRef}
           value={draft}
@@ -243,8 +251,9 @@ export function AdvisorChat({
               void send();
             }
           }}
-          placeholder={busy ? "el asesor responde… (⏹ para detener)" : "pregúntale a tu asesor…"}
-          className="max-h-24 flex-1 resize-none bg-transparent text-sm leading-snug outline-none placeholder:opacity-40"
+          aria-label="Mensaje al asesor"
+          placeholder={busy ? "El asesor responde…" : "Pregúntale a tu asesor…"}
+          className="max-h-24 min-h-7 flex-1 resize-none bg-transparent py-1 text-sm leading-snug text-text outline-none placeholder:text-text-faint"
         />
         {busy ? (
           <button
@@ -252,10 +261,10 @@ export function AdvisorChat({
             onClick={stop}
             title="Detener respuesta"
             aria-label="Detener respuesta"
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-amber bg-amber/5 text-amber transition-opacity"
+            className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-full bg-text text-bg transition-opacity hover:opacity-85"
           >
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="5" y="5" width="14" height="14" rx="1.5" />
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <rect x="4" y="4" width="16" height="16" rx="2" />
             </svg>
           </button>
         ) : (
@@ -264,17 +273,9 @@ export function AdvisorChat({
             title="Enviar (Enter)"
             aria-label="Enviar"
             disabled={!draft.trim()}
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-accent bg-accent/5 text-accent transition-opacity disabled:opacity-30"
+            className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-full bg-accent-solid text-on-accent transition-colors disabled:cursor-default disabled:bg-selected disabled:text-text-faint"
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M4 12h14M13 6l6 6-6 6"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <IconArrowUp size={14} />
           </button>
         )}
       </form>

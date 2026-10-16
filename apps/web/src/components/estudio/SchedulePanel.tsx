@@ -151,7 +151,7 @@ export function SchedulePanel({ piece }: { piece: ContentPiece }) {
     >
       {/* Lo primero: la frase que responde "¿cuándo sale?" sin interpretar nada. */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-2xs tracking-label text-text-faint uppercase">Sale</span>
+        <span className="text-2xs text-text-faint">Sale</span>
         {piece.publish_at ? (
           <>
             <span className="text-sm text-text tabular-nums">{fmtFull(piece.publish_at)}</span>
@@ -166,7 +166,7 @@ export function SchedulePanel({ piece }: { piece: ContentPiece }) {
         {piece.publish_at && (
           <button
             onClick={() => setWhen("", "")}
-            className="text-2xs text-text-faint uppercase hover:text-red"
+            className="text-2xs text-text-faint hover:text-red"
           >
             ✕ quitar fecha
           </button>

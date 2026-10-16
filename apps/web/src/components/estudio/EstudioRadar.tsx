@@ -18,16 +18,16 @@ import { youtubeThumbnail } from "@hermes/shared";
 import type { ContentPiece, ContentPillar, ContentRef, HookPerformanceRow } from "@hermes/shared";
 import { useEstudioContext } from "@/state/EstudioProvider";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Segmented } from "@/components/ui/Segmented";
+import { PanelState } from "@/components/ui/PanelState";
 import { PILLARS, STATUSES } from "./labels";
 
-const APPLY_TONE = { aplicado: "green", probar: "amber", observar: "neutral" } as const;
+// El plan ES un estado (observar → probar → aplicado): probar = en curso
+// (cyan), aplicado = hecho (verde), observar = sin marca. v5 lo alinea con el
+// significado de los semánticos (antes "probar" iba en ámbar, que es alerta).
+const APPLY_TONE = { aplicado: "green", probar: "cyan", observar: "neutral" } as const;
 const APPLY_STATES: NonNullable<ContentRef["apply_status"]>[] = ["observar", "probar", "aplicado"];
-// Clases completas: Tailwind no ve las interpoladas (`bg-${tone}/16`).
-const APPLY_ACTIVE: Record<NonNullable<ContentRef["apply_status"]>, string> = {
-  observar: "bg-panel-2 text-text",
-  probar: "bg-amber/16 text-amber",
-  aplicado: "bg-green/16 text-green",
-};
 
 const KINDS: { id: ContentRef["kind"]; label: string; hint: string }[] = [
   { id: "tendencia", label: "Tendencias", hint: "Dato comprobado que cambia cómo se produce" },
@@ -36,9 +36,10 @@ const KINDS: { id: ContentRef["kind"]; label: string; hint: string }[] = [
 ];
 
 const inputCls =
-  "rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
-const btnCls =
-  "rounded-sm border border-line-2 bg-panel-2 px-2 py-0.5 text-2xs tracking-label text-text-dim uppercase hover:border-accent hover:text-text";
+  "h-8 rounded-sm border border-line bg-panel px-3 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
+/** Enlace con forma de botón secundario (el <a> no puede ser <Button>). */
+const linkBtnCls =
+  "inline-flex h-7 items-center gap-1.5 rounded-sm border border-line bg-panel px-2.5 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover";
 
 /** "23 jul" en hora de Bogotá — cuándo entró la referencia al radar. */
 function fmtCaptured(iso: string): string {
@@ -79,29 +80,26 @@ export function EstudioRadar() {
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Un solo carril por tipo: el radar se lee de a una cosa a la vez. */}
-      <div className="flex gap-0.5 rounded-sm border border-line p-0.5">
-        {KINDS.map((k) => {
-          const n = board.refs.filter((r) => r.kind === k.id).length;
-          return (
-            <button
-              key={k.id}
-              onClick={() => setKind(k.id)}
-              title={k.hint}
-              className={`flex-1 rounded-xs px-2 py-1 text-2xs tracking-label uppercase ${
-                kind === k.id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
-              }`}
-            >
-              {k.label} <span className="tabular-nums">{n}</span>
-            </button>
-          );
-        })}
+    <div className="flex flex-col gap-4">
+      {/* Un solo carril por tipo: el radar se lee de a una cosa a la vez.
+          El div evita que la columna flex estire el control a todo el ancho. */}
+      <div>
+        <Segmented
+          ariaLabel="Tipo de referencia"
+          value={kind}
+          onChange={setKind}
+          options={KINDS.map((k) => ({
+            value: k.id,
+            label: k.label,
+            title: k.hint,
+            count: board.refs.filter((r) => r.kind === k.id).length,
+          }))}
+        />
       </div>
 
       {/* Alta pegando el link (Pinterest/Patreon): la URL basta — YouTube pone
           título, canal y miniatura. Texto suelto sigue funcionando igual. */}
-      <div className="flex flex-col gap-1.5 rounded-sm border border-line px-2 py-2">
+      <div className="flex flex-col gap-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -110,40 +108,36 @@ export function EstudioRadar() {
           className={inputCls}
         />
         {draftThumb && (
-          <div className="flex items-center gap-2 rounded-sm bg-panel-2 p-1.5">
+          <div className="flex items-center gap-2 rounded-sm border border-line bg-panel-2 p-1.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={draftThumb}
               alt="Miniatura del video"
               className="aspect-video h-12 shrink-0 rounded-xs object-cover"
             />
-            <p className="text-2xs leading-snug text-text-dim">
+            <p className="text-xs leading-snug text-text-dim">
               Video detectado — el título y el canal los trae YouTube al guardar.
             </p>
           </div>
         )}
-        <div className="flex gap-1.5">
+        <div className="flex gap-2">
           <input
             value={context}
             onChange={(e) => setContext(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void submit()}
-            placeholder="por qué la guardas / qué copiar (opcional)"
+            placeholder="Por qué la guardas o qué copiar (opcional)"
             className={`min-w-0 flex-1 ${inputCls}`}
           />
-          <button
-            onClick={() => void submit()}
-            disabled={!draft.trim() || saving}
-            className={`${btnCls} border-accent text-accent disabled:opacity-40`}
-          >
-            {saving ? "guardando…" : "＋ Guardar"}
-          </button>
+          <Button size="md" onClick={() => void submit()} disabled={!draft.trim() || saving}>
+            {saving ? "Guardando…" : "Guardar"}
+          </Button>
         </div>
       </div>
 
       {/* Grid de tarjetas: miniatura navegable cuando hay link; la abierta se
           expande a lo ancho con su ficha completa. */}
       {list.length ? (
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {list.map((r) => (
             <RefCard
               key={r.id}
@@ -159,10 +153,11 @@ export function EstudioRadar() {
           ))}
         </div>
       ) : (
-        <p className="px-1 py-3 text-xs text-text-faint">
-          Sin {active.label.toLowerCase()} todavía — {active.hint.toLowerCase()}. Pega un link
-          arriba y listo.
-        </p>
+        <PanelState
+          kind="empty"
+          title={`Sin ${active.label.toLowerCase()} todavía`}
+          hint={`${active.hint}. Pega un link arriba y listo.`}
+        />
       )}
 
       <HooksConDatos onSelectPiece={setSelectedId} />
@@ -195,11 +190,15 @@ function RefCard({
 
   return (
     <div
-      className={`min-w-0 rounded-sm border transition-colors ${
-        open ? "col-span-2 border-accent/40 bg-panel-2/40" : "border-line hover:border-line-2"
+      className={`min-w-0 overflow-hidden rounded-md border bg-panel transition-colors ${
+        open ? "border-line-2 sm:col-span-2" : "border-line hover:border-line-2"
       }`}
     >
-      <button onClick={onToggle} className="block w-full text-left" aria-expanded={open}>
+      <button
+        onClick={onToggle}
+        className="block w-full cursor-pointer text-left"
+        aria-expanded={open}
+      >
         {thumb ? (
           <div className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -207,7 +206,7 @@ function RefCard({
               src={thumb}
               alt={r.title}
               loading="lazy"
-              className={`w-full rounded-t-sm object-cover ${open ? "max-h-40" : "aspect-video"}`}
+              className={`w-full object-cover ${open ? "max-h-40" : "aspect-video"}`}
             />
             {/* Clic en la imagen = ver el video (el detalle es el clic en el resto). */}
             <a
@@ -218,7 +217,7 @@ function RefCard({
               title="Ver en YouTube"
               className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity hover:opacity-100"
             >
-              <span className="rounded-sm bg-black/70 px-2 py-1 text-xs text-white">▶ Ver ↗</span>
+              <span className="rounded-sm bg-black/70 px-2 py-1 text-xs text-white">Ver en YouTube ↗</span>
             </a>
             {r.apply_status && (
               <span className="absolute top-1 right-1">
@@ -228,15 +227,15 @@ function RefCard({
               </span>
             )}
             {r.metric && (
-              <span className="absolute bottom-1 left-1 rounded-xs bg-black/70 px-1.5 py-0.5 font-display text-2xs text-cyan tabular-nums">
+              <span className="absolute bottom-1 left-1 rounded-xs bg-black/70 px-1.5 py-0.5 text-2xs text-white tabular-nums">
                 {r.metric}
               </span>
             )}
           </div>
         ) : (
-          <div className="flex items-baseline gap-2 px-2 pt-2">
+          <div className="flex items-baseline gap-2 px-3 pt-3">
             {r.metric && (
-              <span className="shrink-0 font-display text-sm text-cyan tabular-nums">
+              <span className="shrink-0 text-md font-semibold text-text tabular-nums">
                 {r.metric}
               </span>
             )}
@@ -249,23 +248,24 @@ function RefCard({
           </div>
         )}
 
-        <div className="flex flex-col gap-0.5 px-2 py-1.5">
-          <p className={`text-xs leading-snug text-text ${open ? "" : "line-clamp-2"}`}>
+        <div className="flex flex-col gap-1 px-3 py-2.5">
+          <p className={`text-sm leading-snug text-text ${open ? "" : "line-clamp-2"}`}>
             {r.title}
           </p>
-          <div className="flex items-center gap-1.5 text-2xs text-text-faint">
+          <div className="flex items-center gap-1.5 text-xs text-text-faint">
             {r.source && <span className="min-w-0 truncate">de {r.source}</span>}
-            <span className="shrink-0">· {fmtCaptured(r.created_at)}</span>
+            <span className="shrink-0">
+              {r.source ? "· " : ""}
+              {fmtCaptured(r.created_at)}
+            </span>
             <span className="flex-1" />
             {derived.length > 0 && (
-              <span className="shrink-0 text-accent tabular-nums" title="Piezas creadas desde aquí">
-                ✦{derived.length}
+              <span className="shrink-0 tabular-nums" title="Piezas creadas desde aquí">
+                {derived.length} {derived.length === 1 ? "pieza" : "piezas"}
               </span>
             )}
             {r.pillar && (
-              <Badge tone={PILLARS[r.pillar].tone} variant="solid" size="sm">
-                {PILLARS[r.pillar].short}
-              </Badge>
+              <Badge size="sm">{PILLARS[r.pillar].short}</Badge>
             )}
           </div>
         </div>
@@ -339,14 +339,14 @@ function RefDetail({
   };
 
   return (
-    <div className="flex flex-col gap-2 border-t border-line px-2 py-2">
+    <div className="flex flex-col gap-3 border-t border-line px-3 py-3">
       {editing ? (
         <div className="flex flex-col gap-1.5">
           <textarea
             value={draftBody}
             onChange={(e) => setDraftBody(e.target.value)}
             placeholder="Contexto: qué dice, por qué importa, cómo se aplica…"
-            className={`${inputCls} min-h-[64px] resize-y`}
+            className={`${inputCls} h-auto min-h-[64px] resize-y py-2`}
           />
           <input
             value={draftUrl}
@@ -369,41 +369,47 @@ function RefDetail({
             />
           </div>
           <div className="flex gap-1.5">
-            <button onClick={() => void saveEdit()} className={`${btnCls} border-accent text-accent`}>
+            <Button variant="primary" onClick={() => void saveEdit()}>
               Guardar
-            </button>
-            <button onClick={() => setEditing(false)} className={btnCls}>
+            </Button>
+            <Button variant="ghost" onClick={() => setEditing(false)}>
               Cancelar
-            </button>
+            </Button>
           </div>
         </div>
       ) : r.body ? (
-        <p className="text-2xs leading-relaxed text-text-dim">{r.body}</p>
+        <p className="text-sm leading-relaxed text-text-dim">{r.body}</p>
       ) : (
-        <p className="text-2xs text-text-faint italic">Sin contexto escrito.</p>
+        <p className="text-xs text-text-faint">Sin contexto escrito.</p>
       )}
 
       {/* Estado en el plan y pilar: la referencia es accionable, no decorativa */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-2xs tracking-label text-text-faint uppercase">En el plan:</span>
-        {APPLY_STATES.map((s) => (
-          <button
-            key={s}
-            onClick={() => void onPatch(r.id, { apply_status: r.apply_status === s ? null : s })}
-            className={`rounded-xs px-1.5 py-0.5 text-2xs tracking-label uppercase ${
-              r.apply_status === s ? APPLY_ACTIVE[s] : "text-text-faint hover:text-text-dim"
-            }`}
-          >
-            {s}
-          </button>
-        ))}
-        <span className="ml-2 text-2xs tracking-label text-text-faint uppercase">Pilar:</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-text-faint">En el plan</span>
+        {/* Clic en el estado vigente lo quita (vuelve a "sin plan"). */}
+        <div className="flex items-center gap-1" role="group" aria-label="Estado en el plan">
+          {APPLY_STATES.map((s) => (
+            <button
+              key={s}
+              aria-pressed={r.apply_status === s}
+              onClick={() => void onPatch(r.id, { apply_status: r.apply_status === s ? null : s })}
+              className={`h-6 cursor-pointer rounded-full px-2 text-xs transition-colors ${
+                r.apply_status === s
+                  ? "bg-selected font-medium text-text"
+                  : "text-text-faint hover:bg-hover hover:text-text"
+              }`}
+            >
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+        <span className="ml-2 text-xs text-text-faint">Pilar</span>
         <select
           value={r.pillar ?? ""}
           onChange={(e) =>
             void onPatch(r.id, { pillar: (e.target.value || null) as ContentPillar | null })
           }
-          className="rounded-sm border border-line bg-panel-2 px-1 py-0.5 text-2xs text-text-dim focus:outline-none"
+          className="h-7 rounded-sm border border-line bg-panel px-2 text-xs text-text-dim focus:border-accent focus:outline-none"
           aria-label="Pilar de la referencia"
         >
           <option value="">—</option>
@@ -417,21 +423,22 @@ function RefDetail({
 
       {/* Trazabilidad: qué salió de esta referencia */}
       {derived.length > 0 && (
-        <div className="rounded-sm border border-line bg-panel-2/40 px-2 py-1.5">
-          <p className="text-2xs tracking-label text-text-faint uppercase">
-            Piezas desde esta referencia · {derived.length}
+        <div>
+          <p className="text-xs text-text-faint">
+            Piezas desde esta referencia{" "}
+            <span className="tabular-nums">{derived.length}</span>
           </p>
-          <div className="mt-1 flex flex-col">
+          <div className="mt-1 -mx-2 flex flex-col">
             {derived.map((p) => (
               <button
                 key={p.id}
                 onClick={() => onSelectPiece(p.id)}
-                className="flex items-baseline gap-2 rounded-xs px-0.5 py-0.5 text-left hover:bg-panel-2"
+                className="flex cursor-pointer items-baseline gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-hover"
               >
-                <span className="w-20 shrink-0 text-2xs text-text-faint uppercase">
+                <span className="min-w-0 flex-1 truncate text-sm text-text">{p.title}</span>
+                <span className="shrink-0 text-xs text-text-faint">
                   {STATUSES[p.status].label}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-xs text-text-dim">{p.title}</span>
               </button>
             ))}
           </div>
@@ -439,31 +446,20 @@ function RefDetail({
       )}
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          onClick={() => void createFromRef()}
-          disabled={creating}
-          className={`${btnCls} border-accent text-accent`}
-        >
-          {creating ? "creando…" : "✦ Crear pieza"}
-        </button>
+        <Button variant="primary" onClick={() => void createFromRef()} disabled={creating}>
+          {creating ? "Creando…" : "Crear pieza"}
+        </Button>
         {r.url && (
-          <a href={r.url} target="_blank" rel="noreferrer" className={btnCls}>
-            ▶ Ver en YouTube ↗
+          <a href={r.url} target="_blank" rel="noreferrer" className={linkBtnCls}>
+            Ver en YouTube <span aria-hidden>↗</span>
           </a>
         )}
-        {!editing && (
-          <button onClick={() => setEditing(true)} className={btnCls}>
-            ✎ Editar
-          </button>
-        )}
-        <button
-          onClick={() => void onRemove(r.id)}
-          className="rounded-sm px-2 py-0.5 text-2xs tracking-label text-text-faint uppercase hover:text-red"
-        >
-          ✕ Borrar
-        </button>
+        {!editing && <Button onClick={() => setEditing(true)}>Editar</Button>}
+        <Button variant="ghost" className="hover:text-red" onClick={() => void onRemove(r.id)}>
+          Borrar
+        </Button>
         <span className="flex-1" />
-        <span className="text-2xs text-text-faint">Capturada {fmtCaptured(r.created_at)}</span>
+        <span className="text-xs text-text-faint">Capturada {fmtCaptured(r.created_at)}</span>
       </div>
     </div>
   );
@@ -484,36 +480,36 @@ function HooksConDatos({ onSelectPiece }: { onSelectPiece: (id: number) => void 
 
   const fmtN = (n: number) => new Intl.NumberFormat("es-CO", { notation: "compact" }).format(n);
   return (
-    <div className="border-t border-line pt-2">
-      <p className="text-2xs tracking-label text-text-dim uppercase">
-        Hooks con datos · {rows.length}
-      </p>
+    <section className="border-t border-line pt-4">
+      <h3 className="px-2 text-xs font-medium text-text-dim">
+        Hooks con datos{" "}
+        <span className="font-normal text-text-faint tabular-nums">{rows.length}</span>
+      </h3>
       <div className="mt-1 flex flex-col">
         {rows.slice(0, 6).map((h) => (
           <button
             key={`${h.piece_id}-${h.platform}`}
             onClick={() => onSelectPiece(h.piece_id)}
-            className="flex items-baseline gap-2 rounded-xs px-0.5 py-1 text-left hover:bg-panel-2"
+            className="flex cursor-pointer items-center gap-3 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-hover"
             title={h.title}
           >
-            <span className="min-w-0 flex-1 truncate text-xs text-text-dim">«{h.hook}»</span>
-            {h.hook_kind && (
-              <Badge tone="accent" variant="solid" size="sm">
-                {h.hook_kind}
-              </Badge>
-            )}
-            <span className="shrink-0 text-2xs text-text tabular-nums">
+            <span className="min-w-0 flex-1 truncate text-sm text-text">«{h.hook}»</span>
+            {h.hook_kind && <Badge size="sm">{h.hook_kind}</Badge>}
+            <span className="w-20 shrink-0 text-right text-xs text-text-dim tabular-nums">
               {fmtN(h.engaged_views ?? h.views ?? 0)} views
             </span>
             {h.avg_view_pct != null && (
-              <span className="shrink-0 text-2xs text-cyan tabular-nums">
+              <span
+                className="w-10 shrink-0 text-right text-xs text-text-faint tabular-nums"
+                title="Porcentaje medio visto"
+              >
                 {Math.round(h.avg_view_pct)}%
               </span>
             )}
           </button>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -29,18 +29,18 @@ export function LiveMeetingChip() {
 
   // La clase de inglés vive en /ingles; la junta, en el tab Reuniones.
   const noun = live.isClass ? "Clase" : "Junta";
-  let cls = "border-red/60 bg-red/10 text-red";
+  let cls = "border-red/30 bg-red/10 text-red";
   let dot = true;
   let label: string = `${noun} en vivo`;
   if (live.phase === "processing") {
-    cls = "border-accent/60 bg-accent/10 text-accent";
+    cls = "border-accent/30 bg-accent/10 text-accent";
     dot = false;
     label = live.isClass ? "◈ Guardando clase" : "◈ Procesando junta";
   } else if (live.phase === "reconnecting") {
-    cls = "border-amber/60 bg-amber/10 text-amber";
+    cls = "border-amber/30 bg-amber/10 text-amber";
     label = `${noun} · reconectando`;
   } else if (live.phase === "requesting_mic" || live.phase === "connecting") {
-    cls = "border-amber/60 bg-amber/10 text-amber";
+    cls = "border-amber/30 bg-amber/10 text-amber";
     label = `${noun} · conectando`;
   } else if (live.phase === "stopping") {
     label = `${noun} · cerrando`;
@@ -51,11 +51,11 @@ export function LiveMeetingChip() {
       type="button"
       onClick={() => (live.isClass ? router.push("/ingles") : ws.showPanel("reuniones"))}
       title={live.isClass ? "Ir a la clase en vivo" : "Ir a la junta en vivo"}
-      className={`flex items-center gap-1.5 rounded-sm border px-2 py-1 text-2xs tracking-label uppercase ${cls}`}
+      className={`flex h-7 w-full cursor-pointer items-center gap-2 rounded-sm border px-2.5 text-xs font-medium whitespace-nowrap ${cls}`}
     >
       {dot && <span className="pulse-dot">●</span>}
       <span>{label}</span>
-      {dot && elapsed && <span className="tabular-nums">{elapsed}</span>}
+      {dot && elapsed && <span className="ml-auto tabular-nums">{elapsed}</span>}
     </button>
   );
 }

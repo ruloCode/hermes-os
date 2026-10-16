@@ -133,7 +133,7 @@ export function ChordBuilder({ song }: { song: Song }) {
           <button
             key={s.id}
             onClick={() => setSectionId(s.id)}
-            className={`rounded-sm border px-2 py-1 text-2xs tracking-label uppercase ${
+            className={`rounded-sm border px-2 py-1 text-2xs ${
               s.id === section.id ? "border-accent bg-accent/16 text-accent" : "border-line text-text-dim hover:text-text"
             }`}
           >
@@ -145,7 +145,7 @@ export function ChordBuilder({ song }: { song: Song }) {
       {/* La progresión: tarjetas grandes, clic = oír */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <span className="text-2xs tracking-label text-text-dim uppercase">
+          <span className="text-2xs text-text-dim">
             {section.label} · {section.bars} compases · {SECTION_KINDS[section.kind].hint}
           </span>
           <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ export function ChordBuilder({ song }: { song: Song }) {
 
       {/* Paleta de la tonalidad */}
       <div className="flex flex-col gap-1.5">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Paleta · clic agrega y suena</span>
+        <span className="text-2xs text-text-dim">Paleta · clic agrega y suena</span>
         <div className="flex flex-wrap gap-1">
           {dia.map((d) => (
             <button key={d.degree} onClick={() => add(d.chord)} className="flex items-center gap-1.5 rounded-sm border border-line bg-panel-2 px-2 py-1 hover:border-accent">
@@ -233,7 +233,7 @@ export function ChordBuilder({ song }: { song: Song }) {
 
       {/* Presets: para no arrancar de cero */}
       <div className="flex flex-col gap-1.5">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Progresiones clásicas · reemplazan la sección</span>
+        <span className="text-2xs text-text-dim">Progresiones clásicas · reemplazan la sección</span>
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
           {PROGRESSION_PRESETS.filter((p) => p.mode === "any" || p.mode === key.mode).map((p) => {
             const resolved = p.romans.map((r) => chordFromRoman(r, key)).filter((c): c is Chord => Boolean(c));

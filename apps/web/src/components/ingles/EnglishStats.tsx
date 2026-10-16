@@ -1,38 +1,54 @@
 "use client";
 
-// Hero de la vista Inglés (patrón Memrise/Speak de Mobbin): racha, sesiones,
-// tiempo hablado, fluidez con tendencia y vocabulario — todo real — más el
-// CTA que conecta la voz con el tutor.
+// Tira de métricas de la vista Inglés (patrón Memrise/Speak de Mobbin): racha,
+// sesiones, tiempo hablado, fluidez con tendencia y vocabulario — todo real.
+//
+// v5: una tira serena, no un tablero. Antes cada número llevaba su color
+// (tiempo en cyan, fluidez en verde, racha en ámbar) y ninguno era un estado:
+// eran cinco colores para cinco etiquetas. Ahora el número va en el color del
+// texto, la etiqueta en gris y la tendencia en neutro; el color queda libre
+// para lo que sí es estado. Los botones de acción se fueron a la cabecera de
+// la vista (ViewHeader), que es donde viven las acciones de toda la página.
 
+import type { ReactNode } from "react";
 import type { EnglishSession, VocabEntry } from "@hermes/shared";
-import { BarMeter } from "@/components/ui/BarMeter";
 import { Sparkline } from "@/components/ui/Sparkline";
-import { StatBlock } from "@/components/ui/StatBlock";
+
+function Stat({
+  label,
+  value,
+  unit,
+  children,
+}: {
+  label: string;
+  value: ReactNode;
+  unit?: string;
+  /** Visual pequeño al lado del número (tendencia, progreso). */
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5 border-l border-line px-6 first:border-l-0 first:pl-0">
+      <dt className="text-xs text-text-faint">{label}</dt>
+      <dd className="flex items-end gap-3">
+        <span className="text-xl leading-none font-semibold text-text tabular-nums">
+          {value}
+          {unit && <span className="ml-1 text-sm font-normal text-text-faint">{unit}</span>}
+        </span>
+        {children}
+      </dd>
+    </div>
+  );
+}
 
 export function EnglishStats({
   sessions,
   vocab,
   streak,
-  tutorConfigured,
-  live,
-  onPractice,
-  onStop,
-  classBusy,
-  onClass,
 }: {
   sessions: EnglishSession[];
   vocab: VocabEntry[];
   /** Racha del hábito "Práctica de inglés" (null si aún no existe). */
   streak: number | null;
-  tutorConfigured: boolean;
-  /** Práctica en vivo activa: el CTA se vuelve "Terminar práctica". */
-  live: boolean;
-  onPractice: () => void;
-  onStop: () => void;
-  /** Hay clase (o junta) en vivo: el control vive en su vista, aquí no se ofrece nada. */
-  classBusy: boolean;
-  /** Arranca la compañera de clase (Google Meet). */
-  onClass: () => void;
 }) {
   const totalSec = sessions.reduce((a, s) => a + (s.duration_sec ?? 0), 0);
   const totalMin = Math.round(totalSec / 60);
@@ -46,78 +62,45 @@ export function EnglishStats({
   const learned = vocab.filter((v) => v.learned).length;
 
   return (
-    <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+    <dl className="flex flex-wrap items-stretch gap-y-4">
       {streak != null && streak > 0 && (
-        <StatBlock label="Racha" value={streak} unit="días" size="lg" tone="amber" />
+        <Stat label="Racha" value={streak} unit={streak === 1 ? "día" : "días"} />
       )}
-      <StatBlock label="Sesiones" value={sessions.length} size="lg" />
+      <Stat label="Sesiones" value={sessions.length} />
       {totalMin > 0 && (
-        <StatBlock
+        <Stat
           label="Tiempo hablado"
           value={totalMin < 60 ? totalMin : (totalMin / 60).toFixed(1)}
           unit={totalMin < 60 ? "min" : "h"}
-          size="lg"
-          tone="cyan"
         />
       )}
       {lastFluency != null && (
-        <div className="flex flex-col gap-1.5">
-          <StatBlock label="Fluidez" value={`${lastFluency}/5`} size="lg" tone="green" />
+        <Stat label="Fluidez" value={lastFluency} unit="/ 5">
           {/* Caja acotada: el spark suelto crece al alto por defecto del svg */}
           {fluencyTrend.length >= 2 && (
-            <div className="h-5 w-36">
-              <Sparkline data={fluencyTrend} max={5} tone="green" fill />
-            </div>
+            <span className="mb-0.5 block h-4 w-20" title="Fluidez de las últimas sesiones">
+              <Sparkline data={fluencyTrend} max={5} tone="neutral" height={16} width={80} />
+            </span>
           )}
-        </div>
+        </Stat>
       )}
       {vocab.length > 0 && (
-        <div className="flex min-w-36 flex-col gap-1">
-          <StatBlock label="Vocabulario" value={`${learned}/${vocab.length}`} unit="aprendidos" />
-          <BarMeter
-            value={learned}
-            max={Math.max(vocab.length, 1)}
-            segments={0}
-            height={5}
-            tone="accent"
-            showValue={false}
-          />
-        </div>
+        <Stat label="Vocabulario" value={`${learned}/${vocab.length}`} unit="aprendidas">
+          <span
+            className="mb-1 block h-1 w-20 overflow-hidden rounded-full bg-line-2"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={vocab.length}
+            aria-valuenow={learned}
+            aria-label="Vocabulario aprendido"
+          >
+            <span
+              className="block h-full rounded-full bg-text-dim"
+              style={{ width: `${(learned / Math.max(vocab.length, 1)) * 100}%` }}
+            />
+          </span>
+        </Stat>
       )}
-      {classBusy ? null : live ? (
-        <button
-          type="button"
-          onClick={onStop}
-          title="Cuelga la llamada — la sesión se guarda y el coach genera el reporte"
-          className="ml-auto self-center rounded-sm border border-red/50 bg-red/5 px-3 py-1.5 text-xs text-red transition-colors hover:border-red"
-        >
-          ◼ Terminar práctica
-        </button>
-      ) : (
-        <span className="ml-auto flex items-center gap-2 self-center">
-        <button
-          type="button"
-          onClick={onClass}
-          title="Abre la compañera para tu clase de Google Meet: comparte la pestaña de Meet y te corrige, te ayuda a responder y arma el reporte"
-          className="rounded-sm border border-accent/50 bg-accent/5 px-3 py-1.5 text-xs text-accent transition-colors hover:border-accent"
-        >
-          ● Clase en vivo
-        </button>
-        <button
-          type="button"
-          onClick={onPractice}
-          disabled={!tutorConfigured}
-          title={
-            tutorConfigured
-              ? "Conecta la voz con el tutor de inglés"
-              : "Falta NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID (pnpm setup:elevenlabs)"
-          }
-          className="rounded-sm border border-green/50 bg-green/5 px-3 py-1.5 text-xs text-green transition-colors hover:border-green disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          ▶ Practicar ahora
-        </button>
-        </span>
-      )}
-    </div>
+    </dl>
   );
 }

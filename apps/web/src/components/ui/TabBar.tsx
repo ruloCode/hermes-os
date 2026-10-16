@@ -3,8 +3,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 /**
- * TabBar — tabs HUD con acento animado bajo el tab activo.
- * El acento (barra de 2px con glow de acento) se posiciona midiendo
+ * TabBar — pestañas subrayadas con un indicador animado bajo la activa.
+ * El indicador (barra de 2px en el color del texto) se posiciona midiendo
  * offsetLeft/offsetWidth del botón activo y anima translateX + width;
  * se recalcula al cambiar `active` y ante resize del contenedor.
  * Teclado: ArrowLeft/ArrowRight con wrap, Home/End a los extremos.
@@ -65,7 +65,7 @@ export function TabBar({
   };
 
   const sizing =
-    size === "md" ? "min-h-8 px-2.5 text-xs" : "min-h-7 px-2 text-2xs";
+    size === "md" ? "min-h-9 px-2.5 text-sm" : "min-h-8 px-2 text-xs";
 
   return (
     <div
@@ -89,13 +89,13 @@ export function TabBar({
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(t.id)}
-            className={`${sizing} tracking-label whitespace-nowrap uppercase transition-colors ${
-              selected ? "text-text font-medium" : "text-text-dim hover:text-text"
+            className={`${sizing} cursor-pointer whitespace-nowrap transition-colors ${
+              selected ? "font-medium text-text" : "text-text-faint hover:text-text"
             }`}
           >
             {t.label}
             {t.badge !== undefined && (
-              <sup className="ml-0.5 text-2xs text-cyan tabular-nums">{t.badge}</sup>
+              <span className="ml-1.5 text-2xs text-text-faint tabular-nums">{t.badge}</span>
             )}
           </button>
         );

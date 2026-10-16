@@ -34,18 +34,21 @@ import {
 import type { ContentPiece, ContentStatus } from "@hermes/shared";
 import { useEstudioContext } from "@/state/EstudioProvider";
 import { RadialGauge } from "@/components/ui/RadialGauge";
+import { Button } from "@/components/ui/Button";
 import { ConfirmModal } from "./ConfirmModal";
 import { fmtDays, fmtPublish } from "./labels";
 
 type Tab = "guion" | "tomas" | "edicion" | "publicacion";
 
-/** Clases ESTÁTICAS por tono (Tailwind purga las interpoladas). */
+/** Clases ESTÁTICAS por tono (Tailwind purga las interpoladas). El punto de
+ *  la etapa actual lleva el tono de su ESTADO (lista = verde, programada =
+ *  cyan, atascada = ámbar); sin estado especial, el texto normal. */
 const ACTIVE_DOT: Record<string, string> = {
-  green: "border-green bg-green/20 text-green",
-  amber: "border-amber bg-amber/20 text-amber",
-  accent: "border-accent bg-accent/20 text-accent",
-  cyan: "border-cyan bg-cyan/20 text-cyan",
-  neutral: "border-line-2 bg-panel-2 text-text-dim",
+  green: "border-green bg-green",
+  amber: "border-amber bg-amber",
+  accent: "border-text bg-text",
+  cyan: "border-cyan bg-cyan",
+  neutral: "border-text-dim bg-text-dim",
 };
 
 /** Dónde se resuelve cada criterio → tab del workspace (null = cabecera). */
@@ -98,27 +101,22 @@ export function PieceProgress({
   // Descartada: fuera del pipeline — una línea con la salida de vuelta.
   if (discarded)
     return (
-      <div className="mt-2 flex items-center justify-between gap-2 rounded-sm border border-red/30 bg-red/5 px-3 py-2">
+      <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-red/30 bg-red/5 px-3 py-2">
         <p className="text-xs text-text-dim">
           <span className="text-red">Descartada</span> — archivada para no volver a proponerla.
         </p>
-        <button
-          onClick={() => void patchPiece(piece.id, { status: "idea" })}
-          className="shrink-0 rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent"
-        >
-          ↺ Restaurar a idea
-        </button>
+        <Button onClick={() => void patchPiece(piece.id, { status: "idea" })}>
+          Restaurar a idea
+        </Button>
       </div>
     );
 
   return (
+    /* Se opera (stepper, avance, criterios): lleva marco. Calmado — el estado
+       (lista para avanzar / programada) tiñe solo el borde, no el fondo. */
     <div
-      className={`mt-2 rounded-sm border px-3 py-2 ${
-        scheduled
-          ? "border-cyan/35 bg-cyan/6"
-          : ready && next
-            ? "border-green/35 bg-green/6"
-            : "border-line bg-panel-2/40"
+      className={`mt-3 rounded-md border bg-panel px-3 py-2.5 ${
+        scheduled ? "border-cyan/35" : ready && next ? "border-green/35" : "border-line"
       }`}
     >
       <div className="flex items-center gap-3">
@@ -146,7 +144,7 @@ export function PieceProgress({
                   {i > 0 && (
                     <span
                       aria-hidden
-                      className={`h-px min-w-3 flex-1 ${passed || active ? "bg-accent/60" : "bg-line-2"}`}
+                      className={`h-px min-w-3 flex-1 ${passed || active ? "bg-text-faint" : "bg-line-2"}`}
                     />
                   )}
                   <button
@@ -154,31 +152,32 @@ export function PieceProgress({
                     title={`${STAGES[s].label} — ${STAGES[s].meaning}`}
                     aria-current={active ? "step" : undefined}
                     aria-label={`${STAGES[s].label}${active ? " (etapa actual)" : passed ? " (pasada)" : ""}`}
-                    className={`group flex shrink-0 flex-col items-center gap-0.5 px-0.5 ${
-                      active ? "" : "opacity-80 hover:opacity-100"
-                    }`}
+                    className="group flex shrink-0 cursor-pointer flex-col items-center gap-1 rounded-xs px-0.5"
                   >
+                    {/* Punto: lleno = pasada · lleno con anillo = actual · hueco = por venir */}
                     <span
-                      className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[8px] leading-none transition-colors ${
+                      className={`flex h-3 w-3 items-center justify-center rounded-full border transition-colors ${
                         active
-                          ? (ACTIVE_DOT[tone] ?? ACTIVE_DOT.accent)
+                          ? `ring-2 ring-selected ${ACTIVE_DOT[tone] ?? ACTIVE_DOT.accent}`
                           : passed
-                            ? "border-accent/60 bg-accent/15 text-accent"
-                            : "border-line-2 text-transparent group-hover:border-text-faint"
+                            ? "border-text-faint bg-text-faint"
+                            : "border-line-2 group-hover:border-text-faint"
                       }`}
-                    >
-                      {passed ? "✓" : active ? "●" : "○"}
-                    </span>
+                    />
                     <span
-                      className={`text-2xs leading-none tracking-label uppercase max-xl:hidden ${
-                        active ? "text-text" : passed ? "text-text-dim" : "text-text-faint"
+                      className={`text-2xs leading-none max-xl:hidden ${
+                        active
+                          ? "font-medium text-text"
+                          : passed
+                            ? "text-text-dim group-hover:text-text"
+                            : "text-text-faint group-hover:text-text"
                       }`}
                     >
                       {STAGES[s].label}
                     </span>
                     {/* En angosto: solo la etapa actual conserva su nombre */}
                     {active && (
-                      <span className="text-2xs leading-none tracking-label text-text uppercase xl:hidden">
+                      <span className="text-2xs leading-none font-medium text-text xl:hidden">
                         {STAGES[s].label}
                       </span>
                     )}
@@ -192,12 +191,10 @@ export function PieceProgress({
           <button
             onClick={() => setOpen(!open)}
             aria-expanded={open}
-            className="mt-1.5 flex w-full items-center gap-2 text-left"
+            className="mt-2 flex w-full cursor-pointer items-center gap-2 text-left"
           >
             <span className="min-w-0 flex-1 truncate text-xs text-text-dim">
-              <span className={scheduled ? "text-cyan" : ready && next ? "text-green" : "text-text"}>
-                {stage.label}
-              </span>
+              <span className="font-medium text-text">{stage.label}</span>
               {" · "}
               {/* Programada/publicada: lo que importa es la FECHA, no cuántos
                   criterios faltan. Antes decía "falta 1 de 3" incluso con el
@@ -215,9 +212,7 @@ export function PieceProgress({
                 {fmtDays(days)} aquí{overSla ? " · atascada" : ""}
               </span>
             </span>
-            <span aria-hidden className="shrink-0 text-2xs text-text-faint">
-              {open ? "▴" : "▾"}
-            </span>
+            <Chevron open={open} />
           </button>
 
           {/* Qué falta, SIEMPRE a la vista. Antes vivía tras el ▾ y la línea
@@ -233,13 +228,17 @@ export function PieceProgress({
                     onClick={() => tab && onGo(tab)}
                     disabled={!tab}
                     title={tab ? `Resolver en ${g.where}` : "Se resuelve en la cabecera"}
-                    className={`flex items-center gap-1 rounded-xs border px-1.5 py-0.5 text-2xs ${
+                    className={`flex h-6 items-center gap-1 rounded-full border px-2 text-xs transition-colors ${
                       g.done
-                        ? "border-green/30 text-green/70"
-                        : "border-line-2 text-text-dim enabled:hover:border-accent enabled:hover:text-text"
+                        ? "border-transparent text-text-faint"
+                        : "border-line text-text-dim enabled:cursor-pointer enabled:hover:bg-hover enabled:hover:text-text"
                     }`}
                   >
-                    <span aria-hidden>{g.done ? "✓" : "○"}</span>
+                    {g.done && (
+                      <span aria-hidden className="text-green">
+                        ✓
+                      </span>
+                    )}
                     <span className={g.done ? "line-through" : ""}>{g.label}</span>
                   </button>
                 );
@@ -248,22 +247,21 @@ export function PieceProgress({
           )}
         </div>
 
+        {/* Lista para avanzar = la acción principal de la pieza (primario);
+            si falta algo se puede igual, pero no se empuja. */}
         {next && (
-          <button
+          <Button
+            variant={ready ? "primary" : "secondary"}
             onClick={() => setPendingMove(next)}
             title={
               ready
                 ? `Cumple todo — pasar a ${STAGES[next].label}`
                 : `Faltan ${pendientes.length} criterios, pero la decisión es tuya`
             }
-            className={`shrink-0 self-center rounded-sm border px-2.5 py-1.5 text-2xs tracking-label uppercase ${
-              ready
-                ? "border-green bg-green/10 text-green"
-                : "border-line-2 bg-panel-2 text-text-dim hover:border-accent hover:text-text"
-            }`}
+            className="self-center"
           >
-            {STAGES[next].label} →
-          </button>
+            Pasar a {STAGES[next].label.toLowerCase()}
+          </Button>
         )}
       </div>
 
@@ -276,12 +274,12 @@ export function PieceProgress({
           </p>
 
           <div className="flex flex-wrap items-center gap-1">
-            <span className="mr-1 text-2xs tracking-label text-text-faint uppercase">Recorrido</span>
+            <span className="mr-1 text-2xs text-text-faint">Recorrido</span>
             {history.length ? (
               history.map((h, i) => (
                 <span key={`${h.status}-${h.at}`} className="text-2xs text-text-faint">
                   {i > 0 && <span className="mx-1 text-line-2">›</span>}
-                  <span className={h.current ? "text-accent" : "text-text-dim"}>
+                  <span className={h.current ? "font-medium text-text" : "text-text-dim"}>
                     {STAGES[h.status].label}
                   </span>{" "}
                   <span className="tabular-nums">{fmtDays(h.days)}</span>
@@ -293,12 +291,9 @@ export function PieceProgress({
               </span>
             )}
             <span className="flex-1" />
-            <button
-              onClick={() => setPendingMove("descartada")}
-              className="text-2xs tracking-label text-text-faint uppercase hover:text-red"
-            >
-              ✕ descartar
-            </button>
+            <Button variant="ghost" onClick={() => setPendingMove("descartada")}>
+              Descartar pieza
+            </Button>
           </div>
         </div>
       )}
@@ -355,7 +350,7 @@ function StageMoveModal({
       <p className="text-xs text-text">
         <span className="text-text-dim">{STAGES[from].label}</span>
         <span className="mx-1.5 text-text-faint">→</span>
-        <span className={discard ? "text-red" : backward ? "text-amber" : "text-accent"}>
+        <span className={discard ? "text-red" : backward ? "text-amber" : "font-medium text-text"}>
           {toLabel}
         </span>
       </p>
@@ -389,13 +384,33 @@ function StageMoveModal({
       )}
 
       {to === "programado" && (
-        <p className="rounded-xs border border-accent/30 bg-accent/5 px-2 py-1.5 text-2xs leading-snug text-text-dim">
+        <p className="rounded-sm border border-line bg-panel-2 px-2.5 py-2 text-xs leading-snug text-text-dim">
           Al entrar a Programado, las variantes con copy se encolan y el barrido las{" "}
-          <span className="text-accent">sube a YouTube</span> (privadas hasta su fecha).
+          <span className="font-medium text-text">sube a YouTube</span> (privadas hasta su fecha).
         </p>
       )}
 
       <p className="text-2xs text-text-faint">{discard ? "" : STAGES[to].meaning}</p>
     </ConfirmModal>
+  );
+}
+
+/** Flecha de desplegar (▾/▴ eran texto: no alineaban ni giraban). */
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className={`shrink-0 text-text-faint transition-transform ${open ? "rotate-180" : ""}`}
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }

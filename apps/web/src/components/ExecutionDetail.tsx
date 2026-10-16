@@ -41,9 +41,12 @@ export function ExecutionDetail({
       <button
         type="button"
         onClick={onBack}
-        className="mb-2 flex w-fit items-center gap-1.5 text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-text"
+        className="-ml-1 mb-2 flex h-7 w-fit cursor-pointer items-center gap-1 rounded-xs pr-2 pl-1 text-xs text-text-dim transition-colors hover:bg-hover hover:text-text"
       >
-        ← Ejecuciones
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+        Ejecuciones
       </button>
 
       {loading && <PanelState kind="loading" compact />}
@@ -51,17 +54,30 @@ export function ExecutionDetail({
       {!loading && !exec && <PanelState kind="error" title="No se pudo cargar la ejecución" />}
 
       {exec && (
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-2xs tracking-label text-text-dim uppercase">
-            <span className={exec.status === "done" ? "text-green" : "text-red"}>
-              ● {exec.status === "done" ? "hecha" : "error"}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          {/* Metadatos reales: el estado va en el punto; lo demás, gris. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-dim">
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className={`h-1.5 w-1.5 rounded-full ${exec.status === "done" ? "bg-green" : "bg-red"}`}
+              />
+              {exec.status === "done" ? "Hecha" : "Error"}
             </span>
-            <span>▸ {exec.kind === "continue" ? "continuación" : "ejecución"}</span>
-            <span>◷ {exec.created_at.slice(0, 16).replace("T", " ")}</span>
-            {exec.cost_usd != null && <span>${exec.cost_usd.toFixed(2)}</span>}
-            {exec.duration_ms != null && <span>⧗ {Math.round(exec.duration_ms / 1000)}s</span>}
-            {exec.num_turns != null && <span>↺ {exec.num_turns} turnos</span>}
-            {exec.model && <span>{exec.model}</span>}
+            <span>{exec.kind === "continue" ? "Continuación" : "Ejecución"}</span>
+            <span className="font-mono tabular-nums">
+              {exec.created_at.slice(0, 16).replace("T", " ")}
+            </span>
+            {exec.cost_usd != null && (
+              <span className="tabular-nums">${exec.cost_usd.toFixed(2)}</span>
+            )}
+            {exec.duration_ms != null && (
+              <span className="tabular-nums">{Math.round(exec.duration_ms / 1000)} s</span>
+            )}
+            {exec.num_turns != null && (
+              <span className="tabular-nums">{exec.num_turns} turnos</span>
+            )}
+            {exec.model && <span className="font-mono text-2xs">{exec.model}</span>}
           </div>
 
           <Markdown source={exec.markdown} />

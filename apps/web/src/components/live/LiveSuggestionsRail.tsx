@@ -7,33 +7,37 @@ import { SuggestionBody } from "./SuggestionBody";
 import { AutoHelpToggle } from "@/components/ingles/AutoHelpToggle";
 import { fmtLiveClock, useLiveMeeting } from "@/state/LiveMeetingProvider";
 
-// Acento por tipo de sugerencia: franja izquierda + label. Clases literales
-// (no interpoladas) para que Tailwind las emita.
-const KIND_STYLE: Record<LiveSuggestionKind, { label: string; border: string; text: string }> = {
-  decir: { label: "DILO", border: "border-l-cyan", text: "text-cyan" },
-  preguntar: { label: "PREGUNTA", border: "border-l-accent", text: "text-accent" },
-  dato: { label: "DATO", border: "border-l-blue", text: "text-blue" },
-  rumbo: { label: "RUMBO", border: "border-l-amber", text: "text-amber" },
+// Tipo de sugerencia = CATEGORÍA, no estado: etiqueta en gris (v4 le daba a
+// cada tipo un color de borde izquierdo y de texto — seis colores por riel).
+const KIND_STYLE: Record<LiveSuggestionKind, { label: string }> = {
+  decir: { label: "Dilo" },
+  preguntar: { label: "Pregunta" },
+  dato: { label: "Dato" },
+  rumbo: { label: "Rumbo" },
   // Clase de inglés
-  corregir: { label: "Corrección", border: "border-l-amber", text: "text-amber" },
-  andamio: { label: "Para responder", border: "border-l-green", text: "text-green" },
-  explicar: { label: "Qué dijo", border: "border-l-blue", text: "text-blue" },
+  corregir: { label: "Corrección" },
+  andamio: { label: "Para responder" },
+  explicar: { label: "Qué dijo" },
   // Reunión de equipo
-  aportar: { label: "Aporta", border: "border-l-green", text: "text-green" },
-  entender: { label: "Concepto", border: "border-l-blue", text: "text-blue" },
+  aportar: { label: "Aporta" },
+  entender: { label: "Concepto" },
   // Cualquier junta con «soy yo»: lo que acabas de decir, con el punto primero
-  pulir: { label: "Dilo más claro", border: "border-l-accent", text: "text-accent" },
+  pulir: { label: "Dilo más claro" },
 };
 
 /** Etiqueta de la tarjeta que streamea (capa rápida) según lo que se pidió. */
 const STREAM_LABEL: Partial<Record<LiveSuggestionKind, string>> = {
-  decir: "⚡ Dilo ahora",
-  andamio: "⚡ Para responder",
-  explicar: "⚡ Qué dijo",
-  aportar: "⚡ Aporta",
-  preguntar: "⚡ Pregunta",
-  entender: "⚡ De qué hablan",
+  decir: "Dilo ahora",
+  andamio: "Para responder",
+  explicar: "Qué dijo",
+  aportar: "Aporta",
+  preguntar: "Pregunta",
+  entender: "De qué hablan",
 };
+
+// Botón de ayuda a mano: secundario neutro (el acento es solo foco/primario).
+const HELP_BTN =
+  "inline-flex h-7 cursor-pointer items-center justify-center truncate rounded-sm border border-line bg-panel px-2.5 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 /** Botones de la reunión de equipo: qué decir, qué preguntar, qué está pasando. */
 export const TEAM_HELP: { intent: LiveHelpIntent; label: string; title: string }[] = [
@@ -85,9 +89,9 @@ export function LiveSuggestionsRail() {
       // se acota con lg:max-wide: para que ambos anchos convivan.
       className="flex shrink-0 flex-col lg:max-wide:w-[300px] wide:w-[340px] max-lg:h-[156px] max-lg:w-full"
     >
-      <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-2xs tracking-title text-accent uppercase">
-          {live.isClass ? "Compañera de clase" : live.isTeam ? "Copiloto de equipo" : "▸ Copiloto"}
+      <div className="mb-2 flex min-h-7 shrink-0 items-center justify-between gap-2">
+        <span className="text-xs font-medium text-text-dim">
+          {live.isClass ? "Compañera de clase" : live.isTeam ? "Copiloto de equipo" : "Copiloto"}
         </span>
         {live.isTeam ? null : live.isClass ? (
           <span className="flex gap-1">
@@ -98,7 +102,7 @@ export function LiveSuggestionsRail() {
                 onClick={() => live.suggestNow(h.intent)}
                 disabled={!live.wsConnected || !live.fastCopilot}
                 title={h.title}
-                className="rounded-sm border border-accent/50 bg-accent/5 px-2 py-1 text-2xs text-accent opacity-90 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className={HELP_BTN}
               >
                 {h.label}
               </button>
@@ -114,16 +118,16 @@ export function LiveSuggestionsRail() {
               ? "Pide una respuesta inmediata para este momento (capa rápida)"
               : "Fuerza una tanda de sugerencias con lo hablado hasta ahora"
           }
-          className="rounded-sm border border-accent/50 bg-accent/5 px-2 py-1 text-2xs tracking-label text-accent uppercase opacity-90 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className={HELP_BTN}
         >
-          ◈ Soplar ahora
+          Soplar ahora
         </button>
         )}
       </div>
 
       {/* Equipo: los tres pedidos a mano en su propia fila (junto al título no caben). */}
       {live.isTeam && (
-        <div className="mb-1.5 grid shrink-0 grid-cols-3 gap-1">
+        <div className="mb-2 grid shrink-0 grid-cols-3 gap-1">
           {TEAM_HELP.map((h) => (
             <button
               key={h.intent}
@@ -131,7 +135,7 @@ export function LiveSuggestionsRail() {
               onClick={() => live.suggestNow(h.intent)}
               disabled={!live.wsConnected || !live.fastCopilot}
               title={h.title}
-              className="truncate rounded-sm border border-accent/50 bg-accent/5 px-1.5 py-1 text-2xs text-accent opacity-90 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+              className={`${HELP_BTN} px-1.5`}
             >
               {h.label}
             </button>
@@ -146,8 +150,9 @@ export function LiveSuggestionsRail() {
       )}
 
       {live.suggesting && (
-        <p className="mb-1.5 shrink-0 text-2xs tracking-label text-accent pulse-dot">
-          ◈ Analizando la conversación…
+        <p className="mb-2 flex shrink-0 items-center gap-2 text-xs text-text-dim">
+          <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan" />
+          Analizando la conversación…
         </p>
       )}
 
@@ -156,27 +161,31 @@ export function LiveSuggestionsRail() {
         (() => {
           const { angle, body } = splitStreamingAngle(streaming.kind, streaming.text);
           return (
-            <div className="mb-2 shrink-0 rounded-sm border border-cyan/60 border-l-2 border-l-cyan bg-cyan/5 p-2.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-2xs tracking-label text-cyan uppercase pulse-dot">
-                  {STREAM_LABEL[streaming.kind] ?? "⚡ DILO AHORA"}
-                  {angle ? ` · ${angle}` : ""}
+            // En curso: la única tarjeta con color (cyan = "en curso").
+            <div className="mb-2 shrink-0 rounded-md border border-cyan/40 bg-cyan/5 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-text">
+                  <span aria-hidden className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
+                  <span className="truncate">
+                    {STREAM_LABEL[streaming.kind] ?? "Dilo ahora"}
+                    {angle ? ` · ${angle}` : ""}
+                  </span>
                 </span>
-                <span className="text-2xs text-text-faint tabular-nums">
+                <span className="font-mono text-2xs text-text-faint tabular-nums">
                   {fmtLiveClock(streaming.atMs)}
                 </span>
               </div>
               {body ? (
                 <p className="mt-1 text-sm leading-snug whitespace-pre-line text-text">
                   {body}
-                  <span className="text-cyan">▌</span>
+                  <span className="text-text-faint">▍</span>
                 </p>
               ) : (
                 <p className="mt-1 text-xs leading-snug text-text-dim italic">
                   {live.isTeam ? "pensando qué aportar…" : "pensando la respuesta…"}
                 </p>
               )}
-              <p className="mt-1 text-2xs leading-snug text-text-dim">{streaming.trigger}</p>
+              <p className="mt-1 text-xs leading-snug text-text-faint">{streaming.trigger}</p>
             </div>
           );
         })()}
@@ -205,16 +214,16 @@ export function LiveSuggestionsRail() {
             return (
               <div
                 key={s.id}
-                className={`shrink-0 rounded-sm border border-line border-l-2 ${k.border} bg-accent/5 p-2.5 max-lg:min-w-[260px] max-lg:snap-start`}
+                className="group shrink-0 rounded-md border border-line bg-panel px-3 py-2.5 max-lg:min-w-[260px] max-lg:snap-start"
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className={`text-2xs tracking-label uppercase ${k.text}`}>
-                    {s.source === "fast" ? "⚡ " : ""}
+                  <span className="text-xs font-medium text-text-dim">
                     {k.label}
                     {s.angle && s.angle.toLowerCase() !== k.label.toLowerCase() ? ` · ${s.angle}` : ""}
-                    {s.manual ? " · manual" : ""}
+                    {s.manual ? " · a mano" : ""}
+                    {s.source === "fast" ? " · al instante" : ""}
                   </span>
-                  <span className="text-2xs text-text-faint tabular-nums">
+                  <span className="font-mono text-2xs text-text-faint tabular-nums">
                     {fmtLiveClock(s.atMs)}
                   </span>
                 </div>
@@ -222,9 +231,9 @@ export function LiveSuggestionsRail() {
                 <button
                   type="button"
                   onClick={() => live.dismissSuggestion(s.id)}
-                  className="mt-1.5 text-2xs text-text-dim transition-colors hover:text-text"
+                  className="-ml-1 mt-1.5 h-6 cursor-pointer rounded-xs px-1 text-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
                 >
-                  ✕ descartar
+                  Descartar
                 </button>
               </div>
             );

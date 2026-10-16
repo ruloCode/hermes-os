@@ -11,11 +11,18 @@
 // usar RailSection, igual que en las otras nueve rutas. La estructura de fondo
 // ya era la correcta (lista de sesiones → reporte = lista → pieza), así que
 // aquí el cambio es de piel, no de huesos.
+//
+// v5: las dos acciones de la página (Practicar ahora · Clase en vivo) suben a
+// la cabecera — antes eran dos botones con borde rojo y verde perdidos al
+// final de la tira de métricas. Las tres columnas (sesiones · reporte · riel)
+// se separan con hairlines y ninguna lleva caja: se elige, se lee, se actúa.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ScrollArea } from "@/components/ui/ScrollArea";
+import { PanelState } from "@/components/ui/PanelState";
 import { RailSection } from "@/components/ui/Rail";
+import { Button } from "@/components/ui/Button";
 import { useEnglish } from "@/hooks/useEnglish";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
 import { useVoice } from "@/components/VoiceBusyContext";
@@ -131,46 +138,92 @@ export function InglesView() {
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ViewHeader
         title="Inglés"
-        meta={classLive ? "En clase" : tutorLive ? "Practicando" : undefined}
+        meta={
+          classLive
+            ? "En clase"
+            : tutorLive
+              ? "Practicando"
+              : sessions.length > 0
+                ? `${sessions.length} ${sessions.length === 1 ? "sesión" : "sesiones"}`
+                : undefined
+        }
+        actions={
+          // En vivo (práctica, clase o una junta) el control vive en su vista.
+          tutorLive || classLive || live.active ? undefined : (
+            <>
+              <Button
+                size="md"
+                onClick={startClass}
+                title="Abre la compañera para tu clase de Google Meet: comparte la pestaña de Meet y te corrige, te ayuda a responder y arma el reporte"
+                icon={<span className="block h-2 w-2 rounded-full bg-red" />}
+              >
+                Clase en vivo
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => void voice.switchToTutor()}
+                disabled={!voice.tutorConfigured}
+                title={
+                  voice.tutorConfigured
+                    ? "Conecta la voz con el tutor de inglés"
+                    : "Falta NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID (pnpm setup:elevenlabs)"
+                }
+              >
+                Practicar ahora
+              </Button>
+            </>
+          )
+        }
       />
 
       {/* En vivo (práctica o clase) la conversación manda: las stats esperan. */}
-      <div className={`shrink-0 ${tutorLive || classLive ? "hidden" : ""}`}>
-        <EnglishStats
-          sessions={sessions}
-          vocab={vocab}
-          streak={streak}
-          tutorConfigured={voice.tutorConfigured}
-          live={tutorLive}
-          onPractice={() => void voice.switchToTutor()}
-          onStop={() => void voice.disconnect()}
-          classBusy={classLive || live.active}
-          onClass={startClass}
-        />
-        {classError && <p className="mt-2 text-2xs text-red">⚠ {classError}</p>}
+      <div className={`shrink-0 pb-3 ${tutorLive || classLive ? "hidden" : ""}`}>
+        <EnglishStats sessions={sessions} vocab={vocab} streak={streak} />
+        {classError && (
+          <p className="mt-3 flex items-center gap-2 text-sm text-text-dim">
+            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-red" />
+            {classError}
+          </p>
+        )}
       </div>
 
       {/* Clase en vivo: la ventanita flota encima de Meet (un clic: Chrome
           exige un gesto para abrirla, y el del inicio ya se usó en la pestaña). */}
       {classLive && live.phase === "live" && pip.supported && !pip.open && (
-        <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
-          <p className="text-xs text-text">
+        <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-line bg-panel px-3.5 py-2.5">
+          <p className="min-w-0 flex-1 text-sm text-text-dim">
             Abre la ventanita y vuelve a Meet: la ayuda queda flotando encima de la llamada.
           </p>
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={() => void pip.openPip()}
-            className="ml-auto rounded-sm border border-accent bg-accent/10 px-3 py-1 text-xs text-accent"
+            icon={
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <rect x="12" y="12" width="7" height="6" rx="1" />
+              </svg>
+            }
           >
-            ⧉ Abrir ventanita
-          </button>
+            Abrir ventanita
+          </Button>
         </div>
       )}
 
       {/* lg: la única fila mide exactamente el alto disponible (minmax(0,1fr));
           sin esto la fila es `auto`, crece con el reporte y su scroll interno
           nunca se activa (el contenido se corta). */}
-      <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] lg:gap-0">
         {classLive ? (
           /* Takeover de clase: transcript + compañera + coach, todo el ancho */
           <div className="col-span-12 flex min-h-[480px] flex-col lg:min-h-0">
@@ -194,36 +247,33 @@ export function InglesView() {
           </div>
         ) : (
           <>
-            {/* Historial: qué sesión estoy mirando */}
-            <div className="col-span-12 flex min-h-[260px] flex-col md:col-span-4 lg:col-span-3 lg:min-h-0">
-              <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-line bg-panel">
-                <h3 className="shrink-0 border-b border-line px-3 py-2.5 text-xs font-medium text-text-dim">
-                  Sesiones · {sessions.length}
-                </h3>
-                <div className="min-h-0 flex-1 p-2">
-                  <SessionList
-                    sessions={sessions}
-                    selectedId={selectedId}
-                    onSelect={setSelectedId}
-                  />
-                </div>
-              </section>
-            </div>
-
-            {/* El reporte del coach es el protagonista del centro */}
-            <div className="col-span-12 flex min-h-[360px] flex-col md:col-span-8 lg:col-span-5 lg:min-h-0">
-              {/* La PIEZA: se lee largo, así que va sin marco. */}
-              <div className="flex min-h-0 flex-1 flex-col">
-                <span className="mb-2.5 shrink-0 text-2xs text-text-faint">Reporte del coach</span>
-                <div className="min-h-0 flex-1">
-                  <SessionDetail
-                    session={selected}
-                    onReviewWithTutor={
-                      live.active ? undefined : () => void voice.switchToTutor()
-                    }
-                  />
-                </div>
+            {/* Historial: qué sesión estoy mirando. La lista se elige, no se
+                lee: sin caja, y una hairline la separa del reporte. */}
+            <section
+              aria-label="Sesiones"
+              className="col-span-12 flex min-h-[260px] flex-col gap-2 md:col-span-4 lg:col-span-3 lg:min-h-0 lg:border-r lg:border-line lg:pr-3"
+            >
+              <h2 className="shrink-0 px-2.5 text-xs font-medium text-text-faint">Sesiones</h2>
+              <div className="min-h-0 flex-1">
+                <SessionList sessions={sessions} selectedId={selectedId} onSelect={setSelectedId} />
               </div>
+            </section>
+
+            {/* El reporte del coach es el protagonista del centro. La PIEZA: se
+                lee largo, así que va sin marco. */}
+            <div className="col-span-12 flex min-h-[360px] flex-col md:col-span-8 lg:col-span-5 lg:min-h-0 lg:pl-8">
+              {sessions.length === 0 ? (
+                <PanelState
+                  kind="empty"
+                  title="Aquí aparece el reporte de cada sesión"
+                  hint="Practica con la tutora (Practicar ahora) o abre la compañera en tu clase de Meet (Clase en vivo): al colgar, el coach analiza lo que dijiste."
+                />
+              ) : (
+                <SessionDetail
+                  session={selected}
+                  onReviewWithTutor={live.active ? undefined : () => void voice.switchToTutor()}
+                />
+              )}
             </div>
           </>
         )}
@@ -231,7 +281,7 @@ export function InglesView() {
         {/* Riel derecho: en vivo = banco de palabras de la sesión (foco);
             en reposo = qué hacer con lo aprendido */}
         {classLive ? null : tutorLive ? (
-          <div className="col-span-12 flex min-h-[260px] flex-col gap-6 md:col-span-4 lg:col-span-4 lg:min-h-0">
+          <div className="col-span-12 flex min-h-[260px] flex-col gap-6 md:col-span-4 lg:col-span-4 lg:ml-6 lg:min-h-0 lg:border-l lg:border-line lg:pl-4">
             <RailSection label="Esta práctica">
               <PracticeSessionRail companion={companion} fromLine={practiceFrom} />
             </RailSection>
@@ -242,10 +292,12 @@ export function InglesView() {
         ) : (
           <aside
             aria-label="Contexto"
-            className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:border-l lg:pl-6"
+            className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:ml-6 lg:border-l lg:pl-4"
           >
-            <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
-              <div className="flex min-h-full flex-col gap-7">
+            {/* -mt-3 pt-3: el fade superior del ScrollArea cae sobre el aire y
+                no sobre la primera etiqueta, que queda alineada con "Sesiones". */}
+            <ScrollArea rail fade="y" className="-mt-3 min-h-0 flex-1 pt-3 pr-1">
+              <div className="flex min-h-full flex-col gap-7 pb-3">
                 <RailSection label="Recomendaciones">
                   <EnglishRecs sessions={sessions} />
                 </RailSection>

@@ -35,11 +35,11 @@ import type { OrbState } from "./orbState";
 // acento↔cian en el borde.
 const ORB_COLORS: Record<OrbState, { accent: [string, string]; rim: [string, string] }> = {
   na: { accent: ["--color-text-dim", "#8891c5"], rim: ["--color-text-dim", "#8891c5"] },
-  off: { accent: ["--color-accent", "#d97757"], rim: ["--color-cyan", "#67e8f9"] },
-  connecting: { accent: ["--color-amber", "#fbbf24"], rim: ["--color-accent-hot", "#e89a7d"] },
+  off: { accent: ["--color-accent", "#7c7ff5"], rim: ["--color-cyan", "#67e8f9"] },
+  connecting: { accent: ["--color-amber", "#fbbf24"], rim: ["--color-accent-hot", "#a5a7fa"] },
   listening: { accent: ["--color-green", "#6ee7a0"], rim: ["--color-cyan", "#67e8f9"] },
-  speaking: { accent: ["--color-accent-hot", "#e89a7d"], rim: ["--color-cyan", "#67e8f9"] },
-  exec: { accent: ["--color-cyan", "#67e8f9"], rim: ["--color-accent-hot", "#e89a7d"] },
+  speaking: { accent: ["--color-accent-hot", "#a5a7fa"], rim: ["--color-cyan", "#67e8f9"] },
+  exec: { accent: ["--color-cyan", "#67e8f9"], rim: ["--color-accent-hot", "#a5a7fa"] },
 };
 
 // Ruido simplex 3D (Ashima) — compartido por los shaders del orbe.
@@ -186,10 +186,11 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
       uDpr: { value: Math.min(window.devicePixelRatio || 1, 1.75) },
       uAccent: { value: color(ORB_COLORS.off.accent) },
       uRim: { value: color(ORB_COLORS.off.rim) },
-      uHot: { value: color(["--color-accent-hot", "#e89a7d"]) },
-      // Base del núcleo: negro en oscuro (la luz lo esculpe), porcelana cálida
-      // en claro (un orbe negro sobre papel se veía sucio).
-      uBase: { value: new THREE.Color(lightTheme ? "#efe9df" : "#000000") },
+      uHot: { value: color(["--color-accent-hot", "#a5a7fa"]) },
+      // Base del núcleo: negro en oscuro (la luz lo esculpe); en claro un iris
+      // suave (v5). Un orbe negro sobre papel se veía sucio, y la porcelana
+      // cálida de v4 sobre el cromo gris se leía como un hueco, no como Hermes.
+      uBase: { value: new THREE.Color(lightTheme ? "#c4c6f5" : "#000000") },
     };
 
     const orbGeo = new THREE.IcosahedronGeometry(1, 48);
@@ -287,7 +288,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
     const shellSrc = new THREE.IcosahedronGeometry(1.55, 1);
     const shellGeo = new THREE.WireframeGeometry(shellSrc);
     const shellMat = new THREE.LineBasicMaterial({
-      color: readToken("--color-accent", "#d97757"),
+      color: readToken("--color-accent", "#7c7ff5"),
       transparent: true,
       opacity: 0.07,
     });
@@ -309,7 +310,7 @@ export function VoiceOrb3D({ getAnchor, simplified = false, state, getVolume }: 
 
     const ringBGeo = new THREE.TorusGeometry(2.02, 0.0035, 8, 220);
     const ringBMat = new THREE.MeshBasicMaterial({
-      color: readToken("--color-accent", "#d97757"),
+      color: readToken("--color-accent", "#7c7ff5"),
       transparent: true,
       opacity: 0.24,
     });

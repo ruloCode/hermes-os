@@ -8,4 +8,10 @@
  */
 export const THEME_STORAGE_KEY = "hermes-theme";
 
-export const THEME_INIT_SCRIPT = `(function(){try{var k="${THEME_STORAGE_KEY}";var p=localStorage.getItem(k);var m=window.matchMedia("(prefers-color-scheme: light)").matches;var t=(p==="light"||p==="dark")?p:(m?"light":"dark");document.documentElement.setAttribute("data-theme",t);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
+/** Marca de sesión: la cortina de arranque ya se vio en esta pestaña. */
+export const BOOTED_SESSION_KEY = "hermes-booted";
+
+// También estampa `data-booted` si esta pestaña ya vio la cortina de arranque:
+// el CSS la oculta ANTES del primer paint (sin destello) y BootGate la desmonta
+// al hidratar. La cortina es para abrir Hermes, no para cada recarga.
+export const THEME_INIT_SCRIPT = `(function(){var d=document.documentElement;try{var k="${THEME_STORAGE_KEY}";var p=localStorage.getItem(k);var m=window.matchMedia("(prefers-color-scheme: light)").matches;var t=(p==="light"||p==="dark")?p:(m?"light":"dark");d.setAttribute("data-theme",t);}catch(e){d.setAttribute("data-theme","dark");}try{if(sessionStorage.getItem("${BOOTED_SESSION_KEY}"))d.setAttribute("data-booted","");}catch(e){}})();`;

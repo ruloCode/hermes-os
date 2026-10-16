@@ -477,7 +477,7 @@ export default function RuloviewPage() {
                 <button className="rounded-sm border border-line px-2 py-1 hover:border-accent" onClick={turnDraft}>
                   Girar 90°
                 </button>
-                <button className="rounded-sm bg-accent px-2 py-1 text-white" onClick={() => void saveDraft()}>
+                <button className="rounded-sm bg-accent-solid px-2 py-1 text-on-accent" onClick={() => void saveDraft()}>
                   Guardar
                 </button>
                 <button className="rounded-sm border border-line px-2 py-1 hover:border-accent" onClick={() => void removeScan()}>
@@ -512,7 +512,7 @@ export default function RuloviewPage() {
               </button>
             ) : (
               <>
-                <button className="rounded-md bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-50" onClick={() => void serverAction("/ruloview/start", { source: "esp32" })} disabled={Boolean(status?.busy) || !status?.pathOk}>
+                <button className="rounded-md bg-accent-solid px-3 py-1.5 text-sm text-on-accent disabled:opacity-50" onClick={() => void serverAction("/ruloview/start", { source: "esp32" })} disabled={Boolean(status?.busy) || !status?.pathOk}>
                   Arrancar con los ESP32
                 </button>
                 <button className="rounded-md border border-line bg-panel px-3 py-1.5 text-sm disabled:opacity-50" onClick={() => void serverAction("/ruloview/start", { source: "simulated" })} disabled={Boolean(status?.busy) || !status?.pathOk}>
@@ -550,7 +550,7 @@ export default function RuloviewPage() {
       </header>
 
       {notice && (
-        <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded-md bg-accent px-3 py-1.5 text-sm text-white" role="status">
+        <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded-md bg-accent-solid px-3 py-1.5 text-sm text-on-accent" role="status">
           {notice}
         </div>
       )}

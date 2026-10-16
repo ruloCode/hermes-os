@@ -361,7 +361,7 @@ export default function EstacionPage() {
   return (
     <main
       style={estVars}
-      className="relative grid h-screen w-screen grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden bg-[var(--est-mountain)] px-10 pt-8 pb-6 font-[family-name:var(--font-inter)]"
+      className="relative grid h-screen w-screen grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden bg-[var(--est-mountain)] px-10 pt-8 pb-6 font-sans"
     >
       {/* Fondo: curvas de nivel, el valle donde está esta estación. */}
       <svg

@@ -298,7 +298,7 @@ export function WorkerDrawer({
               type="button"
               disabled={deciding}
               onClick={() => onDecide(true)}
-              className="flex-1 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="flex-1 rounded-md bg-accent-solid px-3 py-2 text-sm font-medium text-on-accent hover:opacity-90 disabled:opacity-50"
             >
               {plan ? `Aprobar y ejecutar en ${officeModeLabel(runMode)}` : "Aprobar"}
               {padConnected ? " (A)" : ""}

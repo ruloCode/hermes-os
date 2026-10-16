@@ -36,7 +36,7 @@ export function ModePicker({
             title={m.hint}
             onClick={() => onChange(m.value)}
             className={`rounded-md px-2 py-1.5 text-sm transition-colors ${
-              m.value === value ? "bg-accent font-medium text-white" : "text-text-dim hover:bg-panel hover:text-text"
+              m.value === value ? "bg-accent-solid font-medium text-on-accent" : "text-text-dim hover:bg-panel hover:text-text"
             }`}
           >
             {m.label}

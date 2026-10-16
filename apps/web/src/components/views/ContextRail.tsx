@@ -21,6 +21,10 @@ export function ContextRail() {
   const { snapshot } = useDashboard();
   const { projects } = useHermesData();
   const ws = useWorkspace();
+  // En Reuniones el riel ELIGE el proyecto cuyas juntas ves (sin salir del
+  // tab); en el resto, enfocar un proyecto es para conversar sobre él.
+  const pick = (slug: string) =>
+    ws.tab === "reuniones" ? ws.selectProject(slug) : ws.focusProject(slug);
 
   // Proyectos activos con tareas pendientes REALES del vault, los que más
   // cargan primero. El vault es la verdad de proyectos.
@@ -86,16 +90,16 @@ export function ContextRail() {
       )}
 
       {active.length + resto.length > 0 && (
-        <RailSection label="Proyectos · vault">
+        <RailSection label="Proyectos">
           <div>
             {active.map((p) => (
               <RailRow
                 key={p.slug}
                 title={p.name ?? p.slug}
                 sub={p.pend ? `${p.pend} tareas pendientes` : "Sin pendientes"}
-                tone={ws.selectedProject === p.slug ? "accent" : p.pend > 0 ? "cyan" : "line"}
+                tone={ws.selectedProject === p.slug ? "accent" : "line"}
                 value={p.pend || "✓"}
-                onClick={() => ws.focusProject(p.slug)}
+                onClick={() => pick(p.slug)}
               />
             ))}
             {verTodos &&
@@ -107,7 +111,7 @@ export function ContextRail() {
                   sub={p.estado ?? "sin estado"}
                   tone={ws.selectedProject === p.slug ? "accent" : "line"}
                   value={p.pend || undefined}
-                  onClick={() => ws.focusProject(p.slug)}
+                  onClick={() => pick(p.slug)}
                 />
               ))}
           </div>
@@ -115,7 +119,7 @@ export function ContextRail() {
             <button
               type="button"
               onClick={() => setVerTodos((v) => !v)}
-              className="cursor-pointer self-start text-2xs text-text-faint transition-colors hover:text-accent"
+              className="mt-1 cursor-pointer self-start rounded-xs px-2 py-1 text-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
             >
               {verTodos ? "− Ver menos" : `+ Ver ${resto.length} más`}
             </button>

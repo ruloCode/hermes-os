@@ -119,7 +119,7 @@ export function RadialGauge({
             </span>
           )}
           {label && (
-            <span className="text-2xs tracking-label text-text-dim uppercase">{label}</span>
+            <span className="text-2xs text-text-dim">{label}</span>
           )}
           {sublabel && <span className="text-2xs text-text-faint">{sublabel}</span>}
         </div>

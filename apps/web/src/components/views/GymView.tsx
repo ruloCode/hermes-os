@@ -6,6 +6,11 @@
 //
 // Todo dato visible es real: la nota la pone el modelo sobre TU transcript, las
 // frases marcadas las vio el detector y la racha sale de lo guardado en disco.
+//
+// v5: las rondas suben a la cabecera (pestañas de la vista), las cuatro de la
+// ronda son tarjetas seleccionables con un punto de estado (no texto de
+// colores), la grabadora es UN botón redondo de 64 px y el riel junta "tus
+// notas por hábito" y "los cinco hábitos", que eran la misma lista dos veces.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -21,9 +26,13 @@ import {
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { RailRow, RailSection } from "@/components/ui/Rail";
 import { ScrollArea } from "@/components/ui/ScrollArea";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Segmented } from "@/components/ui/Segmented";
 import { LiveWaveform } from "@/components/estudio/audio/Waveform";
-import { GymFeedback, scoreTone } from "@/components/gym/GymFeedback";
+import { GymFeedback, scoreDot } from "@/components/gym/GymFeedback";
 import { GymReference } from "@/components/gym/GymReference";
+import { fmtDay } from "@/components/ingles/report-utils";
 import { useMediaRecorder } from "@/hooks/useMediaRecorder";
 import { useGym } from "@/hooks/useGym";
 
@@ -32,6 +41,35 @@ type Phase = "idle" | "recording" | "analyzing" | "feedback";
 const LANG_LABEL = { es: "Español", en: "Inglés" } as const;
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 const habitLabel = (key: string) => GYM_HABITS.find((h) => h.key === key)?.label ?? key;
+// Las fechas del gimnasio son días locales "AAAA-MM-DD": a mediodía para que el
+// huso horario no las corra al día anterior al formatearlas.
+const fmtGymDay = (date: string) => fmtDay(`${date}T12:00:00`);
+
+/** Tecla de atajo dentro de un texto o un botón. */
+function Kbd({ children, onAccent = false }: { children: string; onAccent?: boolean }) {
+  return (
+    <kbd
+      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-xs border px-1 font-sans text-2xs leading-none ${
+        onAccent ? "border-on-accent/30 text-on-accent/80" : "border-line-2 bg-panel-2 text-text-dim"
+      }`}
+    >
+      {children}
+    </kbd>
+  );
+}
+
+// Iconos de trazo 1.7 (como los de la barra lateral), en lugar de glifos.
+const ICON = {
+  width: 14,
+  height: 14,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.7,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
 
 // Preferencia de esta persona: ver la referencia antes de responder (default
 // sí) o intentarlo a ciegas. Solo comodidad local: si el storage falla, se ve.
@@ -250,6 +288,15 @@ export function GymView({ active }: { active: boolean }) {
       }));
   }, [recent]);
 
+  const selectRound = (i: number) => {
+    setRoundIdx(i);
+    setCurrentId(null);
+    setPhase("idle");
+    setResult(null);
+  };
+  const busyPhase = phase === "recording" || phase === "analyzing";
+  const hasPending = progress.some((p) => !p.best && p.scenario.id !== current?.id);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ViewHeader
@@ -259,52 +306,58 @@ export function GymView({ active }: { active: boolean }) {
             ? `${doneToday} ${doneToday === 1 ? "hecha" : "hechas"} hoy${today.streak ? ` · racha de ${today.streak} ${today.streak === 1 ? "día" : "días"}` : ""}`
             : undefined
         }
+        // Rondas de hoy: la 1 es el plan fijo; las demás, temas nuevos.
+        tabs={
+          roundCount > 1 ? (
+            <Segmented
+              size="sm"
+              ariaLabel="Rondas de hoy"
+              value={String(Math.min(roundIdx, roundCount - 1))}
+              onChange={(v) => selectRound(Number(v))}
+              options={rounds.map((r, i) => {
+                const done = planProgress(r, today?.reps ?? []).filter((p) => p.best).length;
+                return {
+                  value: String(i),
+                  label: (
+                    <>
+                      Ronda {i + 1}
+                      <span className="text-text-faint tabular-nums">
+                        {done}/{r.length}
+                      </span>
+                    </>
+                  ),
+                };
+              })}
+            />
+          ) : undefined
+        }
         actions={
           today ? (
-            <button
-              type="button"
+            <Button
+              size="md"
               onClick={() => void askRound()}
-              disabled={roundBusy || phase === "recording" || phase === "analyzing"}
-              className="cursor-pointer rounded-sm border border-line px-2.5 py-1 text-xs text-text hover:border-line-2 disabled:cursor-default disabled:opacity-50"
+              disabled={roundBusy || busyPhase}
               title="Cuatro temas nuevos de tecnología, IA e ingeniería de agentes"
+              icon={
+                <svg {...ICON}>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              }
             >
-              {roundBusy ? "Preparando temas…" : "＋ Otra ronda"}
-            </button>
+              {roundBusy ? "Preparando temas…" : "Otra ronda"}
+            </Button>
           ) : undefined
         }
       />
 
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
         <ScrollArea fade="y" className="col-span-12 min-h-0 lg:col-span-8">
-          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-1 py-2">
+          <div className="mx-auto flex max-w-3xl flex-col gap-7 px-1 pt-1 pb-8">
             {loadError && !today && (
-              <p className="text-sm text-red">No pude cargar el gimnasio: {loadError}</p>
-            )}
-
-            {/* Rondas de hoy: la 1 es el plan fijo; las demás, temas nuevos */}
-            {roundCount > 1 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {rounds.map((r, i) => {
-                  const done = planProgress(r, today?.reps ?? []).filter((p) => p.best).length;
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        setRoundIdx(i);
-                        setCurrentId(null);
-                        setPhase("idle");
-                        setResult(null);
-                      }}
-                      className={`cursor-pointer rounded-sm px-2 py-0.5 text-xs tabular-nums transition-colors ${
-                        i === roundIdx ? "bg-panel-2 text-text" : "text-text-faint hover:text-text"
-                      }`}
-                    >
-                      Ronda {i + 1} · {done}/{r.length}
-                    </button>
-                  );
-                })}
-              </div>
+              <p className="flex items-center gap-2 text-sm text-text-dim">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-red" />
+                No pude cargar el gimnasio: {loadError}
+              </p>
             )}
 
             {/* Las cuatro de la ronda */}
@@ -312,28 +365,45 @@ export function GymView({ active }: { active: boolean }) {
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                 {progress.map(({ scenario, best, attempts }) => {
                   const on = scenario.id === current?.id && !showRoundDone;
+                  const extra = [
+                    scenario.source === "generated" ? "Tema nuevo" : null,
+                    attempts > 1 ? `${attempts} intentos` : null,
+                  ].filter(Boolean);
                   return (
                     <button
                       key={scenario.id}
                       type="button"
                       onClick={() => choose(scenario.id)}
-                      className={`flex cursor-pointer flex-col gap-1 rounded-md border px-3 py-2 text-left transition-colors ${
-                        on ? "border-accent bg-accent/5" : "border-line hover:border-line-2"
+                      aria-pressed={on}
+                      className={`flex min-w-0 cursor-pointer flex-col gap-2 rounded-sm border px-3 py-2.5 text-left transition-colors ${
+                        on
+                          ? "border-line-2 bg-selected"
+                          : "border-line hover:border-line-2 hover:bg-hover"
                       }`}
                     >
-                      <span className="flex items-center justify-between gap-2 text-2xs text-text-faint">
-                        {LANG_LABEL[scenario.lang]}
+                      <span className="flex items-center justify-between gap-2">
+                        <Badge size="sm">{LANG_LABEL[scenario.lang]}</Badge>
                         {best ? (
-                          <span className={`tabular-nums ${scoreTone(best.score)}`}>{best.score}/100</span>
+                          <span
+                            className="flex items-center gap-1.5 text-xs text-text-dim tabular-nums"
+                            title={`Mejor nota: ${best.score}/100`}
+                          >
+                            <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scoreDot(best.score)}`} />
+                            {best.score}
+                          </span>
                         ) : (
-                          <span>pendiente</span>
+                          <span className="flex items-center gap-1.5 text-xs text-text-faint">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full border border-text-faint" />
+                            Pendiente
+                          </span>
                         )}
                       </span>
-                      <span className="truncate text-xs text-text">{GYM_KIND_LABEL[scenario.kind]}</span>
-                      {scenario.source === "generated" && (
-                        <span className="truncate text-2xs text-accent">✦ tema nuevo</span>
+                      <span className="line-clamp-2 text-sm leading-snug font-medium text-text">
+                        {GYM_KIND_LABEL[scenario.kind]}
+                      </span>
+                      {extra.length > 0 && (
+                        <span className="-mt-1 truncate text-xs text-text-faint">{extra.join(" · ")}</span>
                       )}
-                      {attempts > 1 && <span className="text-2xs text-text-faint">{attempts} intentos</span>}
                     </button>
                   );
                 })}
@@ -342,44 +412,63 @@ export function GymView({ active }: { active: boolean }) {
 
             {/* Ronda completa: la siguiente, sin límite */}
             {showRoundDone && (
-              <div className="flex flex-col items-center gap-2 py-2 text-center">
-                <p className="text-md text-green">Ronda {roundIdx + 1} completa.</p>
-                <button
-                  type="button"
+              <div className="flex flex-col items-center gap-3 py-10 text-center">
+                <span className="grid h-10 w-10 place-items-center rounded-full border border-line bg-panel text-green">
+                  <svg {...ICON} width={18} height={18} strokeWidth={2}>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                </span>
+                <div className="flex flex-col gap-1">
+                  <p className="text-md font-semibold text-text">Ronda {roundIdx + 1} completa</p>
+                  <p className="text-sm text-text-dim">
+                    Sigue con cuatro temas nuevos, o toca una tarjeta para repetir ese ejercicio.
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="md"
                   onClick={() => void askRound()}
                   disabled={roundBusy}
-                  className="cursor-pointer rounded-sm border border-accent bg-accent/10 px-4 py-2 text-sm text-accent disabled:cursor-default disabled:opacity-60"
+                  className="mt-1"
                 >
                   {roundBusy
                     ? (today?.poolReady ?? 0) >= 4
                       ? "Armando la ronda…"
                       : "Escribiendo temas nuevos… (~30 s)"
-                    : "Otra ronda: 4 temas nuevos de IA y agentes →"}
-                </button>
-                <p className="text-xs text-text-faint">o toca una tarjeta para repetir ese ejercicio</p>
+                    : "Otra ronda de IA y agentes"}
+                  {!roundBusy && <Kbd onAccent>Espacio</Kbd>}
+                </Button>
               </div>
             )}
+
             {current && !showRoundDone && (
               <section className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-text-dim">
-                  <span className="rounded-sm border border-line px-1.5 py-0.5 text-text">
-                    {LANG_LABEL[current.lang]}
-                  </span>
-                  <span>{GYM_KIND_LABEL[current.kind]}</span>
-                  {current.source === "generated" && <span className="text-accent">✦ tema nuevo</span>}
-                  <span className="text-text-faint">· foco: {habitLabel(current.focus)}</span>
-                  <button
-                    type="button"
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  <Badge size="sm">{LANG_LABEL[current.lang]}</Badge>
+                  <span className="text-text-dim">{GYM_KIND_LABEL[current.kind]}</span>
+                  {current.source === "generated" && (
+                    <span className="text-text-faint">· Tema nuevo</span>
+                  )}
+                  <span className="text-text-faint">· Foco: {habitLabel(current.focus)}</span>
+                  <Button
+                    variant="ghost"
                     onClick={shuffle}
-                    disabled={phase === "recording" || phase === "analyzing"}
-                    className="ml-auto cursor-pointer text-xs text-text-faint hover:text-text disabled:opacity-40"
+                    disabled={busyPhase}
+                    className="-mr-2.5 ml-auto"
                     title="Otro escenario del mismo idioma (fuera del plan de hoy)"
+                    icon={
+                      <svg {...ICON} width={13} height={13}>
+                        <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+                      </svg>
+                    }
                   >
-                    ⤨ Otro escenario
-                  </button>
+                    Otro escenario
+                  </Button>
                 </div>
                 <p className="text-sm leading-relaxed text-text-dim">{current.situation}</p>
-                <p className="text-2xl leading-snug text-text">{current.prompt}</p>
+                <p className="text-2xl leading-snug font-medium text-pretty text-text">
+                  {current.prompt}
+                </p>
                 {phase !== "feedback" && (
                   <GymReference scenario={current} open={showRef} onToggle={toggleRef} />
                 )}
@@ -388,37 +477,66 @@ export function GymView({ active }: { active: boolean }) {
 
             {/* Grabadora */}
             {current && phase !== "feedback" && !showRoundDone && (
-              <section className="flex flex-col items-center gap-4 py-2">
-                <div className="h-14 w-full max-w-xl">
+              <section className="flex flex-col items-center gap-4 pt-1">
+                <div className="h-12 w-full max-w-xl">
                   <LiveWaveform meterRef={rec.meterRef} active={rec.recording} />
                 </div>
+                {/* El global de :focus-visible redondea a 4px (va fuera de @layer):
+                    `rounded-full!` mantiene el círculo con el anillo de foco. */}
                 <button
                   type="button"
                   onClick={() => void toggleRecord()}
                   disabled={phase === "analyzing" || !rec.supported}
                   aria-label={rec.recording ? "Terminar y evaluar" : "Grabar respuesta"}
                   data-gym-record
-                  className={`flex h-20 w-20 cursor-pointer items-center justify-center rounded-full border-2 transition-colors disabled:cursor-default disabled:opacity-50 ${
-                    rec.recording ? "border-red bg-red/10" : "border-accent bg-accent/10 hover:bg-accent/20"
+                  className={`relative grid h-16 w-16 cursor-pointer place-items-center rounded-full border shadow-[var(--shadow-card)] transition-colors focus-visible:rounded-full! disabled:cursor-default disabled:opacity-50 ${
+                    rec.recording
+                      ? "border-red/40 bg-red/10"
+                      : "border-line-2 bg-panel hover:border-accent/50 hover:bg-hover"
                   }`}
                 >
+                  {rec.recording && (
+                    <span aria-hidden className="absolute inset-0 animate-ping rounded-full bg-red/15" />
+                  )}
                   {rec.recording ? (
-                    <span className="h-6 w-6 rounded-xs bg-red" />
+                    <span className="relative h-5 w-5 rounded-[5px] bg-red" />
+                  ) : phase === "analyzing" ? (
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-line-2 border-t-accent" />
                   ) : (
-                    <span className="h-7 w-7 rounded-full bg-accent" />
+                    <span className="h-6 w-6 rounded-full bg-accent-solid" />
                   )}
                 </button>
-                <p className="text-sm text-text-dim tabular-nums">
-                  {phase === "analyzing"
-                    ? "Escuchando lo que dijiste… (~15 s)"
-                    : rec.recording
-                      ? `${fmt(rec.elapsed)} / ~${fmt(current.targetSec)} · Espacio para terminar`
-                      : `Espacio para hablar · ~${current.targetSec} s`}
+                <p className="flex flex-wrap items-center justify-center gap-1.5 text-sm text-text-dim tabular-nums">
+                  {phase === "analyzing" ? (
+                    "Escuchando lo que dijiste… (~15 s)"
+                  ) : rec.recording ? (
+                    <>
+                      <span className="text-text">{fmt(rec.elapsed)}</span>
+                      <span className="text-text-faint">/ ~{fmt(current.targetSec)}</span>
+                      <span className="text-text-faint">·</span>
+                      <Kbd>Espacio</Kbd> para terminar
+                      <span className="text-text-faint">·</span>
+                      <Kbd>Esc</Kbd> descarta
+                    </>
+                  ) : (
+                    <>
+                      <Kbd>Espacio</Kbd> para hablar
+                      <span className="text-text-faint">· ~{current.targetSec} s</span>
+                    </>
+                  )}
                 </p>
                 {rec.recording && rec.elapsed > current.targetSec + 15 && (
-                  <p className="text-xs text-amber">Ya pasaste el tiempo: cierra con tu punto.</p>
+                  <p className="flex items-center gap-2 text-sm text-text-dim">
+                    <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber" />
+                    Ya pasaste el tiempo: cierra con tu punto.
+                  </p>
                 )}
-                {(error || rec.error) && <p className="text-sm text-red">{error ?? rec.error}</p>}
+                {(error || rec.error) && (
+                  <p className="flex items-center gap-2 text-sm text-text">
+                    <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-red" />
+                    {error ?? rec.error}
+                  </p>
+                )}
 
                 {!rec.recording && phase === "idle" && (
                   <div className="w-full max-w-xl">
@@ -429,18 +547,14 @@ export function GymView({ active }: { active: boolean }) {
                           onChange={(e) => setDraft(e.target.value)}
                           rows={3}
                           placeholder={current.lang === "en" ? "Type what you'd say…" : "Escribe lo que dirías…"}
-                          className="w-full resize-none rounded-md border border-line bg-panel px-3 py-2 text-sm text-text outline-none focus:border-line-2"
+                          className="w-full resize-none rounded-sm border border-line bg-panel px-3 py-2 text-sm leading-relaxed text-text outline-none transition-colors placeholder:text-text-faint focus:border-line-2"
                         />
                         <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setTyping(false)}
-                            className="cursor-pointer px-2 py-1 text-xs text-text-faint hover:text-text"
-                          >
+                          <Button variant="ghost" onClick={() => setTyping(false)}>
                             Cancelar
-                          </button>
-                          <button
-                            type="button"
+                          </Button>
+                          <Button
+                            variant="primary"
                             disabled={draft.trim().split(/\s+/).length < 6}
                             onClick={() => {
                               const text = draft.trim();
@@ -448,20 +562,17 @@ export function GymView({ active }: { active: boolean }) {
                               setTyping(false);
                               void send({ text, durationSec: 0 });
                             }}
-                            className="cursor-pointer rounded-sm border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-default disabled:opacity-40"
                           >
                             Evaluar
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => setTyping(true)}
-                        className="mx-auto block cursor-pointer text-xs text-text-faint hover:text-text"
-                      >
-                        o escríbelo (sin micrófono)
-                      </button>
+                      <div className="flex justify-center">
+                        <Button variant="ghost" onClick={() => setTyping(true)}>
+                          O escríbelo (sin micrófono)
+                        </Button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -469,95 +580,122 @@ export function GymView({ active }: { active: boolean }) {
             )}
 
             {phase === "feedback" && result && (
-              <section className="flex flex-col gap-5 border-t border-line pt-5">
+              <section className="flex flex-col gap-6 border-t border-line pt-6">
                 <GymFeedback rep={result} previous={previousOf(result)} />
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="md"
                     onClick={retry}
-                    className="cursor-pointer rounded-sm border border-accent bg-accent/10 px-3 py-1.5 text-sm text-accent"
+                    icon={
+                      <svg {...ICON}>
+                        <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                        <path d="M3 3v5h5" />
+                      </svg>
+                    }
                   >
-                    ↺ Otra vez <span className="text-text-faint">R</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={next}
-                    className="cursor-pointer rounded-sm border border-line px-3 py-1.5 text-sm text-text hover:border-line-2"
-                  >
-                    {progress.some((p) => !p.best && p.scenario.id !== current?.id)
-                      ? "Siguiente →"
+                    Otra vez <Kbd onAccent>R</Kbd>
+                  </Button>
+                  <Button size="md" onClick={next}>
+                    {hasPending
+                      ? "Siguiente"
                       : roundIdx < roundCount - 1
-                        ? "Siguiente ronda →"
-                        : "Otra ronda →"}{" "}
-                    <span className="text-text-faint">N</span>
-                  </button>
+                        ? "Siguiente ronda"
+                        : "Otra ronda"}{" "}
+                    <Kbd>N</Kbd>
+                  </Button>
                 </div>
               </section>
             )}
-
           </div>
         </ScrollArea>
 
         <aside
           aria-label="Progreso"
-          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:border-l lg:pl-6"
+          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:border-l lg:pl-4"
         >
-          <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
-            <div className="flex min-h-full flex-col gap-7">
+          {/* -mt-3 pt-3: el fade superior del ScrollArea cae sobre el aire, no
+              sobre la primera etiqueta. */}
+          <ScrollArea rail fade="y" className="-mt-3 min-h-0 flex-1 pt-3 pr-1">
+            <div className="flex min-h-full flex-col gap-7 pb-3">
               <RailSection label="Racha">
-                <p className="text-2xl font-semibold text-text tabular-nums">
-                  {today?.streak ?? 0} <span className="text-sm font-normal text-text-dim">días</span>
-                </p>
-                <p className="mt-1 text-xs text-text-faint">
-                  Un día cuenta con al menos una en español y una en inglés.
-                </p>
+                <div className="flex flex-col gap-1 px-2">
+                  <p className="text-2xl leading-none font-semibold text-text tabular-nums">
+                    {today?.streak ?? 0}{" "}
+                    <span className="text-sm font-normal text-text-faint">
+                      {today?.streak === 1 ? "día" : "días"}
+                    </span>
+                  </p>
+                  <p className="text-xs leading-relaxed text-text-faint">
+                    Un día cuenta con al menos una en español y una en inglés.
+                  </p>
+                </div>
               </RailSection>
 
-              <RailSection label="Tus hábitos · 14 días">
-                {recent.length === 0 ? (
-                  <p className="text-xs text-text-faint">Aún no hay repeticiones: la primera nota sale de tu primera respuesta.</p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] gap-2 text-2xs text-text-faint">
-                      <span />
-                      <span className="text-right">ES</span>
-                      <span className="text-right">EN</span>
-                    </div>
-                    {GYM_HABITS.map((h) => (
+              {/* Una sola lista: el hábito, qué significa y tu nota media por
+                  idioma. Antes eran dos secciones con los mismos cinco nombres. */}
+              <RailSection
+                label="Hábitos · 14 días"
+                right={
+                  <span className="grid grid-cols-[2.25rem_2.25rem] gap-1 pr-2 text-right text-2xs text-text-faint">
+                    <span>ES</span>
+                    <span>EN</span>
+                  </span>
+                }
+              >
+                <div className="flex flex-col gap-px">
+                  {GYM_HABITS.map((h) => {
+                    const weak = h.key === weakest;
+                    return (
                       <div
                         key={h.key}
-                        className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] gap-2 text-xs"
-                        title={h.hint}
+                        className="grid grid-cols-[minmax(0,1fr)_2.25rem_2.25rem] items-baseline gap-1 rounded-sm px-2 py-1.5"
                       >
-                        <span className={h.key === weakest ? "text-amber" : "text-text"}>{h.label}</span>
-                        <span className="text-right text-text-dim tabular-nums">{avgEs[h.key] ?? "—"}</span>
-                        <span className="text-right text-text-dim tabular-nums">{avgEn[h.key] ?? "—"}</span>
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-1.5 text-sm text-text">
+                            {h.label}
+                            {weak && (
+                              <span
+                                aria-label="Tu hábito más flojo"
+                                className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber"
+                              />
+                            )}
+                          </span>
+                          <span className="mt-px block text-xs leading-snug text-text-faint">
+                            {h.hint}
+                          </span>
+                        </span>
+                        <span className="text-right text-sm text-text-dim tabular-nums">
+                          {avgEs[h.key] ?? "—"}
+                        </span>
+                        <span className="text-right text-sm text-text-dim tabular-nums">
+                          {avgEn[h.key] ?? "—"}
+                        </span>
                       </div>
-                    ))}
-                    {weakest && (
-                      <p className="mt-1 text-xs text-text-dim">
-                        Hoy trabaja <span className="text-amber">{habitLabel(weakest)}</span>.
+                    );
+                  })}
+                  {recent.length === 0 ? (
+                    <p className="px-2 pt-1 text-xs text-text-faint">
+                      Aún no hay repeticiones: la primera nota sale de tu primera respuesta.
+                    </p>
+                  ) : (
+                    weakest && (
+                      <p className="flex items-center gap-1.5 px-2 pt-1.5 text-xs text-text-dim">
+                        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
+                        Hoy trabaja <span className="font-medium text-text">{habitLabel(weakest)}</span>
                       </p>
-                    )}
-                  </div>
-                )}
-              </RailSection>
-
-              <RailSection label="Los cinco hábitos">
-                <div>
-                  {GYM_HABITS.map((h) => (
-                    <RailRow key={h.key} title={h.label} sub={h.hint} />
-                  ))}
+                    )
+                  )}
                 </div>
               </RailSection>
 
               {days.length > 0 && (
                 <RailSection label="Últimos días">
-                  <div>
+                  <div className="flex flex-col gap-px">
                     {days.map((d) => (
                       <RailRow
                         key={d.date}
-                        title={d.date}
+                        title={fmtGymDay(d.date)}
                         sub={`${d.reps} ${d.reps === 1 ? "repetición" : "repeticiones"}${d.both ? "" : " · falta un idioma"}`}
                         value={`${d.avg}/100`}
                         tone={d.both ? "green" : "amber"}

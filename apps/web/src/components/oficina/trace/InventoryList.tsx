@@ -40,7 +40,7 @@ const Card = memo(function Card({ c, redact, big, onJump }: { c: ToolCard; redac
         <span className={`font-mono font-medium text-text ${big ? "text-[20px]" : "text-sm"}`} title={c.name}>
           {c.origin === "skill" ? `/${c.name}` : c.name}
         </span>
-        {c.active ? <span className={`rounded-full bg-accent px-2 text-white ${big ? "text-[15px]" : "text-[11px]"}`}>en uso</span> : null}
+        {c.active ? <span className={`rounded-full bg-accent-solid px-2 text-on-accent ${big ? "text-[15px]" : "text-[11px]"}`}>en uso</span> : null}
         <span className={`rounded-full px-2 ${PERM_CLASS[c.permission]} ${big ? "text-[15px]" : "text-[11px]"}`} title={c.permissionNote}>
           {PERMISSION_LABEL[c.permission]}
         </span>

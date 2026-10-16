@@ -36,11 +36,17 @@ export const PLAN_LABEL = { observar: "observar", probar: "probar", aplicado: "a
 export const inputCls =
   "rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
 
+/** Campo de una línea de las pantallas de entrada (v5: h-8, fondo de tarjeta). */
+export const fieldCls =
+  "h-8 rounded-sm border border-line bg-panel px-3 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none";
+
+// v5: sin mayúsculas ni tracking. Mismo aspecto que <Button> secondary/ghost
+// para que playground y temas (que también los usan) no desentonen.
 export const btnCls =
-  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent disabled:cursor-not-allowed disabled:opacity-50";
+  "cursor-pointer rounded-sm border border-line bg-panel px-2.5 py-1 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 export const ghostBtnCls =
-  "rounded-sm border border-transparent px-2 py-1 text-2xs tracking-label text-text-dim uppercase hover:border-line hover:text-text";
+  "cursor-pointer rounded-sm border border-transparent px-2 py-1 text-xs text-text-dim transition-colors hover:bg-hover hover:text-text";
 
 export function fmtRelative(iso: string, now = Date.now()): string {
   const d = Math.round((now - new Date(iso).getTime()) / 86_400_000);

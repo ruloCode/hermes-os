@@ -126,7 +126,7 @@ function ScheduledBanner({ piece }: { piece: ContentPiece }) {
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span
-          className={`text-2xs tracking-label uppercase ${live ? "text-text-dim" : "text-cyan"}`}
+          className={`text-2xs ${live ? "text-text-dim" : "text-cyan"}`}
         >
           {live ? "● Publicado" : "● Programado"}
         </span>
@@ -229,7 +229,7 @@ function ResultsSection({ piece }: { piece: ContentPiece }) {
   return (
     <div className="flex flex-col gap-1.5 rounded-sm border border-line bg-panel-2/40 px-3 py-2">
       <div className="flex items-center gap-2">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Resultados</span>
+        <span className="text-2xs text-text-dim">Resultados</span>
         <span className="flex-1" />
         {updated && (
           <span className="text-2xs text-text-faint tabular-nums">
@@ -246,7 +246,7 @@ function ResultsSection({ piece }: { piece: ContentPiece }) {
           {stats.map((s) => (
             <div key={s.label} className="rounded-sm bg-panel-2 px-2 py-1">
               <div className="font-display text-sm text-text tabular-nums">{s.value}</div>
-              <div className="text-2xs tracking-label text-text-faint uppercase">{s.label}</div>
+              <div className="text-2xs text-text-faint">{s.label}</div>
             </div>
           ))}
         </div>
@@ -303,7 +303,7 @@ function Section({
         >
           {n}
         </span>
-        <span className="text-2xs tracking-label text-text-dim uppercase">{label}</span>
+        <span className="text-2xs text-text-dim">{label}</span>
         <span className="flex-1" />
         {right}
       </div>
@@ -481,7 +481,7 @@ function VariantRow({
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="shrink-0 text-text-dim">{info.icon}</span>
-        <span className="shrink-0 text-2xs tracking-label text-text-dim uppercase">
+        <span className="shrink-0 text-2xs text-text-dim">
           {info.label}
         </span>
 
@@ -525,7 +525,7 @@ function VariantRow({
           <button
             onClick={() => setOpen(!open)}
             aria-expanded={open}
-            className="text-2xs text-text-faint uppercase hover:text-text-dim"
+            className="text-2xs text-text-faint hover:text-text-dim"
           >
             {open ? "▴ cerrar" : "✎ texto"}
           </button>
@@ -618,7 +618,7 @@ function PublishCTA({ piece, onOpen }: { piece: ContentPiece; onOpen: () => void
       <button
         onClick={onOpen}
         disabled={!ready}
-        className={`w-full rounded-sm border px-4 py-2.5 text-xs tracking-label uppercase ${
+        className={`w-full rounded-sm border px-4 py-2.5 text-xs ${
           ready
             ? "border-accent bg-accent/15 text-accent hover:bg-accent/25"
             : "cursor-not-allowed border-line-2 bg-panel-2 text-text-faint"
@@ -743,7 +743,7 @@ function PublishConfirmModal({
 function Row({ k, children }: { k: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline gap-2 text-xs">
-      <span className="w-20 shrink-0 text-2xs tracking-label text-text-faint uppercase">{k}</span>
+      <span className="w-20 shrink-0 text-2xs text-text-faint">{k}</span>
       <span className="min-w-0 text-text-dim">{children}</span>
     </div>
   );

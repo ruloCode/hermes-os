@@ -20,6 +20,8 @@ import type {
 } from "@hermes/shared";
 import { useEstudioContext } from "@/state/EstudioProvider";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { TabBar } from "@/components/ui/TabBar";
 import { Markdown } from "@/components/Markdown";
 import { usePieceMedia } from "@/hooks/usePieceMedia";
 import { pieceBeats, takeForBeat, withBeatVerdict } from "@/lib/script-beats";
@@ -83,34 +85,24 @@ export function PieceWorkspace({
         onToggleChat={onToggleChat}
       />
       {/* TODO el progreso en un módulo: % hasta publicar + stepper + qué falta. */}
-      <div className="px-1">
-        <PieceProgress piece={selected} onGo={setTab} />
+      <PieceProgress piece={selected} onGo={setTab} />
+      {/* Tabs: el TabBar del sistema (subrayado neutro, conteo gris) en vez
+          de los subrayados de acento hechos a mano. */}
+      <div className="mt-4 shrink-0">
+        <TabBar
+          size="md"
+          active={tab}
+          onChange={(id) => setTab(id as Tab)}
+          tabs={[
+            { id: "guion", label: "Guion" },
+            { id: "tomas", label: "Tomas", badge: selected.takes.length },
+            { id: "voz", label: "Voz" },
+            { id: "edicion", label: "Edición", badge: selected.edit_points.length },
+            { id: "publicacion", label: "Publicación", badge: selected.publications.length },
+          ]}
+        />
       </div>
-      {/* Tabs */}
-      <div className="mt-2 flex gap-1 border-b border-line px-1">
-        {(
-          [
-            ["guion", "Guion"],
-            ["tomas", `Tomas · ${selected.takes.length}`],
-            ["voz", "Voz"],
-            ["edicion", `Edición · ${selected.edit_points.length}`],
-            ["publicacion", `Publicación · ${selected.publications.length}`],
-          ] as [Tab, string][]
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-2xs tracking-label uppercase ${
-              tab === id
-                ? "border-accent text-accent"
-                : "border-transparent text-text-faint hover:text-text-dim"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 py-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 pr-1">
         {tab === "guion" && <GuionTab key={selected.id} piece={selected} onPatch={patchPiece} />}
         {tab === "tomas" && <TomasTab piece={selected} onPatch={patchPiece} />}
         {tab === "voz" && <VoiceTab key={selected.id} piece={selected} />}
@@ -146,40 +138,43 @@ function PieceHeader({
   const canRecord = pieceBeats(piece).length > 0;
   const recording = piece.status === "grabacion";
   return (
-    <div className="px-1">
-      <div className="flex flex-wrap items-start justify-between gap-2">
+    <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        {/* En el takeover el ← vive en la cabecera de la vista (ViewHeader);
+            se conserva aquí solo para quien monte la pieza sin ella. */}
         {onBack && (
-          <button
-            onClick={onBack}
-            title="Volver a la lista (Esc)"
-            className="mt-0.5 shrink-0 text-2xs tracking-label text-text-faint uppercase hover:text-text"
-          >
-            ← Piezas
-          </button>
+          <Button variant="ghost" onClick={onBack} title="Volver a la lista (Esc)">
+            Piezas
+          </Button>
         )}
-        <h3 className="min-w-0 flex-1 font-display text-sm leading-snug text-text">{piece.title}</h3>
-        <div className="flex shrink-0 items-center gap-2">
+        <h2 className="min-w-0 flex-1 text-lg leading-snug font-semibold text-text">
+          {piece.title}
+        </h2>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* Grabar es LA acción cuando la etapa es grabación (primario); en
+              las demás etapas sigue a mano, pero sin pedir atención. */}
           {canRecord && (
-            <button
+            <Button
+              variant={recording ? "primary" : "secondary"}
               onClick={() => setRecording(piece.id)}
               title="Teleprompter a pantalla completa: solo tus frases + el detalle de cada toma"
-              className={`${btnCls} ${recording ? "border-red text-red" : "border-line-2 text-text-dim hover:text-text"}`}
+              icon={<span className="block h-2 w-2 rounded-full bg-red" />}
             >
-              ● Grabar
-            </button>
+              Grabar
+            </Button>
           )}
           {piece.linear_url ? (
             <a
               href={piece.linear_url}
               target="_blank"
               rel="noreferrer"
-              className="text-2xs tracking-label text-cyan uppercase hover:underline"
+              title="Abrir el issue en Linear"
+              className="inline-flex h-7 items-center gap-1 rounded-sm px-2 font-mono text-xs text-text-dim transition-colors hover:bg-hover hover:text-text"
             >
-              {piece.linear_identifier} ↗
+              {piece.linear_identifier} <span aria-hidden>↗</span>
             </a>
           ) : (
-            <button
-              className={btnCls}
+            <Button
               disabled={linking}
               onClick={async () => {
                 setLinking(true);
@@ -187,17 +182,19 @@ function PieceHeader({
                 setLinking(false);
               }}
             >
-              {linking ? "creando…" : "◫ Crear en Linear"}
-            </button>
+              {linking ? "Creando…" : "Crear en Linear"}
+            </Button>
           )}
           {onToggleChat && (
-            <button
+            <Button
+              variant="ghost"
               onClick={onToggleChat}
+              aria-pressed={chatOpen}
               title={chatOpen ? "Ocultar el chat de la pieza" : "Mostrar el chat de la pieza"}
-              className={`${btnCls} ${chatOpen ? "border-cyan text-cyan" : ""}`}
+              className={chatOpen ? "bg-selected text-text" : ""}
             >
-              ✳ Chat
-            </button>
+              Chat
+            </Button>
           )}
         </div>
       </div>
@@ -205,17 +202,32 @@ function PieceHeader({
           (patrón CMS de Framer: los campos no compiten con el contenido). */}
       <button
         onClick={() => setProps(!props)}
-        className="mt-1.5 flex items-center gap-2 text-2xs tracking-label text-text-faint uppercase hover:text-text-dim"
+        aria-expanded={props}
+        className="mt-1 -ml-1 flex cursor-pointer items-center gap-1.5 rounded-xs px-1 py-0.5 text-xs text-text-faint transition-colors hover:text-text-dim"
       >
-        <span>{props ? "▴" : "▾"} Propiedades</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+          className={`transition-transform ${props ? "" : "-rotate-90"}`}
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+        <span>Propiedades</span>
         {!props && (
-          <span className="text-text-dim normal-case">
-            {PILLARS[piece.pillar].short} · {piece.platforms.join("+") || piece.format} ·{" "}
+          <span className="text-text-dim tabular-nums">
+            · {PILLARS[piece.pillar].short} · {piece.platforms.join(" + ") || piece.format} ·{" "}
             {fmtPublish(piece.publish_at)}
           </span>
         )}
       </button>
-      <div className={`mt-1.5 flex-wrap items-center gap-2 ${props ? "flex" : "hidden"}`}>
+      <div className={`mt-2 flex-wrap items-center gap-2 ${props ? "flex" : "hidden"}`}>
         <select
           value={piece.pillar}
           onChange={(e) => void onPatch(piece.id, { pillar: e.target.value as ContentPillar })}
@@ -267,7 +279,10 @@ function PieceHeader({
                       : [...piece.platforms, pl],
                   })
                 }
-                className={`rounded-xs px-1.5 py-0.5 text-2xs tracking-label uppercase ${on ? "bg-cyan/16 text-cyan" : "text-text-faint hover:text-text-dim"}`}
+                aria-pressed={on}
+                className={`h-6 cursor-pointer rounded-full px-2 text-xs transition-colors ${
+                  on ? "bg-selected font-medium text-text" : "text-text-faint hover:bg-hover hover:text-text"
+                }`}
               >
                 {pl}
               </button>
@@ -383,7 +398,7 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
             <button
               key={id}
               onClick={() => setMode(id)}
-              className={`rounded-xs px-2.5 py-0.5 text-2xs tracking-label uppercase ${
+              className={`rounded-xs px-2.5 py-0.5 text-2xs ${
                 mode === id ? "bg-accent/16 text-accent" : "text-text-faint hover:text-text-dim"
               }`}
             >
@@ -497,18 +512,18 @@ function GuionTab({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn })
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   onClick={() => setFull(false)}
-                  className="shrink-0 text-2xs tracking-label text-text-faint uppercase hover:text-text"
+                  className="shrink-0 text-2xs text-text-faint hover:text-text"
                 >
                   ← Salir
                 </button>
                 <span className="min-w-0 truncate text-xs text-text-dim">{piece.title}</span>
-                <span className="shrink-0 text-2xs tracking-label text-accent uppercase">
+                <span className="shrink-0 text-2xs text-accent">
                   {STAGES[piece.status].label}
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span
-                  className={`text-2xs tracking-label uppercase ${dirty ? "text-amber" : "text-text-faint"}`}
+                  className={`text-2xs ${dirty ? "text-amber" : "text-text-faint"}`}
                 >
                   {saveState}
                 </span>
@@ -779,7 +794,7 @@ function CaptureChecklist({
 
       {extra.length > 0 && (
         <>
-          <span className="mt-1 text-2xs tracking-label text-text-faint uppercase">
+          <span className="mt-1 text-2xs text-text-faint">
             En crudos/ sin plan · {extra.length}
           </span>
           {extra.map((f) => (
@@ -831,7 +846,7 @@ function ManualTakes({ piece, onPatch }: { piece: ContentPiece; onPatch: PatchFn
           key={t.id}
           className="flex flex-wrap items-center gap-2 rounded-sm border border-line px-2 py-1.5"
         >
-          <span className="text-2xs tracking-label text-text-dim uppercase">{t.label}</span>
+          <span className="text-2xs text-text-dim">{t.label}</span>
           {t.range && <span className="text-2xs text-cyan tabular-nums">{t.range}</span>}
           <span className={`flex-1 text-xs ${t.verdict === "descartada" ? "text-text-faint line-through" : "text-text-dim"}`}>
             {t.note ?? ""}
@@ -958,7 +973,7 @@ function CrudosSection({ piece }: { piece: ContentPiece }) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-2xs tracking-label text-text-dim uppercase">
+        <span className="text-2xs text-text-dim">
           Crudos · {clips.length}
           {totalSec > 0 && (
             <span className="ml-1.5 text-text-faint normal-case tabular-nums">
@@ -1018,7 +1033,7 @@ function CrudosSection({ piece }: { piece: ContentPiece }) {
             Vincula el material grabado (quedan como rutas locales; nada se copia) para armar el
             corte automático.
           </span>
-          <span className="mt-1 text-2xs tracking-label text-accent uppercase">＋ Agregar crudos</span>
+          <span className="mt-1 text-2xs text-accent">＋ Agregar crudos</span>
         </button>
       )}
 
@@ -1257,7 +1272,7 @@ function AutoEditCard({ piece }: { piece: ContentPiece }) {
         <p className="text-2xs text-red">✕ La edición anterior falló: {job.error ?? "sin detalle"}</p>
       )}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Edición automática</span>
+        <span className="text-2xs text-text-dim">Edición automática</span>
         {retrying && (
           <button onClick={() => setRetrying(false)} className="text-2xs text-text-faint hover:text-text-dim">
             ← volver al corte listo
@@ -1311,7 +1326,7 @@ function EditPointsSection({ piece, onPatch }: { piece: ContentPiece; onPatch: P
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-2xs tracking-label text-text-dim uppercase">
+      <span className="text-2xs text-text-dim">
         Puntos de edición · {sorted.length}
       </span>
       {sorted.map((p) => (

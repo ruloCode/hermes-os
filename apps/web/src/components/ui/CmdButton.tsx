@@ -36,16 +36,18 @@ export function CmdButton({
   const style: Record<string, string> = {};
 
   if (size === "sm") {
-    style.padding = "5px 9px";
-    style.fontSize = "10px";
-    style.gap = "7px";
+    style.padding = "4px 10px";
+    style.fontSize = "12px";
+    style.gap = "6px";
     style.minHeight = "28px";
   }
 
   if (variant === "solid") {
-    // Fondo de acento al 12% + borde line-2 (vía la var que lee .cmd-btn).
-    style.background = "color-mix(in srgb, var(--color-accent) 12%, transparent)";
-    style["--line"] = "var(--color-line-2)";
+    // v5: "solid" ES el primario — fondo índigo sólido, texto sobre acento.
+    style.background = "var(--color-accent-solid)";
+    style.color = "var(--color-on-accent)";
+    style["--line"] = "transparent";
+    style["--line-bright"] = "transparent";
   } else if (variant === "danger") {
     // Tiñe texto/borde de rojo; el prefijo ">" y el hover de .cmd-btn
     // leen --accent/--accent-hot, así que también se vuelven rojos.

@@ -4,9 +4,10 @@ import type { ReactNode } from "react";
 import { toneVar, type Tone } from "./tones";
 
 /**
- * Badge — etiqueta compacta teñida por tono.
- * - line:  borde 1px del tono al 40% + texto del tono (default)
- * - solid: fondo del tono al 15% + texto del tono
+ * Badge — etiqueta compacta (píldora) teñida por tono.
+ * - line:  borde 1px del tono al 35% + texto del tono (default)
+ * - solid: fondo del tono al 12% + texto del tono
+ * `neutral` = gris: la mayoría de las etiquetas no son estado y no llevan color.
  */
 export function Badge({
   tone = "neutral",
@@ -20,22 +21,22 @@ export function Badge({
   children: ReactNode;
 }) {
   const color = toneVar(tone);
-  const padding = size === "sm" ? "px-1.5 py-0" : "px-2 py-0.5";
+  const padding = size === "sm" ? "h-5 px-1.5" : "h-6 px-2";
   const style =
     variant === "solid"
       ? {
           color,
-          background: `color-mix(in srgb, ${color} 15%, transparent)`,
+          background: `color-mix(in srgb, ${color} 12%, transparent)`,
         }
       : {
           color,
-          border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`,
+          border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
         };
 
   return (
     <span
-      className={`inline-flex items-center ${padding} text-2xs tracking-label uppercase`}
-      style={{ ...style, borderRadius: 2 }}
+      className={`inline-flex shrink-0 items-center rounded-full ${padding} text-2xs font-medium whitespace-nowrap`}
+      style={style}
     >
       {children}
     </span>

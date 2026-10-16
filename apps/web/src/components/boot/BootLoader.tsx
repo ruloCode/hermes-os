@@ -11,6 +11,7 @@
 //     expone por ref y la conduce <BootGate/> con el progreso real de carga.
 // El modo demo y el loop de reinicio se eliminaron: el progreso es real.
 
+import { HermesMark } from "@/components/shell/HermesMark";
 import { useEffect, useRef } from "react";
 import { readToken } from "@/components/ui/tones";
 
@@ -537,7 +538,10 @@ export function BootLoader({ progress, finish, labels, onDone }: BootLoaderProps
 
       <div className="stage" data-boot="stage">
         <div className="hud-top">
-          <b>Hermes</b>
+          <b style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <HermesMark size={22} />
+            Hermes
+          </b>
           <span>Arrancando</span>
         </div>
 

@@ -13,13 +13,12 @@ import {
   type TransactionKind,
 } from "@hermes/shared";
 import { Badge } from "@/components/ui/Badge";
-import { CmdButton } from "@/components/ui/CmdButton";
+import { Button } from "@/components/ui/Button";
 import { DataRow } from "@/components/ui/DataRow";
+import { Segmented } from "@/components/ui/Segmented";
 import { CategoryIcon, categoryLabel } from "./categories";
 import { money } from "./FinanceSummary";
-
-const FIELD =
-  "rounded-sm border border-line bg-transparent outline-none transition-colors focus:border-line-2";
+import { FIELD, IconPencil, IconX } from "./kit";
 
 const MONTHS_LONG = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -55,6 +54,7 @@ const SOURCE_LABEL: Record<string, string> = {
   agent: "Hermes",
   voice: "voz",
   mobile: "móvil",
+  notification: "aviso del banco (teléfono)",
 };
 
 interface EditDraft {
@@ -67,13 +67,11 @@ interface EditDraft {
 
 export function TransactionDetail({
   transaction: t,
-  categoryColor,
   onEdit,
   onVoid,
   onClose,
 }: {
   transaction: Transaction;
-  categoryColor?: (category: string) => string | undefined;
   onEdit: (
     id: number,
     patch: Partial<Pick<Transaction, "amount" | "category" | "note" | "occurred_on" | "kind">>,
@@ -129,8 +127,6 @@ export function TransactionDetail({
     onClose();
   };
 
-  const color = categoryColor?.(t.category) ?? "var(--color-text-faint)";
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm hud-in"
@@ -143,70 +139,74 @@ export function TransactionDetail({
         aria-modal="true"
         aria-label="Detalle del movimiento"
         onClick={(e) => e.stopPropagation()}
-        className="hud-panel relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-y-auto overscroll-contain p-5"
+        className="hud-panel elev-2 relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-y-auto overscroll-contain p-5"
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="Cerrar"
-          className="absolute top-3 right-3 grid h-6 w-6 place-items-center rounded-sm border border-line text-text-dim transition-colors hover:border-line-2 hover:text-text"
+          className="absolute top-3 right-3 grid h-7 w-7 cursor-pointer place-items-center rounded-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
         >
-          ✕
+          <IconX />
         </button>
 
         {/* Identidad: categoría + tipo */}
-        <div className="flex items-center gap-2 pr-8">
-          <span style={{ color }}>
-            <CategoryIcon category={t.category} className="h-4 w-4" />
-          </span>
-          <span className="text-sm text-text">{categoryLabel(t.category)}</span>
-          <Badge tone={t.kind === "income" ? "green" : "red"} size="sm">
+        <div className="flex items-center gap-2 pr-8 text-text-dim">
+          <CategoryIcon category={t.category} className="h-4 w-4" />
+          <span className="text-sm">{categoryLabel(t.category)}</span>
+          <Badge tone="neutral" size="sm">
             {t.kind === "income" ? "Ingreso" : "Gasto"}
           </Badge>
         </div>
 
-        {/* Monto hero */}
+        {/* Monto hero: el signo lo dice; solo el ingreso va en verde. */}
         <div
-          className={`font-display text-3xl tabular-nums ${
-            t.kind === "income" ? "text-green" : "text-red"
+          className={`text-2xl font-medium tabular-nums ${
+            t.kind === "income" ? "text-green" : "text-text"
           }`}
         >
           {t.kind === "income" ? "+" : "−"}
           {money(t.amount, t.currency)}
         </div>
+        {t.note && !edit && (
+          <p className="-mt-1 text-sm break-words whitespace-pre-wrap text-text-dim">{t.note}</p>
+        )}
 
         {edit ? (
           /* Edición dentro del overlay: mismos campos de la captura */
           <div
-            className="flex flex-col gap-2"
+            className="flex flex-col gap-2 border-t border-line pt-3"
             onKeyDown={(e) => {
               if (e.key === "Enter") void commitEdit();
             }}
           >
-            <div className="flex flex-wrap items-center gap-1.5">
-              <select
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                ariaLabel="Tipo de movimiento"
                 value={edit.kind}
-                onChange={(e) => setEdit({ ...edit, kind: e.target.value as TransactionKind })}
-                className={`${FIELD} px-1.5 py-1 text-2xs ${edit.kind === "income" ? "text-green" : "text-red"}`}
-              >
-                <option value="expense" className="bg-bg">Gasto</option>
-                <option value="income" className="bg-bg">Ingreso</option>
-              </select>
+                onChange={(k) => setEdit({ ...edit, kind: k })}
+                options={[
+                  { value: "expense", label: "Gasto" },
+                  { value: "income", label: "Ingreso" },
+                ]}
+              />
               <input
                 autoFocus
                 value={edit.amount}
                 onChange={(e) => setEdit({ ...edit, amount: e.target.value })}
                 inputMode="numeric"
-                className={`${FIELD} w-28 px-2 py-1 text-xs text-text tabular-nums`}
+                aria-label="Monto"
+                className={`${FIELD} w-28 tabular-nums`}
               />
               <select
                 value={edit.category}
                 onChange={(e) => setEdit({ ...edit, category: e.target.value })}
-                className={`${FIELD} px-1.5 py-1 text-2xs text-text`}
+                aria-label="Categoría"
+                className={FIELD}
               >
                 {FINANCE_CATEGORIES.map((c) => (
-                  <option key={c} value={c} className="bg-bg">
-                    {c}
+                  <option key={c} value={c}>
+                    {categoryLabel(c)}
                   </option>
                 ))}
               </select>
@@ -214,22 +214,29 @@ export function TransactionDetail({
                 type="date"
                 value={edit.date}
                 onChange={(e) => setEdit({ ...edit, date: e.target.value })}
-                className={`${FIELD} px-1.5 py-[3px] text-2xs text-text [color-scheme:dark]`}
+                aria-label="Fecha"
+                className={FIELD}
               />
             </div>
             <input
               value={edit.note}
               onChange={(e) => setEdit({ ...edit, note: e.target.value })}
               placeholder="Nota…"
-              className={`${FIELD} w-full px-2 py-1 text-xs text-text`}
+              aria-label="Nota"
+              className={`${FIELD} w-full`}
             />
-            <div className="flex gap-2">
-              <CmdButton size="sm" onClick={() => void commitEdit()} loading={saving}>
-                Guardar
-              </CmdButton>
-              <CmdButton size="sm" onClick={() => setEdit(null)}>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button size="md" variant="ghost" onClick={() => setEdit(null)}>
                 Cancelar
-              </CmdButton>
+              </Button>
+              <Button
+                size="md"
+                variant="primary"
+                onClick={() => void commitEdit()}
+                disabled={saving}
+              >
+                {saving ? "Guardando…" : "Guardar"}
+              </Button>
             </div>
           </div>
         ) : (
@@ -239,51 +246,30 @@ export function TransactionDetail({
               <DataRow label="Fecha" value={fullDate(t.occurred_on)} />
               <DataRow label="Registrado" value={registeredAt(t.created_at)} />
               <DataRow label="Vía" value={SOURCE_LABEL[t.source] ?? t.source} />
-              <DataRow label="Billetera" value={t.account ?? "—"} />
+              <DataRow label="Billetera" value={t.account ?? "Sin billetera"} />
               <DataRow label="Moneda" value={t.currency} />
             </div>
-            {t.note && (
-              <div className="rounded-sm border border-line px-2.5 py-2">
-                <span className="mb-1 block text-2xs tracking-label text-text-dim uppercase">
-                  Nota
-                </span>
-                <p className="text-xs leading-relaxed whitespace-pre-wrap text-text">{t.note}</p>
-              </div>
-            )}
 
-            {/* Acciones */}
-            <div className="flex items-center gap-2 border-t border-line pt-3">
-              <CmdButton size="sm" onClick={startEdit}>
-                ✎ Editar
-              </CmdButton>
+            {/* Acciones: anular pide confirmación (nada destructivo a un clic). */}
+            <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
               {confirmVoid ? (
-                <span className="flex items-center gap-2 text-2xs text-red">
+                <span className="flex items-center gap-2 text-xs text-text-dim">
                   ¿Anular este movimiento?
-                  <button
-                    type="button"
-                    onClick={() => void doVoid()}
-                    disabled={saving}
-                    className="rounded-sm border border-red px-2 py-1 font-semibold text-red transition-colors hover:bg-red/10"
-                  >
+                  <Button variant="danger" onClick={() => void doVoid()} disabled={saving}>
                     Sí, anular
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmVoid(false)}
-                    className="rounded-sm border border-line px-2 py-1 text-text-dim transition-colors hover:text-text"
-                  >
+                  </Button>
+                  <Button variant="ghost" onClick={() => setConfirmVoid(false)}>
                     No
-                  </button>
+                  </Button>
                 </span>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmVoid(true)}
-                  className="rounded-sm border border-line px-2 py-1 text-2xs text-red transition-colors hover:border-red"
-                >
-                  ✕ Anular
-                </button>
+                <Button variant="danger" onClick={() => setConfirmVoid(true)}>
+                  Anular
+                </Button>
               )}
+              <Button icon={<IconPencil size={13} />} onClick={startEdit}>
+                Editar
+              </Button>
             </div>
           </>
         )}

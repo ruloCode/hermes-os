@@ -1,43 +1,40 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════════════
-   Design system v4 (2026-09) — menos opciones, todas defendibles.
+   Design system v5 "Grafito" (2026-10) — marca propia, no prestada.
 
-   Sigue la línea "limpia" de v3 (superficies planas y opacas, un acento
-   cálido, Inter para el UI y mono solo para datos, sin mayúsculas). Lo que
-   v4 cambia es que las escalas dejan de mentir.
+   v3/v4 limpiaron el HUD cyberpunk, pero lo hicieron copiando la piel de
+   Claude: neutros cálidos de papel y el MISMO terracota (#d97757). Funcionaba
+   como interfaz y fallaba como marca — Hermes se veía como un tema de otro
+   producto. v5 cambia la identidad y conserva toda la API:
 
-   1 · EL ACENTO SE LLAMA COMO ES. `--color-violet` valía terracota desde
-       el rediseño de v3: un token que se llama violeta y pinta naranja es
-       una trampa para quien abra el archivo. Ahora es `--color-accent`
-       (408 usos renombrados). El VALOR no se tocó: sigue siendo #d97757.
+   1 · NEUTROS GRAFITO, NO PAPEL. Grises fríos con un tinte azul apenas
+       perceptible (como Linear/Vercel). Tres alturas reales en oscuro:
+         cromo #0e0f11 (barra lateral) < lienzo #131417 < tarjeta #18191d
+       En claro el lienzo es blanco y el cromo gris #f4f4f5: el contenido
+       vive en una hoja enmarcada, la navegación alrededor.
 
-   2 · LOS TRES GRISES LLEVAN INFORMACIÓN Y SE LEEN. `text-faint` estaba
-       documentado como "solo decorativo, nunca información" y se usaba 296
-       veces para datos reales del vault. No era solo una regla incumplida:
-       daba 3.86:1 en oscuro y 2.64:1 en claro, contra el 4.5:1 que pide
-       AA. Los tres niveles ahora pasan AA, así que el comentario ya no
-       hace falta: si se lee, puede llevar dato.
-         oscuro (sobre #121110): text 16.2:1 · dim 8.7:1 · faint 5.5:1
-         claro  (sobre #f6f4f0): text 17.1:1 · dim 7.1:1 · faint 5.0:1
-       El acento del tema claro también subía justo por debajo (#c2542d =
-       4.13:1) y bajó a #b34a25 = 4.9:1.
+   2 · UN ACENTO ÍNDIGO "IRIS". Uno, usado poco: foco, selección, enlaces,
+       botón primario, el orbe. Todo lo demás es gris. El terracota decía
+       "acción", "ingreso", "negativo" y "pestaña activa" a la vez; ahora el
+       color vuelve a significar algo.
+         · `accent`        texto/iconos  (oscuro #7c7ff5 = 5.45:1 · claro #5048e5 = 6.3:1)
+         · `accent-solid`  FONDO de botón primario con `text-on-accent`
+           (en oscuro el acento legible como texto es demasiado claro para
+           llevar texto blanco encima: 3.4:1 → el sólido es #5b5bd6 = 5.4:1)
 
-   3 · DIEZ TAMAÑOS DE TEXTO ERAN DOS. Medido: 698 usos de `text-2xs` y 210
-       de `text-xs` — el 90% de la app estaba escrita a 11 y 12px, y el
-       resto de la escala sumaba 53 usos. Los valores se colapsan en SEIS
-       pasos (12·14·16·20·28·40) y el piso sube de 11px a 12px. Los nombres
-       de utilidad siguen todos vivos a propósito: la escala se arregla sin
-       tocar mil call sites, y varios nombres comparten valor hasta que un
-       barrido posterior los unifique.
+   3 · LOS SEMÁNTICOS SON ESTADO, NO DECORACIÓN. green/amber/red = bien/
+       atención/mal; cyan = "en curso / info". Bajan de saturación para que
+       una lista con cinco tipos no se lea como arcoíris.
 
-   4 · CINCO RADIOS ERAN DOS (228 `rounded-sm` + 50 `rounded-xs` de 287).
-       Tres valores: 6 controles · 10 tarjetas · 14 superficies grandes.
+   4 · TIPOGRAFÍA: Geist + Geist Mono (par diseñado junto). Escala intacta
+       (12·14·16·20·28·40) y piso de 12px. Radios más firmes: 6 controles ·
+       8 tarjetas · 12 superficies.
 
-   DENSIDAD: una sola, con la rejilla de 4 (gaps 8·12·16·24 = gap-2/3/4/6
-   de Tailwind). Si algún día entra el modo compacto, el sitio es un
-   `:root[data-density="compacto"]` junto a los bloques de tema de abajo —
-   no hay tokens muertos esperándolo.
+   Contraste medido (WCAG, sobre el lienzo de cada tema):
+     oscuro: text 15.9 · dim 7.6 · faint 5.6 · accent 5.45
+     claro:  text 17.9 · dim 7.9 · faint 5.0 · accent 6.3
+   Regla heredada de v4: si lleva información, pasa AA.
 
    Cómo funciona el tema: @theme emite las vars en :root (oscuro por
    defecto); `:root[data-theme="light"]` las redefine. Las utilidades de
@@ -46,32 +43,39 @@
    cambiar de tema, ver ThemeProvider).
    ══════════════════════════════════════════════════════════════════════ */
 @theme {
-  /* ── Superficies (oscuro = default) ── */
-  --color-bg: #121110;
-  --color-panel: #1a1917;
-  --color-panel-2: #232120;
-  --color-line: rgb(255 255 255 / 0.08);
-  --color-line-2: rgb(255 255 255 / 0.16);
+  /* ── Superficies (oscuro = default) ──
+     chrome = lo que rodea al lienzo (barra lateral, fondo de la ventana). */
+  --color-chrome: #0e0f11;
+  --color-bg: #131417;
+  --color-panel: #18191d;
+  --color-panel-2: #1f2025;
+  --color-line: rgb(255 255 255 / 0.07);
+  --color-line-2: rgb(255 255 255 / 0.13);
+  /* Capas de interacción: se SUPERPONEN al fondo que haya debajo (cromo,
+     lienzo o tarjeta), por eso son translúcidas y valen en cualquier altura. */
+  --color-hover: rgb(255 255 255 / 0.05);
+  --color-selected: rgb(255 255 255 / 0.09);
 
-  /* ── Acento + semánticos ──
-     `accent` ES el acento (terracota). El nombre se conserva por la API. */
-  --color-accent: #d97757;
-  --color-accent-hot: #e89a7d;
-  --color-cyan: #7fc4d4;
-  --color-blue: #8ab4f8;
-  --color-green: #6ccb8f;
-  --color-amber: #e7b04e;
-  --color-red: #f07070;
+  /* ── Acento + semánticos ── */
+  --color-accent: #7c7ff5;
+  --color-accent-hot: #a5a7fa;
+  --color-accent-solid: #5b5bd6;
+  --color-on-accent: #ffffff;
+  --color-cyan: #6db3c8;
+  --color-blue: #7ea6ee;
+  --color-green: #5cc58b;
+  --color-amber: #e3ad55;
+  --color-red: #ee7b7b;
 
   /* ── Texto ── */
-  --color-text: #f0ede6;
-  --color-text-dim: #b5afa5;
-  --color-text-faint: #8f8a80;
+  --color-text: #eceef1;
+  --color-text-dim: #a3a7b0;
+  --color-text-faint: #8a8e97;
 
-  /* ── Tipografía (las vars --font-inter/--font-plex las inyecta next/font) ── */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-plex), ui-monospace, "SF Mono", Menlo, monospace;
+  /* ── Tipografía (las vars --font-geist/--font-geist-mono las inyecta next/font) ── */
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
   --text-2xs: 12px;
   --text-2xs--line-height: 1.45;
   --text-xs: 12px;
@@ -81,19 +85,24 @@
   --text-base: 14px;
   --text-base--line-height: 1.55;
   --text-md: 16px;
-  --text-md--line-height: 1.55;
+  --text-md--line-height: 1.5;
   --text-lg: 20px;
+  --text-lg--line-height: 1.35;
   --text-xl: 20px;
+  --text-xl--line-height: 1.35;
   --text-2xl: 28px;
+  --text-2xl--line-height: 1.2;
   --text-3xl: 28px;
+  --text-3xl--line-height: 1.2;
   --text-4xl: 40px;
+  --text-4xl--line-height: 1.1;
 
-  /* ── Radios (suaves, como Claude) ── */
+  /* ── Radios: firmes, no de burbuja ── */
   --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 14px;
-  --radius-xl: 14px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
   /* ── Tracking: casi neutro. Las clases siguen existiendo, ya no gritan. ── */
   --tracking-label: 0.01em;
@@ -108,48 +117,54 @@
 /* Tokens que SOLO consume JS (canvas/three/SVG vía readToken/chartVar).
    `static`: sin utilidades que los referencien, el @theme normal los
    tree-shakea y llegan vacíos al browser. Paleta categórica en orden FIJO
-   1→5; amber/red quedan reservados a estado. */
+   1→5 (índigo · verde azulado · magenta · cielo · verde); amber/red quedan
+   reservados a estado. */
 @theme static {
-  --color-chart-1: #d97757;
-  --color-chart-2: #7fc4d4;
-  --color-chart-3: #8ab4f8;
-  --color-chart-4: #b79cf3;
-  --color-chart-5: #6ccb8f;
+  --color-chart-1: #7c7ff5;
+  --color-chart-2: #4fb5ad;
+  --color-chart-3: #d57db3;
+  --color-chart-4: #6aa6ee;
+  --color-chart-5: #7cc48e;
   /* Teclas del piano (Composición): en claro las negras son negras. */
-  --color-key-white: #33322f;
-  --color-key-black: #141312;
-  --color-key-ink: #1f1e1d;
+  --color-key-white: #2c2e33;
+  --color-key-black: #0e0f11;
+  --color-key-ink: #18191d;
 }
 
 /* ── Tema CLARO: mismos nombres, otros valores ─────────────────────────
-   Neutros cálidos (papel), acento terracota más oscuro para contraste
-   AA sobre blanco, semánticos en su versión "tinta". */
+   Lienzo blanco dentro de cromo gris; acento índigo más profundo para AA
+   sobre blanco; semánticos en su versión "tinta". */
 :root[data-theme="light"] {
-  --color-bg: #f6f4f0;
+  --color-chrome: #f4f4f5;
+  --color-bg: #ffffff;
   --color-panel: #ffffff;
-  --color-panel-2: #efede8;
-  --color-line: rgb(30 28 24 / 0.10);
-  --color-line-2: rgb(30 28 24 / 0.2);
+  --color-panel-2: #f4f4f6;
+  --color-line: rgb(17 19 24 / 0.09);
+  --color-line-2: rgb(17 19 24 / 0.16);
+  --color-hover: rgb(17 19 24 / 0.045);
+  --color-selected: rgb(17 19 24 / 0.075);
 
-  --color-accent: #b34a25;
-  --color-accent-hot: #9e4325;
-  --color-cyan: #2a7b8c;
-  --color-blue: #2f6fe0;
-  --color-green: #1f8a4c;
-  --color-amber: #b7791f;
-  --color-red: #d03a2e;
+  --color-accent: #5048e5;
+  --color-accent-hot: #3f37cc;
+  --color-accent-solid: #5048e5;
+  --color-on-accent: #ffffff;
+  --color-cyan: #0e7490;
+  --color-blue: #2563eb;
+  --color-green: #15803d;
+  --color-amber: #b45309;
+  --color-red: #dc2626;
 
-  --color-text: #1a1815;
-  --color-text-dim: #575249;
-  --color-text-faint: #6e6960;
+  --color-text: #16171a;
+  --color-text-dim: #50545d;
+  --color-text-faint: #6b6f78;
 
-  --color-chart-1: #c2542d;
-  --color-chart-2: #2a7b8c;
-  --color-chart-3: #2f6fe0;
-  --color-chart-4: #7a4fd1;
-  --color-chart-5: #1f8a4c;
+  --color-chart-1: #5048e5;
+  --color-chart-2: #0f8a82;
+  --color-chart-3: #b8458c;
+  --color-chart-4: #2f74d0;
+  --color-chart-5: #2e8b4f;
   --color-key-white: #ffffff;
-  --color-key-black: #2b2926;
+  --color-key-black: #26282d;
   --color-key-ink: #ffffff;
 }
 
@@ -169,9 +184,9 @@
   --red: var(--color-red);
   --text: var(--color-text);
   --text-dim: var(--color-text-dim);
-  /* Sombras por tema (en oscuro casi no se ven; en claro dan la elevación) */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
-  --shadow-pop: 0 12px 40px rgb(0 0 0 / 0.45);
+  /* Sombras por tema (en oscuro la elevación la da el borde, no la sombra) */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
+  --shadow-pop: 0 16px 48px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
   /* Capas (z-index) */
   --z-ambient: -1;
   --z-dropdown: 30;
@@ -180,15 +195,15 @@
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --shadow-card: 0 1px 2px rgb(30 28 24 / 0.05), 0 1px 3px rgb(30 28 24 / 0.04);
-  --shadow-pop: 0 12px 40px rgb(30 28 24 / 0.16);
+  --shadow-card: 0 1px 2px rgb(16 18 24 / 0.04);
+  --shadow-pop: 0 16px 48px rgb(16 18 24 / 0.14), 0 0 0 1px rgb(16 18 24 / 0.06);
   color-scheme: light;
 }
 
 html,
 body {
   height: 100%;
-  background: var(--bg);
+  background: var(--color-chrome);
   color: var(--text);
   overflow-x: hidden;
 }
@@ -197,7 +212,18 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* La cortina de arranque solo en la primera carga de la pestaña (ver
+   theme-init.ts): con `data-booted` no llega a pintarse. */
+html[data-booted] .hermes-boot {
+  display: none !important;
 }
 
 /* Transición suave al cambiar de tema (solo colores, nada de layout). */
@@ -241,10 +267,21 @@ html[data-theme-transition] *::after {
   box-shadow: var(--shadow-card);
 }
 
+/* ── Lienzo: la hoja enmarcada donde vive cada vista ─────────────── */
+.app-canvas {
+  background: var(--color-bg);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+/* Título de panel: texto, no señal. v4 le ponía un punto de color a cada
+   título ("• Preview", "• Actividad en vivo"): veinte puntos de acento por
+   pantalla que no decían nada. El tono queda SOLO para alertas. */
 .hud-title {
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
   color: var(--color-text);
@@ -252,20 +289,15 @@ html[data-theme-transition] *::after {
   align-items: center;
   gap: 8px;
 }
-/* El dot de tono se conserva como señal semántica discreta (sin glow). */
-.hud-title::before {
+.hud-title-amber::before,
+.hud-title-red::before {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: var(--color-accent);
 }
-.hud-title-cyan::before { background: var(--color-cyan); }
-.hud-title-green::before { background: var(--color-green); }
 .hud-title-amber::before { background: var(--color-amber); }
 .hud-title-red::before { background: var(--color-red); }
-.hud-title-blue::before { background: var(--color-blue); }
-.hud-title-neutral::before { background: var(--color-text-faint); }
 
 /* Variante hero: mismo panel, sin línea de neón. */
 .hud-panel-hero { background: var(--color-panel); }
@@ -370,121 +402,125 @@ html[data-theme-transition] *::after {
 }
 
 /* ── Markdown (respuestas, previews) ───────────────────────────── */
-.md {
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.65;
-}
-.md > *:first-child {
-  margin-top: 0;
-}
-.md-h {
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--text);
-}
-.md-h1 {
-  font-size: 20px;
-  margin: 0.2em 0 0.5em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--line);
-}
-.md-h2 {
-  font-size: 16px;
-  margin: 1.1em 0 0.45em;
-}
-.md-h3 {
-  font-size: 14px;
-  margin: 1em 0 0.35em;
-}
-.md-h4 {
-  font-size: 13px;
-  margin: 0.9em 0 0.3em;
-  color: var(--text-dim);
-}
-.md-p {
-  margin: 0.55em 0;
-}
-.md-ul,
-.md-ol {
-  margin: 0.5em 0;
-  padding-left: 1.35em;
-}
-.md-ul {
-  list-style: disc;
-}
-.md-ol {
-  list-style: decimal;
-}
-.md-li {
-  margin: 0.22em 0;
-}
-.md-li::marker {
-  color: var(--text-dim);
-}
-.md-pre {
-  margin: 0.7em 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--color-panel-2);
-  overflow-x: auto;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.md-code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--color-panel-2);
-  border: 1px solid var(--line);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-}
-.md-pre code {
-  background: transparent;
-  border: 0;
-  color: var(--text);
-  padding: 0;
-}
-.md-quote {
-  margin: 0.6em 0;
-  padding: 4px 12px;
-  border-left: 3px solid var(--line-bright);
-  color: var(--text-dim);
-}
-.md-hr {
-  margin: 1.1em 0;
-  border: none;
-  border-top: 1px solid var(--line);
-}
-.md-link {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
+/* En @layer components (v5): fuera de capa, una vista no podía atenuar el
+   cuerpo de un reporte con una utilidad (`text-text-dim`) sin `!important`. */
+@layer components {
+  .md {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .md > *:first-child {
+    margin-top: 0;
+  }
+  .md-h {
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text);
+  }
+  .md-h1 {
+    font-size: 20px;
+    margin: 0.2em 0 0.5em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--line);
+  }
+  .md-h2 {
+    font-size: 16px;
+    margin: 1.1em 0 0.45em;
+  }
+  .md-h3 {
+    font-size: 14px;
+    margin: 1em 0 0.35em;
+  }
+  .md-h4 {
+    font-size: 13px;
+    margin: 0.9em 0 0.3em;
+    color: var(--text-dim);
+  }
+  .md-p {
+    margin: 0.55em 0;
+  }
+  .md-ul,
+  .md-ol {
+    margin: 0.5em 0;
+    padding-left: 1.35em;
+  }
+  .md-ul {
+    list-style: disc;
+  }
+  .md-ol {
+    list-style: decimal;
+  }
+  .md-li {
+    margin: 0.22em 0;
+  }
+  .md-li::marker {
+    color: var(--text-dim);
+  }
+  .md-pre {
+    margin: 0.7em 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-2);
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .md-code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--color-panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+  .md-pre code {
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    padding: 0;
+  }
+  .md-quote {
+    margin: 0.6em 0;
+    padding: 4px 12px;
+    border-left: 3px solid var(--line-bright);
+    color: var(--text-dim);
+  }
+  .md-hr {
+    margin: 1.1em 0;
+    border: none;
+    border-top: 1px solid var(--line);
+  }
+  .md-link {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 
-/* Referencia clickable a un doc del vault (wikilink / *.md). */
-.md-ref {
-  appearance: none;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
-  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
-  transition: border-color 0.15s;
-}
-.md-ref::before {
-  content: "↗";
-  margin-right: 0.25em;
-  opacity: 0.6;
-  font-size: 0.85em;
-}
-.md-ref:hover {
-  border-bottom-color: var(--accent);
+  /* Referencia clickable a un doc del vault (wikilink / *.md). */
+  .md-ref {
+    appearance: none;
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+    border-bottom: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+    transition: border-color 0.15s;
+  }
+  .md-ref::before {
+    content: "↗";
+    margin-right: 0.25em;
+    opacity: 0.6;
+    font-size: 0.85em;
+  }
+  .md-ref:hover {
+    border-bottom-color: var(--accent);
+  }
 }
 
 /* ── Visor de documentos del vault: modal tipo Notion (papel siempre claro) ── */
@@ -694,14 +730,20 @@ html[data-theme-transition] *::after {
 }
 
 /* ── Foco visible global (teclado) ─────────────────────────────── */
-:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-/* Campos dentro de un contenedor que YA señala el foco (composer). */
-.hud-field :focus-visible {
-  outline: none;
+/* En @layer base (v5): fuera de capa le ganaba a CUALQUIER utilidad, y un
+   campo no podía declarar su propio foco (`focus-visible:outline-none`,
+   `focus:border-line-2`). Dentro de base, la utilidad manda. */
+@layer base {
+  /* Sin border-radius: el contorno ya sigue el radio del elemento, y forzar
+     4px volvía cuadrado el foco de los controles `rounded-full`. */
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    outline-offset: 2px;
+  }
+  /* Campos dentro de un contenedor que YA señala el foco (composer). */
+  .hud-field :focus-visible {
+    outline: none;
+  }
 }
 
 /* Elevaciones */

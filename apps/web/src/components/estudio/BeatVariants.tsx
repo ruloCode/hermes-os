@@ -83,7 +83,7 @@ export function BeatVariants({
       <div className="flex items-center gap-2">
         <button
           onClick={() => setOpen(!open)}
-          className={`text-2xs tracking-label uppercase ${
+          className={`text-2xs ${
             open || list.length ? "text-accent" : "text-text-faint hover:text-text-dim"
           }`}
         >
@@ -93,7 +93,7 @@ export function BeatVariants({
           onClick={() => void generate()}
           disabled={generating}
           title="Hermes genera 3-5 versiones con ángulos distintos (se agregan, nada se pisa)"
-          className="text-2xs tracking-label text-text-faint uppercase hover:text-accent disabled:opacity-50"
+          className="text-2xs text-text-faint hover:text-accent disabled:opacity-50"
         >
           {generating ? "◌ generando…" : "✦ generar"}
         </button>
@@ -116,12 +116,12 @@ export function BeatVariants({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     {v.angle && (
-                      <span className="text-2xs tracking-label text-cyan uppercase">{v.angle}</span>
+                      <span className="text-2xs text-cyan">{v.angle}</span>
                     )}
-                    <span className="text-2xs text-text-faint uppercase">
+                    <span className="text-2xs text-text-faint">
                       {v.source === "manual" ? "tuya" : "hermes"}
                     </span>
-                    {active && <span className="text-2xs text-green uppercase">✓ activa</span>}
+                    {active && <span className="text-2xs text-green">✓ activa</span>}
                   </div>
                   <p className="mt-0.5 text-xs leading-snug text-text">{v.text}</p>
                 </div>
@@ -130,7 +130,7 @@ export function BeatVariants({
                     onClick={() => void apply(v)}
                     disabled={dirty}
                     title={dirty ? "Guarda el guion primero (⌘S)" : "Reescribir el guion con esta versión"}
-                    className="shrink-0 rounded-xs border border-line-2 px-1.5 py-0.5 text-2xs tracking-label text-text-dim uppercase hover:border-accent hover:text-accent disabled:opacity-35"
+                    className="shrink-0 rounded-xs border border-line-2 px-1.5 py-0.5 text-2xs text-text-dim hover:border-accent hover:text-accent disabled:opacity-35"
                   >
                     Usar
                   </button>

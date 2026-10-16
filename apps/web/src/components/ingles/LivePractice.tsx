@@ -26,6 +26,7 @@ import type { VocabEntry } from "@hermes/shared";
 import { useVoice, type VoiceLine } from "@/components/VoiceBusyContext";
 import { VoiceWaveform } from "@/components/VoiceWaveform";
 import { ScrollArea } from "@/components/ui/ScrollArea";
+import { Button } from "@/components/ui/Button";
 import { hermesPost } from "@/lib/hermes";
 import { onAgentPartial, type AgentPartial } from "@/lib/voice-partials";
 import type { LineFeedback, PracticeCompanion } from "@/hooks/usePracticeCompanion";
@@ -81,14 +82,14 @@ function TutorLine({
         const cls = [
           "inline rounded-sm transition-colors duration-150",
           active
-            ? "bg-green/15 text-green"
+            ? "bg-selected text-text"
             : upcoming
               ? "text-text-faint"
               : saved
                 ? "text-accent"
                 : "",
           saved ? "underline decoration-accent/60 decoration-dotted underline-offset-4" : "",
-          tappable ? "cursor-pointer hover:bg-cyan/10 hover:text-cyan" : "cursor-default",
+          tappable ? "cursor-pointer hover:bg-hover hover:text-text" : "cursor-default",
         ].join(" ");
         if (!tappable) return <span key={i} className={cls}>{t.raw}</span>;
         const clean = t.clean;
@@ -131,16 +132,32 @@ function MyLine({
         {line.text}
       </div>
       {feedback?.kind === "correction" ? (
-        <div className="hud-in max-w-[85%] rounded-md border border-amber/40 bg-amber/5 px-3 py-2">
+        <div className="hud-in max-w-[85%] rounded-md border border-amber/25 bg-amber/5 px-3 py-2">
           <p className="text-sm leading-snug text-text-dim">
-            <span className="line-through decoration-amber/70">{feedback.quote}</span>
-            <span className="px-1.5 text-amber">→</span>
+            <span className="line-through decoration-amber/60">{feedback.quote}</span>
+            <span className="px-1.5 text-text-faint">→</span>
             <span className="font-medium text-text">{feedback.correction}</span>
           </p>
           {feedback.note && <p className="mt-0.5 text-xs leading-snug text-text-dim">{feedback.note}</p>}
         </div>
       ) : feedback?.kind === "ok" ? (
-        <span className="hud-in text-xs text-green">✓ Bien dicho</span>
+        <span className="hud-in flex items-center gap-1 text-xs text-text-dim">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+            className="text-green"
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          Bien dicho
+        </span>
       ) : pending ? (
         <span className="text-xs text-text-faint pulse-dot">revisando…</span>
       ) : null}
@@ -176,22 +193,25 @@ function TurnDock({ companion, live }: { companion: PracticeCompanion; live: boo
   return (
     <div className="shrink-0 rounded-md border border-line bg-panel px-4 py-3 shadow-[var(--shadow-card)]">
       <div className="flex items-center gap-2">
-        <span className={`text-xs ${cur ? "text-accent" : "text-text-dim"} ${cur?.streaming ? "pulse-dot" : ""}`}>
+        <span
+          className={`flex items-center gap-1.5 text-xs font-medium ${cur ? "text-text" : "text-text-dim"}`}
+        >
+          {cur?.streaming && <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan" />}
           {cur ? (HELP_LABEL[cur.kind] ?? "Ayuda") : "Tu turno"}
         </span>
         <span className="ml-auto flex items-center gap-1.5">
           {ACTIONS.map((a) => (
-            <button
+            <Button
               key={a.intent}
-              type="button"
               onClick={() => companion.help(a.intent)}
               disabled={!companion.ready || !live}
               title={`${a.title} (${a.key})`}
-              className="flex items-center gap-1.5 rounded-sm border border-line px-2 py-1 text-xs text-text-dim transition-colors hover:border-accent/60 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {a.label}
-              <kbd className="rounded-xs border border-line px-1 font-mono text-2xs text-text-faint">{a.key}</kbd>
-            </button>
+              <kbd className="rounded-xs border border-line px-1 font-sans text-2xs text-text-faint">
+                {a.key}
+              </kbd>
+            </Button>
           ))}
         </span>
       </div>
@@ -201,7 +221,7 @@ function TurnDock({ companion, live }: { companion: PracticeCompanion; live: boo
             {hints.keys.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {hints.keys.map((k) => (
-                  <span key={k} className="rounded-sm border border-green/40 bg-green/5 px-2 py-0.5 text-sm text-text">
+                  <span key={k} className="rounded-sm border border-line bg-panel-2 px-2 py-0.5 text-sm text-text">
                     {k}
                   </span>
                 ))}
@@ -361,7 +381,7 @@ export function LivePractice({
     : isMuted
       ? { dot: "bg-red", text: "Micrófono silenciado" }
       : isSpeaking
-        ? { dot: "bg-accent pulse-dot", text: "La tutora está hablando" }
+        ? { dot: "bg-cyan pulse-dot", text: "La tutora está hablando" }
         : { dot: "bg-green", text: "Te escucha — habla cuando quieras" };
 
   return (
@@ -377,26 +397,22 @@ export function LivePractice({
         </div>
         <span className="ml-auto text-sm text-text-dim tabular-nums">{fmtElapsed(elapsed)}</span>
         <AutoHelpToggle />
-        <button
-          type="button"
+        <Button
+          variant={isMuted ? "danger" : "secondary"}
           onClick={() => setMuted(!isMuted)}
           disabled={!connected}
           title="Silenciar tu micrófono (M)"
-          className={`rounded-sm border px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${
-            isMuted ? "border-red/60 bg-red/10 text-red" : "border-line text-text-dim hover:border-line-2 hover:text-text"
-          }`}
         >
           {isMuted ? "Activar mic" : "Silenciar"}
-        </button>
+        </Button>
         {onEnd && (
-          <button
-            type="button"
+          <Button
+            variant="danger"
             onClick={onEnd}
             title="Colgar: la tutora guarda la sesión y el coach arma tu reporte"
-            className="rounded-sm border border-red/50 bg-red/5 px-2.5 py-1 text-xs text-red transition-colors hover:border-red"
           >
             Terminar
-          </button>
+          </Button>
         )}
       </div>
 
@@ -435,7 +451,10 @@ export function LivePractice({
             )}
             {liveText && (
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-accent pulse-dot">Tutora</span>
+                <span className="flex items-center gap-1.5 text-xs text-text-dim">
+                  <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan" />
+                  Tutora
+                </span>
                 <p className="text-2xl leading-relaxed text-text">
                   {liveText}
                   <span className="text-accent">▌</span>

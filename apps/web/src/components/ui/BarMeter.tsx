@@ -110,7 +110,7 @@ export function BarMeter({
   return (
     <div className="flex items-center gap-2">
       {label && (
-        <span className="min-w-[4ch] text-2xs tracking-label text-text-dim uppercase">
+        <span className="min-w-[4ch] text-2xs text-text-dim">
           {label}
         </span>
       )}

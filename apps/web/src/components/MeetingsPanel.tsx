@@ -4,15 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeetingSummary } from "@hermes/shared";
 import { listMeetings, uploadMeeting, getMeetingJob } from "@/lib/hermes";
 import { useMediaRecorder } from "@/hooks/useMediaRecorder";
+import { useHermesData } from "@/hooks/useHermesData";
 import { useLiveMeeting } from "@/state/LiveMeetingProvider";
+import { useWorkspace } from "@/state/WorkspaceContext";
 import { PanelState } from "@/components/ui/PanelState";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { Button } from "@/components/ui/Button";
 import { LiveMeetingView } from "./live/LiveMeetingView";
 import { LiveSetupCard } from "./live/LiveSetupCard";
 import { MeetingDetail } from "./MeetingDetail";
-
-// Campos de texto: mismo borde/focus que el resto del design system.
-const FIELD =
-  "rounded-sm border border-line bg-transparent outline-none transition-colors focus:border-line-2";
 
 /**
  * Panel de Reuniones de un proyecto: graba en vivo, sube un archivo de audio,
@@ -84,7 +84,7 @@ export function MeetingsPanel({
       refresh();
     } else {
       setLiveNotice(
-        `La junta de ${liveResult.project} quedó procesada — enfoca ese proyecto para verla.`,
+        `La junta de ${liveResult.project} quedó procesada — elige ese proyecto para verla.`,
       );
     }
     live.consumeResult();
@@ -197,201 +197,433 @@ export function MeetingsPanel({
   // reemplaza la lista". Va ANTES del guard de proyecto: una junta reanudada
   // tras ⌘R existe aunque no haya proyecto en foco.
   if (live.phase !== "idle") {
-    return <LiveMeetingView />;
+    return <LiveMeetingView asView />;
   }
 
+  // Avisos de estado real (nunca decorativos): el color va en el punto.
+  const notices = (
+    <>
+      {live.error && <Notice tone="red">{live.error}</Notice>}
+      {liveNotice && <Notice tone="green">{liveNotice}</Notice>}
+    </>
+  );
+
+  // Sin proyecto: antes decía "enfoca un proyecto en la barra izquierda" y no
+  // había ninguna barra izquierda de proyectos (estaba a la derecha). Ahora el
+  // vacío OFRECE el control: la lista de proyectos activos, a un clic.
   if (!project) {
     return (
-      <div className="grid h-full place-items-center px-6 text-center">
-        <p className="text-xs leading-relaxed text-text-dim">
-          Enfoca un proyecto en la barra izquierda para grabar, subir y ver sus reuniones.
-        </p>
+      <div className="flex h-full min-h-0 flex-col">
+        <ViewHeader title="Reuniones" />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ProjectPicker />
+          <div className="mx-auto mt-3 w-full max-w-[600px] space-y-1.5">{notices}</div>
+        </div>
       </div>
     );
   }
 
+  // Detalle: la PIEZA reemplaza la lista (con su propia cabecera y ← volver).
+  if (selected) {
+    return (
+      <MeetingDetail
+        key={selected}
+        project={project}
+        id={selected}
+        onBack={() => setSelected(null)}
+        onExecute={onExecute}
+      />
+    );
+  }
+
+  const label = projectName ?? project;
+
   return (
-    <div className="flex h-full flex-col gap-3">
-      {/* ── Nueva reunión ────────────────────────────────────────── */}
-      <div className="space-y-2">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder={`Título (opcional) · junta de ${projectName ?? project}`}
-          className={`${FIELD} w-full px-2.5 py-1.5 text-xs text-text`}
-        />
-
-        {/* Junta EN VIVO: copiloto en tiempo real (takeover al iniciar).
-            Usa el proyecto en foco y el input de título de arriba; modo de
-            audio e idiomas se eligen en el card. */}
-        <LiveSetupCard
-          projectLabel={projectName ?? project}
-          disabled={busy || rec.recording}
-          disabledTitle={
-            rec.recording ? "Detén la grabación batch antes de iniciar la junta en vivo" : undefined
-          }
-          onStart={(opts) => {
-            const t = title.trim();
-            setTitle("");
-            void live.start({ project, title: t || undefined, ...opts });
-          }}
-        />
-        {/* Guards del provider (p. ej. llamada de voz activa) sin takeover */}
-        {live.error && (
-          <p className="text-2xs leading-snug text-red">
-            ⚠ {live.error}
-          </p>
-        )}
-        {liveNotice && (
-          <p className="text-2xs leading-snug text-green">
-            ✓ {liveNotice}
-          </p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-2">
-          {!rec.recording ? (
-            <button
-              type="button"
-              onClick={() => void rec.start()}
-              disabled={busy || !rec.supported || live.active}
-              title={
-                live.active
-                  ? "Hay una junta en vivo usando el micrófono"
-                  : rec.supported
-                    ? "Grabar la junta"
-                    : "Grabación no soportada (usa subir archivo)"
+    <div className="flex h-full min-h-0 flex-col">
+      <ViewHeader
+        title="Reuniones"
+        // El proyecto va pegado al título (cambia QUÉ ves) y el conteo detrás:
+        // «Reuniones · [Hermes OS ▾] · 2 reuniones».
+        tabs={
+          <span className="flex min-w-0 items-center gap-3">
+            <ProjectSwitcher current={project} label={label} />
+            {meetings.length > 0 && (
+              <span className="shrink-0 text-xs text-text-faint">
+                {meetings.length} {meetings.length === 1 ? "reunión" : "reuniones"}
+              </span>
+            )}
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              title="Subir un archivo de audio de la junta"
+              icon={<UploadIcon />}
+            >
+              Subir audio
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => textFileRef.current?.click()}
+              disabled={busy}
+              title="Subir un .txt/.md/.vtt/.srt con la transcripción (Otter, Fireflies, Zoom…)"
+              icon={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5M9 13h6M9 17h4" />
+                </svg>
               }
-              className="cmd-btn !w-auto"
-              // `.cmd-btn` vive fuera de @layer y le gana a las utilities:
-              // el tinte va por style con las vars nuevas (ver CmdButton.tsx).
-              style={{ borderColor: "var(--color-red)", color: "var(--color-red)" }}
             >
-              ● Grabar
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void onStopRecording()}
-              className="flex items-center gap-2 rounded-sm border border-red bg-red/10 px-3 py-2 text-xs tracking-label text-red uppercase"
-            >
-              <Waveform />■ Detener · {fmt(rec.elapsed)}
-            </button>
-          )}
+              Subir texto
+            </Button>
+            {!rec.recording ? (
+              <Button
+                onClick={() => void rec.start()}
+                disabled={busy || !rec.supported || live.active}
+                title={
+                  live.active
+                    ? "Hay una junta en vivo usando el micrófono"
+                    : rec.supported
+                      ? "Grabar la junta y procesarla al detener"
+                      : "Grabación no soportada (usa subir archivo)"
+                }
+                icon={<MicIcon />}
+              >
+                Grabar
+              </Button>
+            ) : (
+              <Button
+                variant="danger"
+                onClick={() => void onStopRecording()}
+                title="Detener y procesar la grabación"
+                icon={<Waveform />}
+              >
+                Detener · <span className="tabular-nums">{fmt(rec.elapsed)}</span>
+              </Button>
+            )}
+            <input ref={fileRef} type="file" accept="audio/*" onChange={onFile} className="hidden" />
+            <input
+              ref={textFileRef}
+              type="file"
+              accept=".txt,.md,.vtt,.srt"
+              onChange={onTextFile}
+              className="hidden"
+            />
+          </>
+        }
+      />
 
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={busy}
-            className="cmd-btn !w-auto"
-            style={{ borderColor: "var(--color-cyan)", color: "var(--color-cyan)" }}
-          >
-            ⇪ Subir audio
-          </button>
-          <input ref={fileRef} type="file" accept="audio/*" onChange={onFile} className="hidden" />
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        {/* ── Nueva junta: se OPERA, por eso es la única caja ─────────── */}
+        <section className="rounded-md border border-line bg-panel shadow-[var(--shadow-card)]">
+          <div className="space-y-3 px-4 pt-3.5 pb-4">
+            {/* El título vale para todo: en vivo, grabar, subir o pegar. */}
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={`Título de la junta (opcional) · ${label}`}
+              aria-label="Título de la junta"
+              className="h-8 w-full rounded-sm border border-line bg-panel px-3 text-sm text-text outline-none transition-colors placeholder:text-text-faint focus:border-line-2"
+            />
 
-          <button
-            type="button"
-            onClick={() => textFileRef.current?.click()}
-            disabled={busy}
-            title="Subir un .txt/.md/.vtt/.srt con la transcripción (Otter, Fireflies, Zoom…)"
-            className="cmd-btn !w-auto"
-            style={{ borderColor: "var(--color-blue)", color: "var(--color-blue)" }}
-          >
-            ⎗ Subir texto
-          </button>
-          <input
-            ref={textFileRef}
-            type="file"
-            accept=".txt,.md,.vtt,.srt"
-            onChange={onTextFile}
-            className="hidden"
-          />
-        </div>
+            {/* Junta EN VIVO: copiloto en tiempo real (takeover al iniciar).
+                Modo de audio e idiomas se eligen aquí. */}
+            <LiveSetupCard
+              projectLabel={label}
+              disabled={busy || rec.recording}
+              disabledTitle={
+                rec.recording ? "Detén la grabación antes de iniciar la junta en vivo" : undefined
+              }
+              onStart={(opts) => {
+                const t = title.trim();
+                setTitle("");
+                void live.start({ project, title: t || undefined, ...opts });
+              }}
+            />
+          </div>
 
-        {/* Pegar transcripción directo */}
-        <div className="flex items-stretch gap-2">
-          <textarea
-            value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
-            placeholder="…o pega aquí la transcripción de la junta"
-            rows={2}
-            className={`${FIELD} min-h-[40px] flex-1 resize-y px-2.5 py-1.5 text-xs leading-snug text-text`}
-          />
-          <button
-            type="button"
-            onClick={() => {
+          {/* Pegar transcripción directo */}
+          <form
+            className="flex items-end gap-2 border-t border-line px-4 py-3"
+            onSubmit={(e) => {
+              e.preventDefault();
               const t = pasteText;
               setPasteText("");
               void submitTranscript(t);
             }}
-            disabled={busy || !pasteText.trim()}
-            className="cmd-btn !w-auto self-stretch disabled:opacity-40"
-            style={{ borderColor: "var(--color-green)", color: "var(--color-green)" }}
           >
-            ⏎ Procesar
-          </button>
-        </div>
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder="¿Ya tienes la transcripción? Pégala aquí y Hermes la resume…"
+              aria-label="Pegar transcripción"
+              rows={pasteText.includes("\n") ? 4 : 1}
+              className="min-h-8 min-w-0 flex-1 resize-y rounded-sm border border-line bg-panel px-3 py-1.5 text-sm leading-snug text-text outline-none transition-colors placeholder:text-text-faint focus:border-line-2"
+            />
+            <Button type="submit" size="md" disabled={busy || !pasteText.trim()}>
+              Procesar
+            </Button>
+          </form>
+        </section>
 
-        {rec.error && (
-          <p className="text-2xs leading-snug text-amber">
-            ⚠ {rec.error}
-          </p>
-        )}
-        {busy && (
-          <p className="text-2xs tracking-label text-accent pulse-dot">
-            ◈ Transcribiendo y resumiendo la reunión…
-          </p>
-        )}
-        {error && (
-          <p className="text-2xs leading-snug text-red">
-            ⚠ {error}
-          </p>
-        )}
-      </div>
-
-      {/* ── Detalle o historial ──────────────────────────────────── */}
-      <div className="min-h-0 flex-1">
-        {selected ? (
-          <MeetingDetail
-            key={selected}
-            project={project}
-            id={selected}
-            onBack={() => setSelected(null)}
-            onExecute={onExecute}
-          />
-        ) : meetings.length === 0 ? (
-          <PanelState
-            kind="empty"
-            title="Sin reuniones todavía"
-            hint={`Graba, sube o pega la primera junta de ${projectName ?? project}.`}
-          />
-        ) : (
-          <div className="h-full space-y-1.5 overflow-y-auto pr-1">
-            {meetings.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setSelected(m.id)}
-                className="flex w-full items-center justify-between gap-2 rounded-sm border border-line bg-accent/5 px-2.5 py-2 text-left transition-colors hover:border-accent"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs text-text">
-                    {m.title}
-                  </span>
-                  <span className="text-2xs tracking-label text-text-dim uppercase">
-                    {m.fecha.slice(0, 10)} · {m.accionables_count} accionables
-                  </span>
-                </span>
-                <span className="text-2xs text-accent">
-                  →
-                </span>
-              </button>
-            ))}
+        {(busy || error || rec.error || live.error || liveNotice) && (
+          <div className="mt-3 space-y-1.5">
+            {busy && (
+              <Notice tone="cyan" pulse>
+                Transcribiendo y resumiendo la reunión…
+              </Notice>
+            )}
+            {rec.error && <Notice tone="amber">{rec.error}</Notice>}
+            {error && <Notice tone="red">{error}</Notice>}
+            {notices}
           </div>
         )}
+
+        {/* ── Historial ──────────────────────────────────────────────── */}
+        <section className="mt-7">
+          <h3 className="mb-1.5 flex items-center gap-2 px-2 text-xs font-medium text-text-dim">
+            Historial
+            {meetings.length > 0 && (
+              <span className="text-text-faint tabular-nums">{meetings.length}</span>
+            )}
+          </h3>
+          {meetings.length === 0 ? (
+            <PanelState
+              kind="empty"
+              title="Sin reuniones todavía"
+              hint={`Inicia una junta en vivo, graba, sube o pega la primera junta de ${label}.`}
+            />
+          ) : (
+            <ul>
+              {meetings.map((m) => (
+                <li key={m.id} className="border-t border-line first:border-t-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelected(m.id)}
+                    className="group flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm px-2 text-left transition-colors hover:bg-hover"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm text-text">{m.title}</span>
+                    <span className="hidden shrink-0 text-xs text-text-faint sm:inline">
+                      {sourceShort(m.source)}
+                    </span>
+                    <span className="w-[92px] shrink-0 text-right text-xs text-text-dim tabular-nums">
+                      {m.accionables_count} {m.accionables_count === 1 ? "accionable" : "accionables"}
+                    </span>
+                    <span className="w-[76px] shrink-0 text-right font-mono text-2xs text-text-faint tabular-nums">
+                      {m.fecha.slice(0, 10)}
+                    </span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100">
+                      <path d="m9 6 6 6-6 6" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   );
+}
+
+/** Aviso de una línea: el tono va en el punto, el texto en gris legible. */
+function Notice({
+  tone,
+  pulse = false,
+  children,
+}: {
+  tone: "cyan" | "green" | "amber" | "red";
+  pulse?: boolean;
+  children: React.ReactNode;
+}) {
+  const DOT = { cyan: "bg-cyan", green: "bg-green", amber: "bg-amber", red: "bg-red" } as const;
+  return (
+    <p className="flex items-start gap-2 px-1 text-xs leading-snug text-text-dim">
+      <span
+        aria-hidden
+        className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${DOT[tone]} ${pulse ? "pulse-dot" : ""}`}
+      />
+      <span className={tone === "red" ? "text-text" : undefined}>{children}</span>
+    </p>
+  );
+}
+
+/** Proyectos activos del vault: los únicos con reuniones vivas. */
+function useActiveProjects() {
+  const { projects } = useHermesData();
+  return projects
+    .filter((p) => p.estado === "activo")
+    .sort((a, b) => (a.name ?? a.slug).localeCompare(b.name ?? b.slug, "es"));
+}
+
+/**
+ * Vacío con salida: elegir el proyecto AQUÍ. Usa selectProject (no
+ * focusProject): elegir proyecto no debe sacarte de Reuniones a la consola.
+ */
+function ProjectPicker() {
+  const ws = useWorkspace();
+  const active = useActiveProjects();
+  return (
+    <div className="mx-auto w-full max-w-[600px] pt-[7vh] pb-6">
+      <span
+        aria-hidden
+        className="mb-3 grid h-10 w-10 place-items-center rounded-full border border-line bg-panel-2 text-text-faint"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="9" cy="8" r="3.2" />
+          <path d="M3 19a6 6 0 0 1 12 0M16 4.5a3.2 3.2 0 0 1 0 6.2M18 13.5a6 6 0 0 1 3 5.5" />
+        </svg>
+      </span>
+      <h2 className="text-md font-semibold text-text">Elige un proyecto</h2>
+      <p className="mt-1 text-sm text-text-dim">
+        Las juntas viven por proyecto: inicia una en vivo, grábala, súbela o pega la
+        transcripción, y Hermes la resume con sus accionables.
+      </p>
+      {active.length === 0 ? (
+        <PanelState
+          kind="empty"
+          title="Sin proyectos activos"
+          hint="Marca un proyecto con estado: activo en el vault para verlo aquí."
+        />
+      ) : (
+        <ul className="mt-5 grid gap-1.5 sm:grid-cols-2">
+          {active.map((p) => (
+            <li key={p.slug} className="min-w-0">
+              <button
+                type="button"
+                onClick={() => ws.selectProject(p.slug)}
+                className="group flex h-10 w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm border border-line bg-panel px-3.5 text-left shadow-[var(--shadow-card)] transition-colors hover:border-line-2 hover:bg-hover"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm text-text">{p.name ?? p.slug}</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-faint transition-colors group-hover:text-text">
+                  <path d="m9 6 6 6-6 6" />
+                </svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Cambiar (o quitar) el proyecto sin salir de Reuniones. */
+function ProjectSwitcher({ current, label }: { current: string; label: string }) {
+  const ws = useWorkspace();
+  const active = useActiveProjects();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const pick = (slug: string | null) => {
+    ws.selectProject(slug);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="relative"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          setOpen(false);
+          triggerRef.current?.focus();
+        }
+      }}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Cambiar de proyecto"
+        className={`flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-xs border border-line px-2 text-xs transition-colors hover:bg-hover hover:text-text ${
+          open ? "bg-hover text-text" : "text-text-dim"
+        }`}
+      >
+        <span className="max-w-[200px] truncate">{label}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 text-text-faint transition-transform ${open ? "rotate-180" : ""}`}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Proyectos"
+          className="absolute top-full left-0 z-30 mt-1 max-h-[360px] w-[260px] overflow-y-auto rounded-md border border-line bg-panel p-1 shadow-[var(--shadow-pop)]"
+        >
+          {active.map((p) => (
+            <button
+              key={p.slug}
+              type="button"
+              role="menuitem"
+              onClick={() => pick(p.slug)}
+              className={`flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm transition-colors hover:bg-hover ${
+                p.slug === current ? "bg-selected text-text" : "text-text-dim hover:text-text"
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate">{p.name ?? p.slug}</span>
+              {p.slug === current && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-dim">
+                  <path d="m5 12.5 4.5 4.5L19 7.5" />
+                </svg>
+              )}
+            </button>
+          ))}
+          <div className="my-1 border-t border-line" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => pick(null)}
+            className="flex h-8 w-full cursor-pointer items-center rounded-sm px-2 text-left text-sm text-text-dim transition-colors hover:bg-hover hover:text-text"
+          >
+            Quitar proyecto
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Z" />
+      <path d="M5.5 10.5v1a6.5 6.5 0 0 0 13 0v-1M12 18v3" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+
+function sourceShort(s: MeetingSummary["source"]): string {
+  return s === "audio"
+    ? "Grabada"
+    : s === "upload"
+      ? "Audio subido"
+      : s === "live"
+        ? "En vivo"
+        : "Transcripción";
 }
 
 function Waveform() {
@@ -399,7 +631,11 @@ function Waveform() {
     <span className="flex h-3 items-end gap-[2px]" aria-hidden>
       {[0, 1, 2, 3].map((i) => (
         // animationDelay depende del índice: se queda inline a propósito.
-        <span key={i} className="wave-bar h-3" style={{ animationDelay: `${i * 0.12}s` }} />
+        <span
+          key={i}
+          className="wave-bar h-3 !bg-current"
+          style={{ animationDelay: `${i * 0.12}s` }}
+        />
       ))}
     </span>
   );

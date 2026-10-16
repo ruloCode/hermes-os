@@ -13,19 +13,18 @@ import {
   getTask,
   type LinearBoardIssue,
 } from "@/lib/hermes";
+import { Button } from "@/components/ui/Button";
 import { PanelState } from "@/components/ui/PanelState";
-import { PriorityIcon } from "@/components/LinearBoard";
+import { PriorityIcon, StateIcon } from "@/components/LinearBoard";
 import { useWorkspace } from "@/state/WorkspaceContext";
 
 const PROJECT_SLUG = "ingles";
 const POLL_MS = 30_000; // API remota de Linear: poll sereno
 
-const STATE_DOT: Record<string, string> = {
-  started: "text-cyan",
-  unstarted: "text-accent",
-  backlog: "text-text-dim",
-  completed: "text-green",
-};
+// v5: el estado de cada issue con el MISMO icono del tablero de Tareas (antes
+// un "●" de color propio por estado, con "sin empezar" pintado de acento), el
+// alta con un campo de 32px como los del resto de la app, y las acciones de
+// fila como iconos fantasma que aparecen al pasar el mouse.
 
 export function EnglishTasksPanel() {
   const ws = useWorkspace();
@@ -88,27 +87,28 @@ export function EnglishTasksPanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1.5">
-      <div className="flex shrink-0 items-center gap-1.5">
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <form
+        className="flex shrink-0 items-center gap-1.5 px-0.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void create();
+        }}
+      >
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void create()}
-          placeholder="Nueva tarea de inglés — Hermes la crea en Linear…"
-          className="min-w-0 flex-1 rounded-sm border border-line bg-transparent px-2 py-1 text-2xs text-text outline-none transition-colors focus:border-line-2"
+          placeholder="Nueva tarea de inglés…"
+          title="Hermes la crea en Linear con contexto y Copy prompt"
+          className="h-8 min-w-0 flex-1 rounded-sm border border-line bg-panel px-3 text-sm text-text outline-none transition-colors placeholder:text-text-faint focus:border-line-2"
         />
-        <button
-          type="button"
-          onClick={() => void create()}
-          disabled={!title.trim()}
-          className="shrink-0 rounded-sm border border-accent px-2 py-1 text-2xs tracking-label text-accent uppercase transition-colors disabled:opacity-40"
-        >
-          +
-        </button>
-      </div>
-      {note && <p className="shrink-0 text-2xs tracking-label text-cyan">{note}</p>}
+        <Button type="submit" size="md" disabled={!title.trim()} title="Crear con Hermes">
+          Crear
+        </Button>
+      </form>
+      {note && <p className="shrink-0 px-2 text-xs text-text-faint">{note}</p>}
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {!loaded && <PanelState kind="loading" compact title="Cargando tareas…" />}
         {loaded && issues.length === 0 && (
           <PanelState
@@ -124,19 +124,22 @@ export function EnglishTasksPanel() {
           return (
             <div
               key={i.identifier}
-              className="group flex items-center gap-2 border-b border-line/50 px-1 py-1.5"
+              className="group flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 transition-colors hover:bg-hover"
             >
-              <span className={`text-2xs ${STATE_DOT[i.state.type] ?? "text-text-dim"}`} title={i.state.name}>
-                ●
+              <span title={i.state.name} className="flex shrink-0">
+                <StateIcon type={i.state.type} />
               </span>
               <PriorityIcon priority={i.priority} />
-              <span className={`min-w-0 flex-1 truncate text-xs ${done ? "text-text-dim line-through opacity-70" : "text-text"}`}>
+              <span
+                className={`min-w-0 flex-1 truncate text-sm ${done ? "text-text-faint line-through" : "text-text"}`}
+              >
                 {i.title}
               </span>
               {running && (
-                <span className="pulse-dot shrink-0 text-2xs text-cyan" title="Claude Code ejecutando">
-                  ●
-                </span>
+                <span
+                  className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan"
+                  title="Claude Code ejecutando"
+                />
               )}
               {i.hasPrompt && !running && !done && (
                 <button
@@ -144,9 +147,12 @@ export function EnglishTasksPanel() {
                   onClick={() => void exec(i)}
                   disabled={execBusy === i.identifier}
                   title="Ejecutar con Claude Code"
-                  className="shrink-0 rounded-sm border border-green/50 px-1.5 py-0.5 text-2xs text-green opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-40"
+                  aria-label="Ejecutar con Claude Code"
+                  className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-xs text-text-faint opacity-0 transition-[opacity,color,background-color] group-hover:opacity-100 hover:bg-hover hover:text-text focus-visible:opacity-100 disabled:opacity-40"
                 >
-                  {execBusy === i.identifier ? "…" : "▶"}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z" />
+                  </svg>
                 </button>
               )}
               <a
@@ -154,9 +160,22 @@ export function EnglishTasksPanel() {
                 target="_blank"
                 rel="noreferrer"
                 title={`${i.identifier} en Linear`}
-                className="shrink-0 text-2xs text-text-faint transition-colors hover:text-text"
+                aria-label={`Abrir ${i.identifier} en Linear`}
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
               >
-                ↗
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M7 17 17 7M8 7h9v9" />
+                </svg>
               </a>
             </div>
           );
@@ -166,9 +185,22 @@ export function EnglishTasksPanel() {
       <button
         type="button"
         onClick={() => ws.showPanel("tareas")}
-        className="shrink-0 self-start text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-accent"
+        className="flex h-7 shrink-0 cursor-pointer items-center gap-1 self-start rounded-xs px-2 text-xs text-text-dim transition-colors hover:bg-hover hover:text-text"
       >
-        tablero completo →
+        Ver el tablero completo
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="m9 18 6-6-6-6" />
+        </svg>
       </button>
     </div>
   );

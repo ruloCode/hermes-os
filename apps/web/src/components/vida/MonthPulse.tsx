@@ -2,17 +2,22 @@
 
 // Ritmo del mes (patrón Quicken/Rocket Money): barras de gasto POR DÍA del
 // mes en curso + línea de promedio, y stats derivadas de datos reales —
-// promedio diario, proyección a fin de mes, delta vs mes anterior y el mayor
-// gasto. Complementa los donuts del hero (composición) con la dimensión que
+// promedio diario, proyección a fin de mes contra el mes anterior y el mayor
+// gasto. Complementa la composición de la cabecera con la dimensión que
 // faltaba: EL TIEMPO (¿en qué días se me fue la plata? ¿voy más rápido que
 // el mes pasado?).
+//
+// v5: las barras dejan de ir en el color del acento (el acento es para lo que
+// se toca, y aquí cada día pintado en índigo competía con el botón primario):
+// son grises y "hoy" sube a tinta plena. El "gasto vs mes pasado" se fue a la
+// cifra de Gastado de la cabecera — dos veces el mismo número es ruido.
 
 import { useMemo, useState } from "react";
 import type { Currency, FinanceSummary, FxRate, Transaction } from "@hermes/shared";
 import { PanelState } from "@/components/ui/PanelState";
-import { StatBlock } from "@/components/ui/StatBlock";
 import { categoryLabel } from "./categories";
 import { money } from "./FinanceSummary";
+import { Stat } from "./kit";
 
 const DAYS_SHORT = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 const MONTHS_SHORT = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -72,9 +77,8 @@ export function MonthPulse({
     const projection = avgDaily * daysInMonth;
     const max = Math.max(...perDay);
 
-    // Delta de gasto vs mes anterior (mismo resumen combined del agente).
+    // Gasto total del mes anterior (mismo resumen combined del agente).
     const prevExpense = prevSummary?.expense ?? 0;
-    const delta = prevExpense > 0 ? (summary.expense - prevExpense) / prevExpense : null;
 
     return {
       year,
@@ -86,7 +90,6 @@ export function MonthPulse({
       max,
       avgDaily,
       projection,
-      delta,
       prevExpense,
       largest,
     };
@@ -107,7 +110,7 @@ export function MonthPulse({
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
       {/* Barras por día, con la línea punteada del promedio diario */}
       <div>
         <div className="relative" style={{ height: CHART_H }}>
@@ -115,11 +118,11 @@ export function MonthPulse({
             <div
               aria-hidden
               title={`Promedio diario: ${money(Math.round(data.avgDaily), currency)}`}
-              className="absolute right-0 left-0 border-t border-dashed border-line-2"
+              className="absolute right-0 left-0 border-t border-dashed border-text-faint/50"
               style={{ bottom: avgY }}
             />
           )}
-          <div className="flex h-full items-end gap-px">
+          <div className="flex h-full items-end gap-[3px]">
             {data.perDay.map((v, i) => {
               const day = i + 1;
               const future = data.isCurrentMonth && day > data.dayToday;
@@ -134,13 +137,16 @@ export function MonthPulse({
                   className="relative flex h-full flex-1 items-end"
                 >
                   <div
-                    className={`w-full rounded-t-xs transition-opacity ${
-                      future ? "bg-line" : isToday ? "bg-cyan" : "bg-accent"
+                    className={`w-full rounded-t-[3px] transition-colors ${
+                      future
+                        ? "bg-line"
+                        : isToday || hoverDay === day
+                          ? "bg-text"
+                          : v > 0
+                            ? "bg-text-faint/70"
+                            : "bg-line-2"
                     }`}
-                    style={{
-                      height: Math.max(h, v > 0 ? 2 : 1),
-                      opacity: future ? 0.5 : hoverDay === day ? 1 : isToday ? 0.95 : 0.7,
-                    }}
+                    style={{ height: Math.max(h, v > 0 ? 2 : 1) }}
                   />
                 </div>
               );
@@ -148,9 +154,9 @@ export function MonthPulse({
           </div>
         </div>
         {/* Eje: día 1 · hoy · fin de mes; hover pisa el centro con el día activo */}
-        <div className="mt-1 flex justify-between text-2xs text-text-faint tabular-nums">
+        <div className="mt-1.5 flex justify-between text-xs text-text-faint tabular-nums">
           <span>01</span>
-          <span className={hoverDay ? "text-text-dim" : ""}>
+          <span className={hoverDay ? "text-text" : ""}>
             {hoverDay
               ? `${fmtDay(hoverDay)} · ${money(Math.round(data.perDay[hoverDay - 1] ?? 0), currency)}`
               : data.isCurrentMonth
@@ -162,34 +168,33 @@ export function MonthPulse({
       </div>
 
       {/* Stats del ritmo — todas derivadas de movimientos reales */}
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-        <StatBlock
+      <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3">
+        <Stat
+          size="md"
           label="Promedio diario"
           value={money(Math.round(data.avgDaily), currency)}
+          context={`${data.dayToday} día${data.dayToday === 1 ? "" : "s"} contados`}
         />
         {data.isCurrentMonth && (
-          <StatBlock
+          <Stat
+            size="md"
             label="Proyección del mes"
             value={money(Math.round(data.projection), currency)}
-            tone={
-              data.prevExpense > 0 && data.projection > data.prevExpense ? "amber" : "neutral"
+            // Ámbar = atención: a este ritmo se gasta más que el mes pasado.
+            tone={data.prevExpense > 0 && data.projection > data.prevExpense ? "amber" : "text"}
+            context={
+              data.prevExpense > 0
+                ? `${money(Math.round(data.prevExpense), currency)} el mes pasado`
+                : "al ritmo actual"
             }
           />
         )}
-        {data.delta != null && (
-          <StatBlock
-            label="Gasto vs mes pasado"
-            value={`${data.delta > 0 ? "+" : ""}${Math.round(data.delta * 100)}%`}
-            tone={data.delta > 0.05 ? "red" : data.delta < -0.05 ? "green" : "neutral"}
-            trend={{ dir: data.delta > 0.05 ? "up" : data.delta < -0.05 ? "down" : "flat" }}
-          />
-        )}
         {data.largest && (
-          <StatBlock
+          <Stat
+            size="md"
             label="Mayor gasto"
             value={money(data.largest.amount, data.largest.currency)}
-            unit={data.largest.note?.slice(0, 24) || categoryLabel(data.largest.category)}
-            tone="neutral"
+            context={data.largest.note || categoryLabel(data.largest.category)}
           />
         )}
       </div>

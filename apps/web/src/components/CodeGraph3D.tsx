@@ -266,7 +266,7 @@ export function CodeGraph3D({ project }: { project?: string }) {
     // Tokens del design system (three no resuelve var(--…)).
     const COLOR = {
       bg: readToken("--color-bg", "#05060f"),
-      core: readToken("--color-accent-hot", "#e89a7d"),
+      core: readToken("--color-accent-hot", "#a5a7fa"),
       label: readToken("--color-text", "#e2e7ff"),
       line: "#7a84ff",
     };
@@ -877,12 +877,12 @@ export function CodeGraph3D({ project }: { project?: string }) {
       {/* Tooltip del nodo bajo el puntero (posicionado fuera de React) */}
       <div
         ref={tooltipRef}
-        className={`pointer-events-none absolute left-0 top-0 z-10 max-w-64 border border-line bg-panel/90 px-2.5 py-1.5 backdrop-blur transition-opacity ${hover ? "opacity-100" : "opacity-0"}`}
+        className={`pointer-events-none absolute left-0 top-0 z-10 max-w-64 rounded-sm border border-line bg-panel/95 px-2.5 py-1.5 shadow-[var(--shadow-pop)] backdrop-blur transition-opacity ${hover ? "opacity-100" : "opacity-0"}`}
       >
         {hover && (
           <>
             <p className="text-xs font-medium text-text">{hover.label}</p>
-            <p className="mt-0.5 text-2xs tracking-label text-cyan uppercase">
+            <p className="mt-0.5 text-2xs text-text-dim">
               {hover.communityName}
             </p>
             <p className="mt-0.5 truncate text-2xs text-text-dim">
@@ -905,39 +905,41 @@ export function CodeGraph3D({ project }: { project?: string }) {
 
       {/* Comunidad enfocada */}
       {selComm && (
-        <div className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-2 border border-line bg-panel/90 px-3 py-1.5 backdrop-blur">
-          <span className="text-2xs tracking-label text-accent uppercase">{selComm.name}</span>
+        <div className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-panel/95 py-1 pr-1.5 pl-3 shadow-[var(--shadow-card)] backdrop-blur">
+          <span className="text-xs font-medium text-text">{selComm.name}</span>
           <span className="text-2xs text-text-dim tabular-nums">{selComm.count} nodos</span>
           <button
             type="button"
             aria-label="Quitar foco de comunidad"
             onClick={() => sceneApi.current?.clearSelection()}
-            className="text-2xs text-text-dim transition-colors hover:text-text"
+            className="grid h-5 w-5 cursor-pointer place-items-center rounded-full text-text-faint transition-colors hover:bg-hover hover:text-text"
           >
-            ✕
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
           </button>
         </div>
       )}
 
       {/* Leyenda + hints */}
       <div className="pointer-events-none absolute bottom-2 left-0 right-0 z-10 flex flex-col items-center gap-1">
-        <span className="text-2xs tracking-hero text-text-dim uppercase">
+        <span className="text-xs text-text-dim">
           Grafo de código · {data.project}
         </span>
-        <span className="text-2xs tracking-label text-text-faint tabular-nums uppercase">
+        <span className="text-2xs text-text-faint tabular-nums">
           {data.nodes.length.toLocaleString("es-CO")} nodos ·{" "}
           {data.links.length.toLocaleString("es-CO")} aristas ·{" "}
           {Object.keys(data.communities).length || "?"} {grouping} · color = {groupingOne} · tamaño
           = conexiones
         </span>
       </div>
-      <div className="pointer-events-none absolute left-2 top-2 z-10 text-2xs leading-relaxed tracking-hero uppercase text-text-dim">
+      <div className="pointer-events-none absolute left-3 top-3 z-10 text-2xs leading-relaxed text-text-faint">
         {projects.length > 1 && (
           <select
             aria-label="Carpeta del grafo"
             value={sel ?? projects[0]?.slug ?? ""}
             onChange={(e) => setSel(e.target.value)}
-            className="pointer-events-auto mb-1 max-w-44 border border-line bg-panel px-1.5 py-1 text-2xs text-text-dim transition-colors hover:text-text focus:outline-none"
+            className="pointer-events-auto mb-1.5 h-7 max-w-44 cursor-pointer rounded-xs border border-line bg-panel px-2 text-xs text-text transition-colors hover:border-line-2 focus:outline-none"
           >
             {projects.map((p) => (
               <option key={p.slug} value={p.slug} title={p.root}>

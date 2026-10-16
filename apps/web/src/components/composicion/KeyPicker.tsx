@@ -96,7 +96,7 @@ export function KeyPicker({ song }: { song: Song }) {
             <button
               key={m}
               onClick={() => choose({ tonic: key.tonic, mode: m })}
-              className={`rounded-sm border px-2 py-1.5 text-2xs tracking-label uppercase ${
+              className={`rounded-sm border px-2 py-1.5 text-2xs ${
                 key.mode === m ? "border-accent bg-accent/16 text-accent" : "border-line bg-panel-2 text-text-dim hover:text-text"
               }`}
             >
@@ -113,7 +113,7 @@ export function KeyPicker({ song }: { song: Song }) {
       {/* La escala en el piano + notas */}
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
-          <span className="font-display text-sm tracking-title text-text uppercase">{keyLabel(key, notation)}</span>
+          <span className="font-display text-sm text-text">{keyLabel(key, notation)}</span>
           <span className="font-mono text-2xs text-text-dim">{scale.map(nm).join(" · ")}</span>
         </div>
         <PianoKeys musicKey={key} scale={scale} active={preview ? chordNotes(preview) : []} notation={notation} onPlay={(m) => playChord({ root: m % 12, quality: "maj" }, 0.6)} />
@@ -121,7 +121,7 @@ export function KeyPicker({ song }: { song: Song }) {
 
       {/* Acordes diatónicos: la paleta de la tonalidad */}
       <div className="flex flex-col gap-1.5">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Los 7 acordes de esta tonalidad</span>
+        <span className="text-2xs text-text-dim">Los 7 acordes de esta tonalidad</span>
         <div className="grid grid-cols-7 gap-1">
           {dia.map((d) => (
             <button
@@ -147,7 +147,7 @@ export function KeyPicker({ song }: { song: Song }) {
 
       {/* Prestados: color fuera de la tonalidad, con el porqué */}
       <div className="flex flex-col gap-1.5">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Acordes prestados que suelen funcionar</span>
+        <span className="text-2xs text-text-dim">Acordes prestados que suelen funcionar</span>
         <div className="flex flex-col gap-1">
           {borrowed.map((b) => (
             <button key={b.roman} onClick={() => play(b.chord)} className="flex items-center gap-2 rounded-sm border border-line px-2 py-1 text-left hover:border-amber/60">
@@ -161,7 +161,7 @@ export function KeyPicker({ song }: { song: Song }) {
 
       {/* Vecinas */}
       <div className="flex flex-col gap-1.5">
-        <span className="text-2xs tracking-label text-text-dim uppercase">Tonalidades vecinas</span>
+        <span className="text-2xs text-text-dim">Tonalidades vecinas</span>
         <div className="flex flex-wrap gap-1">
           {relatedKeys(key).map((r) => (
             <button key={r.label} onClick={() => choose(r.key)} className={btnCls} title={`Cambiar a ${keyLabel(r.key, notation)}`}>

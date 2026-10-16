@@ -360,7 +360,7 @@ export function GestureControlProvider({ children }: { children: ReactNode }) {
         ctx.beginPath();
         ctx.arc(cx, cy, 12, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = sign.progress >= 1 ? "#22c55e" : "#d97757";
+        ctx.strokeStyle = sign.progress >= 1 ? "#22c55e" : "#7c7ff5";
         ctx.beginPath();
         ctx.arc(cx, cy, 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * sign.progress);
         ctx.stroke();

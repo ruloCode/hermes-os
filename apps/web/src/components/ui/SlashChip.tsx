@@ -1,9 +1,7 @@
 "use client";
 
 /**
- * Chip de slash-command bajo el input de la consola. Muestra el comando
- * tal cual (p. ej. "/resumen diario"); al pasar el mouse o estar activo
- * se enciende en el acento con un glow suave.
+ * Chip de slash-command bajo el input de la consola ("/resumen diario").
  */
 export function SlashChip({
   command,
@@ -18,14 +16,15 @@ export function SlashChip({
   active?: boolean;
   disabled?: boolean;
 }) {
-  // El glow en hover va como arbitrary property (glow-box-accent es una
-  // clase CSS plana, no una utility, y no admite el variant hover:).
   const state = disabled
-    ? "cursor-not-allowed border-line text-text-dim opacity-40"
+    ? "cursor-not-allowed border-dashed border-line text-text-faint"
     : active
-      ? "border-accent text-accent glow-box-accent"
-      : "border-line text-text-dim hover:border-accent hover:text-accent hover:[box-shadow:0_0_12px_color-mix(in_srgb,var(--color-accent)_25%,transparent)]";
+      ? "border-accent/40 bg-accent/10 text-accent"
+      : "cursor-pointer border-line bg-panel text-text-dim hover:border-line-2 hover:bg-hover hover:text-text";
 
+  // v5: píldora en sans, no caja en mono. El "/" va atenuado: lo que se lee
+  // es la capacidad ("Resumen diario"), el slash es solo la sintaxis.
+  const name = command.replace(/^\//, "");
   return (
     <button
       type="button"
@@ -33,9 +32,10 @@ export function SlashChip({
       disabled={disabled}
       title={description}
       aria-pressed={active || undefined}
-      className={`min-h-7 border bg-transparent px-2 py-1 font-mono text-2xs transition-colors ${state}`}
+      className={`inline-flex h-7 items-center rounded-full border px-3 text-xs transition-colors ${state}`}
     >
-      {command}
+      <span className="mr-0.5 text-text-faint">/</span>
+      {name}
     </button>
   );
 }

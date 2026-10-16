@@ -57,7 +57,7 @@ export function Transport({
       <button
         type="button"
         onClick={() => player.toggle()}
-        className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-accent text-sm text-white hover:opacity-90"
+        className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-accent-solid text-sm text-on-accent hover:opacity-90"
         aria-label={player.playing ? "Pausar (Espacio)" : "Reproducir (Espacio)"}
         title={player.playing ? "Pausar (Espacio)" : "Reproducir (Espacio)"}
       >

@@ -8,6 +8,8 @@
 import { useEffect, useState } from "react";
 import { TEAM_COACH_MODE } from "@hermes/shared";
 import type { CallAudioSource } from "@/hooks/useLiveMeetingAudio";
+import { Segmented } from "@/components/ui/Segmented";
+import { Button } from "@/components/ui/Button";
 
 export interface LiveSetupOptions {
   mode: "presencial" | "remoto";
@@ -75,34 +77,6 @@ function readPrefs(): Prefs {
   }
 }
 
-function Pill({
-  active,
-  onClick,
-  children,
-  title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-pressed={active}
-      className={`rounded-sm border px-2 py-1 text-2xs tracking-label uppercase transition-colors ${
-        active
-          ? "border-green/70 bg-green/10 text-green"
-          : "border-line text-text-dim hover:border-line-2 hover:text-text"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 export function LiveSetupCard({
   projectLabel,
   disabled,
@@ -133,60 +107,77 @@ export function LiveSetupCard({
   const audio = AUDIO.find((a) => a.id === prefs.audio) ?? AUDIO[0];
 
   return (
-    <div className="space-y-2 rounded-sm border border-green/40 bg-green/5 p-2.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <div className="flex items-center gap-1" role="group" aria-label="Tipo de reunión">
-          {KINDS.map((k) => (
-            <Pill
-              key={k.id}
-              active={prefs.kind === k.id}
-              onClick={() => update({ kind: k.id })}
-              title={k.hint}
-            >
-              {k.label}
-            </Pill>
-          ))}
-        </div>
-        <div className="flex items-center gap-1" role="group" aria-label="Idiomas de la junta">
-          {LANGS.map((l) => (
-            <Pill key={l.id} active={prefs.lang === l.id} onClick={() => update({ lang: l.id })}>
-              {l.label}
-            </Pill>
-          ))}
-        </div>
+    <div className="space-y-3">
+      {/* Tres decisiones, tres segmentados (antes: píldoras verdes en mayúsculas,
+          cada una con su propio borde). Lo elegido se recuerda. */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <Field label="Tipo">
+          <Segmented
+            ariaLabel="Tipo de reunión"
+            size="sm"
+            value={kind.id}
+            onChange={(v) => update({ kind: v })}
+            options={KINDS.map((k) => ({ value: k.id, label: k.label, title: k.hint }))}
+          />
+        </Field>
+        <Field label="Audio">
+          <Segmented
+            ariaLabel="De dónde sale el audio"
+            size="sm"
+            value={audio.id}
+            onChange={(v) => update({ audio: v })}
+            options={AUDIO.map((a) => ({ value: a.id, label: a.label, title: a.hint }))}
+          />
+        </Field>
+        <Field label="Idioma">
+          <Segmented
+            ariaLabel="Idiomas de la junta"
+            size="sm"
+            value={lang.id}
+            onChange={(v) => update({ lang: v })}
+            options={LANGS.map((l) => ({ value: l.id, label: l.label }))}
+          />
+        </Field>
       </div>
-      <div className="flex flex-wrap items-center gap-1" role="group" aria-label="De dónde sale el audio">
-        {AUDIO.map((a) => (
-          <Pill
-            key={a.id}
-            active={prefs.audio === a.id}
-            onClick={() => update({ audio: a.id })}
-            title={a.hint}
-          >
-            {a.label}
-          </Pill>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 basis-[280px] text-xs leading-snug text-text-faint first-letter:uppercase">
+          {kind.hint} · {audio.hint}
+        </p>
+        <Button
+          variant="primary"
+          size="md"
+          onClick={() =>
+            onStart({
+              mode: audio.id === "presencial" ? "presencial" : "remoto",
+              source: audio.id === "app" ? "app" : "tab",
+              languages: lang.languages,
+              coachMode: kind.id,
+            })
+          }
+          disabled={disabled}
+          title={
+            disabled
+              ? disabledTitle
+              : `Transcript + sugerencias de Hermes en tiempo real · ${projectLabel}`
+          }
+          icon={
+            <span className="relative grid h-2 w-2 place-items-center">
+              <span className="h-2 w-2 rounded-full bg-current" />
+            </span>
+          }
+        >
+          Iniciar junta en vivo
+        </Button>
       </div>
-      <button
-        type="button"
-        onClick={() =>
-          onStart({
-            mode: audio.id === "presencial" ? "presencial" : "remoto",
-            source: audio.id === "app" ? "app" : "tab",
-            languages: lang.languages,
-            coachMode: kind.id,
-          })
-        }
-        disabled={disabled}
-        title={disabled ? disabledTitle : "Transcript + sugerencias de Hermes en tiempo real"}
-        className="flex w-full items-center justify-between gap-2 rounded-sm border border-green/50 bg-green/5 px-3 py-2 text-left transition-colors hover:border-green disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        <span className="text-xs text-green">▶ Iniciar junta en vivo · {projectLabel}</span>
-        <span className="text-2xs tracking-label text-text-dim uppercase">{kind.label}</span>
-      </button>
-      <p className="text-2xs leading-snug text-text-dim">
-        {kind.hint} · {audio.hint}
-      </p>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-text-faint">{label}</span>
+      {children}
     </div>
   );
 }

@@ -1,14 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+// Cabecera del mes en Finanzas: la fila de cifras + de qué se compone.
+//
+// v5 (2026-10): esto eran dos donuts de 232px alrededor de un neto con un
+// gauge de ahorro. Con los datos reales de un mes normal se veía así:
+// "otros ingresos 100%" en un anillo lleno, "otros 100%" en otro anillo lleno
+// y un gauge con un "% de ahorro" negativo de cuatro cifras. Un anillo de UNA categoría no compara
+// nada, y un porcentaje de ahorro de cuatro cifras no es una cifra: es un
+// síntoma. Ahora:
+//  - Cuatro cifras sin caja (Ingresos · Gastado · Neto · Ahorro), cada una con
+//    una línea de contexto REAL (contra el mes anterior, cuántos movimientos).
+//  - El color dice algo o no aparece: el neto lleva su signo (+ verde / −
+//    rojo); ingresos y gastos son totales y van en el gris del texto.
+//  - El ahorro se dice en palabras cuando el número deja de significar algo:
+//    si gastaste más de lo que entró no hay "−1900 %", hay "Sin ahorro" y la
+//    proporción real ("gastaste 20× lo que entró").
+//  - El desglose por categoría solo se DIBUJA con dos o más categorías; con
+//    una se dice en una frase.
+
+import { useMemo } from "react";
 import type { Currency, FinanceSummary as Summary } from "@hermes/shared";
-import { BarMeter } from "@/components/ui/BarMeter";
-import { DonutChart, type DonutSlice } from "@/components/ui/DonutChart";
 import { PanelState } from "@/components/ui/PanelState";
-import { RadialGauge } from "@/components/ui/RadialGauge";
-import { StatBlock } from "@/components/ui/StatBlock";
+import { Segmented } from "@/components/ui/Segmented";
+import type { DonutSlice } from "@/components/ui/DonutChart";
 import { CHART_OTHER, CHART_SLOTS, chartVar } from "@/components/ui/tones";
 import { CategoryIcon, categoryLabel } from "./categories";
+import { Stat, StatStrip } from "./kit";
 
 /** Formato colombiano: $2.450.000 / US$120. */
 export function money(amount: number, currency: Currency): string {
@@ -16,7 +33,28 @@ export function money(amount: number, currency: Currency): string {
   return currency === "USD" ? `US$${s}` : `$${s}`;
 }
 
-/** Conmutador COP/USD — vive en el header del panel (right del Panel). */
+/** Monto con signo tipográfico (−, no guion): "+$12.000" / "−$48.500". */
+export function signedMoney(amount: number, currency: Currency): string {
+  return `${amount < 0 ? "−" : "+"}${money(Math.abs(amount), currency)}`;
+}
+
+const MONTHS_LONG = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+/** "2026-10" → "octubre de 2026". */
+export function monthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return MONTHS_LONG[m - 1] ? `${MONTHS_LONG[m - 1]} de ${y}` : month;
+}
+
+/** Nombre del mes de un resumen ("2026-09" → "septiembre"). */
+function monthName(month: string): string {
+  return MONTHS_LONG[Number(month.split("-")[1]) - 1] ?? "el mes pasado";
+}
+
+/** Conmutador COP/USD — vive en las acciones de la cabecera de la vista. */
 export function CurrencyToggle({
   currency,
   onCurrency,
@@ -25,22 +63,15 @@ export function CurrencyToggle({
   onCurrency: (c: Currency) => void;
 }) {
   return (
-    <div className="flex shrink-0 gap-1">
-      {(["COP", "USD"] as const).map((c) => (
-        <button
-          key={c}
-          type="button"
-          onClick={() => onCurrency(c)}
-          className={`rounded-sm border px-2 py-0.5 text-2xs tracking-label transition-colors ${
-            c === currency
-              ? "border-accent text-accent"
-              : "border-line text-text-dim hover:border-line-2 hover:text-text"
-          }`}
-        >
-          {c}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      ariaLabel="Moneda"
+      value={currency}
+      onChange={onCurrency}
+      options={[
+        { value: "COP", label: "COP", title: "Pesos (los dólares se convierten a la TRM)" },
+        { value: "USD", label: "USD", title: "Dólares (los pesos se convierten a la TRM)" },
+      ]}
+    />
   );
 }
 
@@ -48,12 +79,13 @@ export function CurrencyToggle({
 interface FinanceSlice extends DonutSlice {
   budget?: number | null;
   budgetPct?: number | null;
+  count: number;
 }
 
 export interface VidaSlices {
   expense: FinanceSlice[];
   income: FinanceSlice[];
-  /** color por categoría para pintar consistente fuera del donut (movimientos). */
+  /** color por categoría para pintar consistente fuera del desglose. */
   colorFor: (category: string) => string | undefined;
 }
 
@@ -75,7 +107,7 @@ function fold(
       value: i.value,
       color,
       icon: <CategoryIcon category={i.category} />,
-      sub: `${i.count} mov${i.count === 1 ? "" : "s"}`,
+      count: i.count,
       budget: i.budget ?? null,
       budgetPct: i.pct ?? null,
     };
@@ -83,21 +115,19 @@ function fold(
 
   if (tail.length > 0) {
     for (const i of tail) colors.set(i.category, CHART_OTHER);
-    const value = tail.reduce((a, i) => a + i.value, 0);
-    const count = tail.reduce((a, i) => a + i.count, 0);
     slices.push({
       key: "__resto",
       label: `otras (${tail.length})`,
-      value,
+      value: tail.reduce((a, i) => a + i.value, 0),
       color: CHART_OTHER,
       icon: <CategoryIcon category="otros" />,
-      sub: `${count} movs`,
+      count: tail.reduce((a, i) => a + i.count, 0),
     });
   }
   return slices;
 }
 
-/** Rebanadas de ambos donuts + mapa de color por categoría (identidad única). */
+/** Rebanadas de gastos e ingresos + mapa de color por categoría. */
 export function buildVidaSlices(summary: Summary | null): VidaSlices {
   const colors = new Map<string, string>();
   if (!summary) return { expense: [], income: [], colorFor: () => undefined };
@@ -127,129 +157,144 @@ export function buildVidaSlices(summary: Summary | null): VidaSlices {
   return { expense, income, colorFor: (c) => colors.get(c) };
 }
 
-/** Fila de leyenda: icono teñido + label + barra de presupuesto + monto + %. */
-function LegendRow({
-  slice,
-  total,
-  currency,
-  hovered,
-  onHover,
-}: {
-  slice: FinanceSlice;
-  total: number;
-  currency: Currency;
-  hovered: string | null;
-  onHover: (k: string | null) => void;
-}) {
-  const share = total > 0 ? Math.round((slice.value / total) * 100) : 0;
-  // Un solo %: consumo del presupuesto si existe (estado), si no el share.
-  const budgetPct = slice.budgetPct != null ? Math.round(slice.budgetPct * 100) : null;
-  const pctClass =
-    budgetPct == null
-      ? "text-text-faint"
-      : budgetPct >= 100
-        ? "text-red"
-        : budgetPct >= 80
-          ? "text-amber"
-          : "text-text-dim";
+/**
+ * Contexto de una cifra contra el mes anterior. Un % sobre una base chica se
+ * dispara (de $10.000 a $2.000.000 es "+19.900 %"), y ese número no informa:
+ * pasado el ±300 % se dice el monto del mes anterior en vez del porcentaje.
+ */
+function versus(
+  current: number,
+  prev: Summary | null | undefined,
+  pick: (s: Summary) => number,
+  noun: string,
+  currency: Currency,
+): string | undefined {
+  if (!prev) return undefined;
+  const prevName = monthName(prev.month);
+  const base = pick(prev);
+  if (prev.tx_count === 0) return `sin movimientos en ${prevName}`;
+  if (base <= 0) return `sin ${noun} en ${prevName}`;
+  const delta = (current - base) / base;
+  if (Math.abs(delta) > 3) return `${money(base, currency)} en ${prevName}`;
+  const pct = Math.round(delta * 100);
+  if (pct === 0) return `igual que en ${prevName}`;
+  return `${pct > 0 ? "↑" : "↓"} ${Math.abs(pct)} % vs. ${prevName}`;
+}
 
+/** "12.5" → "12,5" (decimal colombiano), sin decimales a partir de 10×… salvo uno. */
+function ratioLabel(r: number): string {
+  return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 }).format(r);
+}
+
+/** Celda de ahorro: número cuando significa algo, frase cuando no. */
+function SavingsStat({ income, expense }: { income: number; expense: number }) {
+  const net = income - expense;
+  const savings = net / income;
+  if (savings >= 0) {
+    const pct = Math.round(savings * 100);
+    return (
+      <Stat
+        label="Ahorro"
+        value={`${pct} %`}
+        tone={pct >= 20 ? "green" : "text"}
+        context="de lo que entró quedó libre"
+      />
+    );
+  }
+  // Gastaste más de lo que entró: el % negativo (−1900 %) no se lee. Se dice
+  // la proporción real. Sin rojo: el neto de al lado ya lo dice en rojo, y dos
+  // alarmas para el mismo hecho son ruido.
+  const ratio = expense / income;
   return (
-    <div
-      onMouseEnter={() => onHover(slice.key)}
-      onMouseLeave={() => onHover(null)}
-      className={`flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors ${
-        hovered === slice.key ? "bg-panel-2" : ""
-      }`}
-    >
-      <span className="shrink-0" style={{ color: slice.color }}>
-        {slice.icon}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-2xs text-text">{slice.label}</span>
-      {slice.budget != null && (
-        <span className="w-14 shrink-0">
-          <BarMeter
-            value={slice.value}
-            max={slice.budget}
-            segments={0}
-            height={4}
-            tone="accent"
-            thresholds={{ warn: 80, danger: 100 }}
-            showValue={false}
-          />
-        </span>
-      )}
-      <span className="shrink-0 font-display text-2xs tabular-nums text-text-dim">
-        {money(slice.value, currency)}
-      </span>
-      <span className={`w-8 shrink-0 text-right text-2xs tabular-nums ${pctClass}`}>
-        {budgetPct ?? share}%
-      </span>
-    </div>
+    <Stat
+      label="Ahorro"
+      value="Sin ahorro"
+      context={
+        ratio >= 2
+          ? `gastaste ${ratioLabel(ratio)}× lo que entró`
+          : `gastaste ${Math.round((ratio - 1) * 100)} % más de lo que entró`
+      }
+    />
   );
 }
 
-/** Donut + leyenda de un lado del hero (ingresos o gastos). */
-function DonutBlock({
+/** Desglose de un lado (gasto o ingreso): barra apilada + filas. ≥2 categorías. */
+function Breakdown({
+  title,
   slices,
-  centerLabel,
   total,
-  tone,
   currency,
-  emptyHint,
 }: {
+  title: string;
   slices: FinanceSlice[];
-  centerLabel: string;
   total: number;
-  tone: "green" | "red";
   currency: Currency;
-  emptyHint: string;
 }) {
-  const [hovered, setHovered] = useState<string | null>(null);
-  const fmt = (v: number) => money(v, currency);
-
   return (
-    <div className="flex min-w-0 flex-col items-center gap-1">
-      <DonutChart
-        slices={slices}
-        size={232}
-        thickness={18}
-        centerLabel={centerLabel}
-        centerValue={fmt(total)}
-        centerTone={tone}
-        format={fmt}
-        hoveredKey={hovered}
-        onHoverKey={setHovered}
-        ariaLabel={`${centerLabel} del mes: ${fmt(total)}`}
-        emptyHint={emptyHint}
-      />
-      {slices.length > 0 && (
-        <div className="flex w-full max-w-72 flex-col">
-          {slices.map((s) => (
-            <LegendRow
-              key={s.key}
-              slice={s}
-              total={total}
-              currency={currency}
-              hovered={hovered}
-              onHover={setHovered}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+    <section className="flex min-w-0 flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-text-dim">{title}</span>
+        <span className="text-xs text-text-faint tabular-nums">{money(total, currency)}</span>
+      </div>
+      {/* Barra apilada: la composición en una línea (el donut sin el anillo). */}
+      <div className="flex h-2 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+        {slices.map((s) => (
+          <span
+            key={s.key}
+            className="h-full first:rounded-l-full last:rounded-r-full"
+            style={{ width: `${(s.value / total) * 100}%`, background: s.color }}
+          />
+        ))}
+      </div>
+      <ul className="flex flex-col">
+        {slices.map((s) => {
+          const share = total > 0 ? Math.round((s.value / total) * 100) : 0;
+          return (
+            <li key={s.key} className="flex min-w-0 items-center gap-2.5 py-1">
+              <span
+                aria-hidden
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ background: s.color }}
+              />
+              <span className="shrink-0 text-text-faint">{s.icon}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-text">{s.label}</span>
+              {s.count > 0 && (
+                <span className="shrink-0 text-xs text-text-faint tabular-nums">
+                  {s.count} mov{s.count === 1 ? "" : "s"}
+                </span>
+              )}
+              <span className="w-24 shrink-0 text-right text-sm text-text tabular-nums">
+                {money(s.value, currency)}
+              </span>
+              <span className="w-10 shrink-0 text-right text-xs text-text-faint tabular-nums">
+                {share} %
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
+}
+
+/** "en «otros» (10 movimientos)" — la frase que reemplaza a un anillo lleno. */
+function singleLine(slice: FinanceSlice): string {
+  const n = slice.count > 0 ? ` (${slice.count} movimiento${slice.count === 1 ? "" : "s"})` : "";
+  return `«${slice.label}»${n}`;
 }
 
 /**
- * Hero de finanzas del mes: donut de ingresos y donut de gastos por categoría
- * (callouts con icono, leyenda con presupuesto) alrededor del NETO con su
- * tasa de ahorro. Todo sale del FinanceSummary real del agente.
+ * El mes en cifras + su composición. Todo sale del FinanceSummary real del
+ * agente (combined: la otra moneda convertida a la TRM).
  */
 export function FinanceSummaryPanel({
   summary,
+  prevSummary,
   currency,
 }: {
   summary: Summary | null;
+  /** Mes anterior (mismo combined) para el contexto de cada cifra. */
+  prevSummary?: Summary | null;
   currency: Currency;
 }) {
   const { expense, income } = useMemo(() => buildVidaSlices(summary), [summary]);
@@ -258,79 +303,99 @@ export function FinanceSummaryPanel({
     return <PanelState kind="offline" compact title="Sin datos" hint="¿Está el agente en línea?" />;
   }
 
-  // Tasa de ahorro (neto/ingresos) solo cuando hay ingresos que la definan.
-  const savings = summary.income > 0 ? summary.net / summary.income : null;
-  const savingsTone = savings == null ? "neutral" : savings >= 0.2 ? "green" : savings > 0 ? "amber" : "red";
+  const cur = summary.currency;
+  const empty = summary.tx_count === 0;
+
+  // Frases para los lados con UNA sola categoría (no se dibujan).
+  const sentences: string[] = [];
+  if (expense.length === 1) sentences.push(`Todo el gasto del mes fue en ${singleLine(expense[0])}.`);
+  if (income.length === 1) sentences.push(`Todo el ingreso llegó como ${singleLine(income[0])}.`);
+  const charts = [
+    expense.length >= 2 && (
+      <Breakdown
+        key="expense"
+        title="Gasto por categoría"
+        slices={expense}
+        total={summary.expense}
+        currency={cur}
+      />
+    ),
+    income.length >= 2 && (
+      <Breakdown
+        key="income"
+        title="Ingreso por fuente"
+        slices={income}
+        total={summary.income}
+        currency={cur}
+      />
+    ),
+  ].filter(Boolean);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-start justify-evenly gap-x-6 gap-y-4">
-        <DonutBlock
-          slices={income}
-          centerLabel="Ingresos"
-          total={summary.income}
-          tone="green"
-          currency={currency}
-          emptyHint="Sin ingresos"
+    <div className="flex flex-col gap-6">
+      <StatStrip>
+        <Stat
+          label="Ingresos"
+          value={money(summary.income, cur)}
+          context={versus(summary.income, prevSummary, (p) => p.income, "ingresos", cur)}
         />
-
-        {/* NETO: la cifra que resume el mes + qué tanto se ahorra */}
-        <div className="flex flex-col items-center gap-3 self-center py-2">
-          <StatBlock
-            label="Neto del mes"
-            value={money(summary.net, summary.currency)}
-            size="lg"
-            tone={summary.net >= 0 ? "green" : "red"}
-          />
-          {savings != null && (
-            <RadialGauge
-              value={Math.max(savings, 0) * 100}
-              size={84}
-              stroke={8}
-              tone={savingsTone === "neutral" ? "accent" : savingsTone}
-              label="ahorro"
-              format={() => `${Math.round(savings * 100)}%`}
-            />
-          )}
-          <span className="text-2xs text-text-dim tabular-nums">
-            {summary.tx_count} movs · {summary.month}
-          </span>
-          {summary.fx && (
-            <span
-              className="text-2xs text-text-faint tabular-nums"
-              title={`Tasa del ${summary.fx.as_of}`}
-            >
-              TRM US$1 = {money(Math.round(summary.fx.usd_cop), "COP")} ·{" "}
-              {summary.fx.converted_count} mov{summary.fx.converted_count === 1 ? "" : "s"}{" "}
-              {summary.currency === "COP" ? "USD" : "COP"} convertido
-              {summary.fx.converted_count === 1 ? "" : "s"}
-            </span>
-          )}
-        </div>
-
-        <DonutBlock
-          slices={expense}
-          centerLabel="Gastado"
-          total={summary.expense}
-          tone="red"
-          currency={currency}
-          emptyHint="Sin gastos"
+        <Stat
+          label="Gastado"
+          value={money(summary.expense, cur)}
+          context={versus(summary.expense, prevSummary, (p) => p.expense, "gastos", cur)}
         />
-      </div>
+        <Stat
+          label="Neto del mes"
+          value={signedMoney(summary.net, cur)}
+          tone={summary.net > 0 ? "green" : summary.net < 0 ? "red" : "text"}
+          context={`${summary.tx_count} movimiento${summary.tx_count === 1 ? "" : "s"}`}
+        />
+        {summary.income > 0 ? (
+          <SavingsStat income={summary.income} expense={summary.expense} />
+        ) : (
+          // Sin ingresos el ahorro no está definido: se dice, no se inventa.
+          <Stat label="Ahorro" value="—" context="sin ingresos este mes" />
+        )}
+      </StatStrip>
 
-      {summary.by_category.length === 0 && summary.income_by_category?.length === 0 && (
-        <p className="text-center text-2xs text-text-dim">
+      {empty && (
+        <p className="text-sm text-text-dim">
           Sin movimientos este mes en {currency}. Díselo a Hermes: “gasté 20 mil en un almuerzo”.
         </p>
       )}
 
-      {summary.budgets_at_risk.length > 0 && (
-        <p className="text-2xs text-amber">
-          ⚠ En riesgo:{" "}
-          {summary.budgets_at_risk
-            .map((c) => `${categoryLabel(c.category)} ${c.pct != null ? Math.round(c.pct * 100) : "?"}%`)
-            .join(" · ")}
-        </p>
+      {charts.length > 0 && (
+        <div className="@container">
+          <div className="grid gap-x-10 gap-y-6 @2xl:grid-cols-2">{charts}</div>
+        </div>
+      )}
+
+      {(sentences.length > 0 || summary.fx || summary.budgets_at_risk.length > 0) && (
+        <div className="flex flex-col gap-1.5 text-xs text-text-dim">
+          {sentences.length > 0 && <p>{sentences.join(" ")}</p>}
+          {summary.budgets_at_risk.length > 0 && (
+            <p className="flex items-center gap-2">
+              <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
+              <span>
+                Presupuestos en riesgo:{" "}
+                {summary.budgets_at_risk
+                  .map(
+                    (c) =>
+                      `${categoryLabel(c.category)} ${c.pct != null ? `${Math.round(c.pct * 100)} %` : ""}`,
+                  )
+                  .join(" · ")}
+              </span>
+            </p>
+          )}
+          {summary.fx && (
+            <p className="text-text-faint" title={`Tasa del ${summary.fx.as_of}`}>
+              Incluye {summary.fx.converted_count} movimiento
+              {summary.fx.converted_count === 1 ? "" : "s"} en {cur === "COP" ? "USD" : "COP"}{" "}
+              convertido{summary.fx.converted_count === 1 ? "" : "s"} a la TRM de{" "}
+              <span className="tabular-nums">{money(Math.round(summary.fx.usd_cop), "COP")}</span>.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

@@ -63,7 +63,7 @@ export function ScriptChecklist({
   return (
     <div className="flex flex-col">
       <div className="flex items-center gap-2 px-1 pb-1.5">
-        <span className="text-2xs tracking-label text-text-faint uppercase">Checklist</span>
+        <span className="text-2xs text-text-faint">Checklist</span>
         <span className="flex-1 flex gap-0.5">
           {beats.map((b, i) => {
             const st = beatState(piece, b);
@@ -112,7 +112,7 @@ export function ScriptChecklist({
             <button onClick={() => onSelect(i)} className="min-w-0 flex-1 text-left">
               <div className="flex items-baseline gap-1.5">
                 <span
-                  className={`shrink-0 text-2xs tracking-label uppercase ${
+                  className={`shrink-0 text-2xs ${
                     active ? "text-accent" : "text-text-dim"
                   }`}
                 >
@@ -121,7 +121,7 @@ export function ScriptChecklist({
                 {beat.heading && beat.time && (
                   <span className="shrink-0 text-2xs text-text-faint tabular-nums">{beat.time}</span>
                 )}
-                {beat.isCta && <span className="shrink-0 text-2xs text-cyan uppercase">cta</span>}
+                {beat.isCta && <span className="shrink-0 text-2xs text-cyan">cta</span>}
                 {beat.cues.length > 0 && (
                   <span
                     className="shrink-0 text-2xs text-cyan"
@@ -219,14 +219,14 @@ export function ScriptBoard({
               >
                 {GLYPH[state]}
               </button>
-              <span className="text-2xs tracking-label text-accent uppercase">
+              <span className="text-2xs text-accent">
                 {beat.kind === "hook" ? "✦ Hook" : (beat.heading ?? beat.label)}
               </span>
               {beat.heading && beat.time && (
                 <span className="text-2xs text-text-faint tabular-nums">{beat.time}</span>
               )}
               {beat.isCta && (
-                <span className="text-2xs tracking-label text-cyan uppercase">cta</span>
+                <span className="text-2xs text-cyan">cta</span>
               )}
               <span className="flex-1" />
               <span className="text-2xs text-text-faint tabular-nums">
@@ -275,7 +275,7 @@ export function ScriptBoard({
 
       {parsed.notes.length > 0 && (
         <div className="rounded-sm border border-line px-2.5 py-2">
-          <p className="text-2xs tracking-label text-text-faint uppercase">Notas de grabación</p>
+          <p className="text-2xs text-text-faint">Notas de grabación</p>
           {parsed.notes.map((n) => (
             <p key={n} className="mt-1 text-xs leading-snug text-text-dim">
               {n}

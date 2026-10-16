@@ -11,19 +11,19 @@ export function GestureChip() {
   const g = useGestureControl();
   if (g.phase === "idle") return null;
 
-  let cls = "border-cyan/60 bg-cyan/10 text-cyan";
+  let cls = "border-cyan/30 bg-cyan/10 text-cyan";
   let label = "Gestos · activo";
   if (g.phase === "starting") {
-    cls = "border-amber/60 bg-amber/10 text-amber";
+    cls = "border-amber/30 bg-amber/10 text-amber";
     label = "Gestos · iniciando";
   } else if (g.phase === "error") {
-    cls = "border-red/60 bg-red/10 text-red";
+    cls = "border-red/30 bg-red/10 text-red";
     label = "Gestos · error";
   } else if (g.accessibility === false) {
-    cls = "border-amber/60 bg-amber/10 text-amber";
+    cls = "border-amber/30 bg-amber/10 text-amber";
     label = "Gestos · sin permiso";
   } else if (g.pinching) {
-    cls = "border-red/60 bg-red/10 text-red";
+    cls = "border-red/30 bg-red/10 text-red";
     label = "Gestos · pinza";
   } else if (!g.handVisible) {
     label = "Gestos · sin mano";
@@ -32,7 +32,7 @@ export function GestureChip() {
   const ev = g.lastSignEvent;
   if (g.phase === "tracking" && ev && Date.now() - ev.at < 4000) {
     label = `${ev.ok ? "✓" : "✕"} ${ev.text}`;
-    if (!ev.ok) cls = "border-amber/60 bg-amber/10 text-amber";
+    if (!ev.ok) cls = "border-amber/30 bg-amber/10 text-amber";
   }
 
   return (
@@ -40,7 +40,7 @@ export function GestureChip() {
       type="button"
       onClick={g.stop}
       title="Apagar el control por gestos"
-      className={`flex items-center gap-1.5 rounded-sm border px-2 py-1 text-2xs tracking-label uppercase ${cls}`}
+      className={`flex h-7 w-full cursor-pointer items-center gap-2 rounded-sm border px-2.5 text-xs font-medium whitespace-nowrap ${cls}`}
     >
       <span className={g.phase === "tracking" && g.handVisible ? "pulse-dot" : ""}>✋</span>
       <span>{label}</span>

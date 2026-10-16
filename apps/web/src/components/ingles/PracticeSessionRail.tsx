@@ -7,8 +7,21 @@
 import { useMemo } from "react";
 import { parseCorrection } from "@hermes/shared";
 import { useVoice } from "@/components/VoiceBusyContext";
-import { StatBlock } from "@/components/ui/StatBlock";
 import type { PracticeCompanion } from "@/hooks/usePracticeCompanion";
+
+// v5: los tres números en el color del texto (como la tira de la vista); el
+// único color es el punto de "bien dichas", que sí es un estado.
+function Mini({ label, value, dot }: { label: string; value: string | number; dot?: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <dt className="text-xs text-text-faint">{label}</dt>
+      <dd className="flex items-center gap-1.5 text-lg leading-none font-semibold text-text tabular-nums">
+        {dot && <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />}
+        {value}
+      </dd>
+    </div>
+  );
+}
 
 export function PracticeSessionRail({
   companion,
@@ -37,19 +50,30 @@ export function PracticeSessionRail({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-3 gap-3">
-        <StatBlock label="Tus turnos" value={mine.length} />
-        <StatBlock label="Palabras" value={words} />
-        <StatBlock
+      <dl className="grid grid-cols-3 gap-3 px-2">
+        <Mini label="Tus turnos" value={mine.length} />
+        <Mini label="Palabras" value={words} />
+        <Mini
           label="Bien dichas"
           value={mine.length ? `${ok}/${ok + corrections.length}` : "—"}
-          tone={corrections.length > ok ? "amber" : "green"}
+          dot={
+            ok + corrections.length === 0
+              ? undefined
+              : corrections.length > ok
+                ? "bg-amber"
+                : "bg-green"
+          }
         />
-      </div>
+      </dl>
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs text-text-dim">
-          Correcciones{corrections.length ? ` · ${corrections.length}` : ""}
+      <div className="flex flex-col gap-2 px-2">
+        <span className="text-xs font-medium text-text-dim">
+          Correcciones
+          {corrections.length > 0 && (
+            <span className="ml-1.5 font-normal text-text-faint tabular-nums">
+              {corrections.length}
+            </span>
+          )}
         </span>
         {corrections.length === 0 ? (
           <p className="text-sm leading-relaxed text-text-faint">
@@ -60,11 +84,13 @@ export function PracticeSessionRail({
             {corrections.map(({ id, e }) => (
               <li key={id} className="border-t border-line py-2 first:border-t-0">
                 <p className="text-sm leading-snug text-text-dim">
-                  <span className="line-through decoration-amber/70">{e!.quote}</span>
-                  <span className="px-1.5 text-amber">→</span>
+                  <span className="line-through decoration-text-faint">{e!.quote}</span>
+                  <span className="px-1.5 text-text-faint">→</span>
                   <span className="text-text">{e!.correction}</span>
                 </p>
-                {e!.note_es && <p className="mt-0.5 text-xs leading-snug text-text-dim">{e!.note_es}</p>}
+                {e!.note_es && (
+                  <p className="mt-0.5 text-xs leading-snug text-text-faint">{e!.note_es}</p>
+                )}
               </li>
             ))}
           </ul>

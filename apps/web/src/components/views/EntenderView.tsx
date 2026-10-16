@@ -4,8 +4,20 @@
 // que leyó para responder) y pizarra a la derecha: cada diagrama llega por la
 // tool draw_diagram con sus fuentes; clic en un nodo = "explícame esto".
 // La conversación vive en el agente (disco local), no en el navegador.
+//
+// v5: el proyecto se elige con un selector compacto junto al título (eran doce
+// chips que desbordaban la cabecera); la conversación va sin caja, con el
+// MISMO composer que Inicio, y la caja queda para la pizarra — el objeto que
+// se mira. Los glifos (●, ◫, 🎙, ■) pasan a iconos de trazo.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { usePathname } from "next/navigation";
 import type {
   TutorConversation,
@@ -16,6 +28,7 @@ import type {
 } from "@hermes/shared";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { PanelState } from "@/components/ui/PanelState";
+import { Button } from "@/components/ui/Button";
 import { Markdown } from "@/components/Markdown";
 import { Pizarra } from "@/components/entender/Pizarra";
 import { useOfficeDictation } from "@/hooks/useOfficeDictation";
@@ -30,6 +43,19 @@ import {
 
 const PROJECT_KEY = "hermes-entender-project";
 const VOICE_KEY = "hermes-entender-voz";
+
+// Iconos de trazo 1.7 (como los de la barra lateral), en lugar de glifos.
+const ICON = {
+  width: 14,
+  height: 14,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.7,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
 
 /** Recorrido guiado: de lo general a lo particular, y al final explicarlo tú. */
 const STARTERS: { title: string; hint: string; prompt: string }[] = [
@@ -330,41 +356,39 @@ export function EntenderView() {
     <div className="flex h-full min-h-0 flex-col gap-3">
       <ViewHeader
         title="Entender"
-        meta={
-          current
-            ? `${current.repos.length} repo${current.repos.length === 1 ? "" : "s"} · ${current.meetings} actas · solo lectura`
-            : undefined
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-1.5">
-            {projects.map((p) => (
-              <button
-                key={p.slug}
-                type="button"
-                onClick={() => !busy && setProject(p.slug)}
-                aria-pressed={p.slug === project}
-                className={`rounded-sm border px-2.5 py-1 text-xs transition-colors ${
-                  p.slug === project
-                    ? "border-accent/60 bg-accent/10 text-accent"
-                    : "border-line text-text-dim hover:border-line-2 hover:text-text"
-                }`}
-              >
-                {p.name}
-              </button>
-            ))}
+        // Doce proyectos no caben como chips (se salían de la cabecera): un
+        // selector compacto junto al título, y al lado lo que tiene ESE proyecto.
+        tabs={
+          <div className="flex min-w-0 items-center gap-3">
+            <ProjectPicker
+              projects={projects}
+              value={project}
+              onChange={setProject}
+              disabled={busy}
+            />
+            {current && (
+              <span className="hidden truncate text-xs text-text-faint sm:inline">
+                {current.repos.length} repo{current.repos.length === 1 ? "" : "s"} ·{" "}
+                {current.meetings} actas · solo lectura
+              </span>
+            )}
           </div>
         }
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(340px,440px)_minmax(0,1fr)]">
-        {/* ── Conversación ─────────────────────────────────────────── */}
-        <section className="flex min-h-0 min-w-0 flex-col rounded-sm border border-line bg-panel">
-          <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(340px,440px)_minmax(0,1fr)]">
+        {/* ── Conversación ─────────────────────────────────────────────
+            Sin caja (como el chat de Inicio): la caja es para la pizarra, que
+            es el objeto que se mira; aquí se conversa sobre el lienzo. */}
+        <section className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex shrink-0 items-center gap-1 pb-3">
             <select
               value={conv?.id ?? ""}
-              onChange={(e) => (e.target.value ? void openConversation(e.target.value) : newConversation())}
+              onChange={(e) =>
+                e.target.value ? void openConversation(e.target.value) : newConversation()
+              }
               disabled={busy}
-              className="min-w-0 flex-1 truncate rounded-sm border border-line bg-transparent px-2 py-1 text-xs text-text"
+              className="h-8 min-w-0 flex-1 cursor-pointer truncate rounded-sm border border-line bg-panel px-2.5 text-sm text-text outline-none transition-colors hover:border-line-2 focus:border-line-2 disabled:cursor-default disabled:opacity-50"
               aria-label="Conversación"
             >
               <option value="">Conversación nueva</option>
@@ -374,43 +398,58 @@ export function EntenderView() {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="md"
               onClick={newConversation}
               disabled={busy}
-              className="shrink-0 rounded-sm border border-line px-2 py-1 text-xs text-text-dim hover:border-line-2 hover:text-text disabled:opacity-40"
+              title="Empezar una conversación nueva"
+              icon={
+                <svg {...ICON}>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              }
             >
               Nueva
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="md"
               onClick={toggleVoice}
               aria-pressed={voiceMode}
               title="Le hablas y te responde en voz alta; al terminar vuelve a escucharte"
-              className={`shrink-0 rounded-sm border px-2 py-1 text-xs transition-colors ${
-                voiceMode
-                  ? "border-accent/60 bg-accent/10 text-accent"
-                  : "border-line text-text-dim hover:border-line-2 hover:text-text"
-              }`}
+              className={voiceMode ? "bg-selected text-text" : ""}
+              icon={
+                voiceMode ? (
+                  <span className="pulse-dot block h-2 w-2 rounded-full bg-cyan" />
+                ) : (
+                  <svg {...ICON}>
+                    <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
+                  </svg>
+                )
+              }
             >
-              {voiceMode ? "● Modo voz" : "Modo voz"}
-            </button>
+              Modo voz
+            </Button>
             {conv && (
               <button
                 type="button"
                 onClick={() => void remove()}
                 disabled={busy}
                 title="Borrar esta conversación"
-                className="shrink-0 rounded-sm border border-line px-2 py-1 text-xs text-text-dim hover:border-red/60 hover:text-red disabled:opacity-40"
+                aria-label="Borrar esta conversación"
+                className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-sm text-text-faint transition-colors hover:bg-red/10 hover:text-red disabled:cursor-default disabled:opacity-40"
               >
-                Borrar
+                <svg {...ICON}>
+                  <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+                </svg>
               </button>
             )}
           </div>
 
-          <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1 pb-2">
             {history.length === 0 && !pending ? (
-              <div className="space-y-3">
+              <div className="flex flex-col gap-4 pt-1">
                 <p className="text-sm leading-relaxed text-text-dim">
                   Pregúntale lo que quieras de {current?.name}: lee el código de los repos, las
                   actas y la nota del proyecto, y te lo explica dibujando. Todo lo que afirma trae
@@ -422,11 +461,11 @@ export function EntenderView() {
                       key={s.title}
                       type="button"
                       onClick={() => void send(s.prompt, { voice: voiceMode })}
-                      className="rounded-sm border border-line p-2.5 text-left transition-colors hover:border-accent/60"
+                      className="flex cursor-pointer flex-col gap-0.5 rounded-sm border border-line bg-panel px-3 py-2.5 text-left transition-colors hover:border-line-2 hover:bg-hover"
                     >
-                      <span className="text-xs text-text-dim tabular-nums">{i + 1}</span>
-                      <span className="block text-sm text-text">{s.title}</span>
-                      <span className="block text-xs text-text-dim">{s.hint}</span>
+                      <span className="text-xs text-text-faint tabular-nums">{i + 1}</span>
+                      <span className="text-sm font-medium text-text">{s.title}</span>
+                      <span className="text-xs leading-snug text-text-faint">{s.hint}</span>
                     </button>
                   ))}
                 </div>
@@ -446,11 +485,15 @@ export function EntenderView() {
                 />
                 <div className="space-y-2">
                   {live && live.tools.length > 0 && (
-                    <p className="text-xs text-text-dim">
-                      {live.tools.at(-1)?.name}
-                      {live.tools.at(-1)?.detail ? ` ${live.tools.at(-1)?.detail}` : ""}
-                      <span className="pulse-dot"> …</span>
-                      <span className="ml-1 text-text-faint">({live.tools.length} consultas)</span>
+                    <p className="flex min-w-0 items-center gap-1.5 text-xs text-text-dim">
+                      <span aria-hidden className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
+                      <span className="min-w-0 truncate">
+                        {live.tools.at(-1)?.name}
+                        {live.tools.at(-1)?.detail ? ` ${live.tools.at(-1)?.detail}` : ""}
+                      </span>
+                      <span className="shrink-0 text-text-faint tabular-nums">
+                        · {live.tools.length} {live.tools.length === 1 ? "consulta" : "consultas"}
+                      </span>
                     </p>
                   )}
                   {live?.text ? (
@@ -458,7 +501,7 @@ export function EntenderView() {
                       <Markdown source={live.text} />
                     </div>
                   ) : (
-                    <p className="text-sm text-text-dim pulse-dot">Leyendo el proyecto…</p>
+                    <p className="pulse-dot text-sm text-text-dim">Leyendo el proyecto…</p>
                   )}
                   {live && live.diagrams.length > 0 && (
                     <DiagramChips diagrams={live.diagrams} onDiagram={setActive} active={active} />
@@ -466,7 +509,12 @@ export function EntenderView() {
                 </div>
               </>
             )}
-            {error && <p className="text-xs text-red">⚠ {error}</p>}
+            {error && (
+              <p className="flex items-start gap-2 text-sm text-text-dim">
+                <span aria-hidden className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-red" />
+                {error}
+              </p>
+            )}
           </div>
 
           {voiceMode && (
@@ -486,8 +534,10 @@ export function EntenderView() {
             />
           )}
 
+          {/* Composer: la MISMA caja que el de Inicio (texto arriba, barra
+              abajo, enviar redondo). El anillo de foco vive en la caja. */}
           <form
-            className="flex shrink-0 items-end gap-2 border-t border-line p-2.5"
+            className="hud-field mt-2 flex shrink-0 flex-col gap-1.5 rounded-lg border border-line-2 bg-panel px-3.5 pt-3 pb-2 shadow-[var(--shadow-card)] transition-colors focus-within:border-text-faint/60"
             onSubmit={(e) => {
               e.preventDefault();
               void send(draft, { voice: voiceMode });
@@ -504,65 +554,85 @@ export function EntenderView() {
               }}
               rows={Math.min(5, Math.max(1, draft.split("\n").length))}
               placeholder={`Pregunta sobre ${current?.name ?? "el proyecto"}…`}
-              className="min-h-[38px] flex-1 resize-none rounded-sm border border-line bg-transparent px-2.5 py-2 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
+              className="max-h-[140px] min-h-[24px] w-full resize-none bg-transparent px-0.5 text-sm leading-relaxed text-text outline-none placeholder:text-text-faint"
             />
-            {!voiceMode && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (dictation.state === "listening") dictation.stop();
-                  else {
-                    dictateToDraft.current = true;
-                    dictation.start();
-                  }
-                }}
-                title="Dictar (lo dicho queda en el cuadro para revisarlo)"
-                aria-label="Dictar"
-                className={`h-[38px] shrink-0 rounded-sm border px-2.5 text-xs ${
-                  dictation.state === "listening"
-                    ? "border-accent/60 text-accent pulse-dot"
-                    : "border-line text-text-dim hover:border-line-2 hover:text-text"
-                }`}
-              >
-                {dictation.state === "listening" ? "● Escuchando" : "🎙"}
-              </button>
-            )}
-            {busy ? (
-              <button
-                type="button"
-                onClick={stop}
-                className="h-[38px] shrink-0 rounded-sm border border-red/60 px-3 text-xs text-red hover:bg-red/10"
-              >
-                ■ Detener
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!draft.trim()}
-                className="h-[38px] shrink-0 rounded-sm border border-accent/60 bg-accent/10 px-3 text-xs text-accent hover:bg-accent/15 disabled:opacity-40"
-              >
-                Enviar
-              </button>
-            )}
+            <div className="flex items-center gap-1">
+              <span className="min-w-0 flex-1 truncate px-0.5 text-xs text-text-faint">
+                {voiceMode ? "Modo voz: también puedes escribir" : "Enter envía · Shift+Enter, línea nueva"}
+              </span>
+              {!voiceMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (dictation.state === "listening") dictation.stop();
+                    else {
+                      dictateToDraft.current = true;
+                      dictation.start();
+                    }
+                  }}
+                  title="Dictar (lo dicho queda en el cuadro para revisarlo)"
+                  aria-label={dictation.state === "listening" ? "Detener dictado" : "Dictar"}
+                  aria-pressed={dictation.state === "listening"}
+                  className={`relative grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full transition-colors ${
+                    dictation.state === "listening"
+                      ? "bg-red/10 text-red"
+                      : "text-text-dim hover:bg-hover hover:text-text"
+                  }`}
+                >
+                  {dictation.state === "listening" && (
+                    <span className="absolute inset-0 animate-ping rounded-full bg-red/30" />
+                  )}
+                  <svg {...ICON} width={15} height={15} className="relative">
+                    <path d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Z" />
+                    <path d="M5.5 10.5v1a6.5 6.5 0 0 0 13 0v-1M12 18v3" />
+                  </svg>
+                </button>
+              )}
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={stop}
+                  title="Detener"
+                  aria-label="Detener"
+                  className="ml-0.5 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-text text-bg transition-opacity hover:opacity-85"
+                >
+                  <span className="h-2.5 w-2.5 rounded-[2px] bg-current" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  title="Enviar (Enter)"
+                  aria-label="Enviar"
+                  className="ml-0.5 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-accent-solid text-on-accent transition-colors disabled:cursor-default disabled:bg-selected disabled:text-text-faint"
+                >
+                  <svg {...ICON} width={15} height={15} strokeWidth={1.8}>
+                    <path d="M12 19V5M6 11l6-6 6 6" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </form>
         </section>
 
         {/* ── Pizarra ──────────────────────────────────────────────── */}
-        <section className="flex min-h-0 min-w-0 flex-col rounded-sm border border-line bg-panel">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-line bg-panel shadow-[var(--shadow-card)]">
           {diagrams.length > 1 && (
-            <div className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-line px-3 py-2">
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-2">
               {diagrams.map((d, i) => (
                 <button
                   key={d.id}
                   type="button"
                   onClick={() => setActive(d)}
-                  className={`shrink-0 rounded-sm border px-2 py-0.5 text-xs ${
+                  aria-pressed={active?.id === d.id}
+                  className={`flex h-7 max-w-[240px] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs px-2 text-xs transition-colors ${
                     active?.id === d.id
-                      ? "border-accent/60 text-accent"
-                      : "border-line text-text-dim hover:text-text"
+                      ? "bg-selected text-text"
+                      : "text-text-dim hover:bg-hover hover:text-text"
                   }`}
                 >
-                  {i + 1}. {d.title}
+                  <span className="text-text-faint tabular-nums">{i + 1}</span>
+                  <span className="truncate">{d.title}</span>
                 </button>
               ))}
             </div>
@@ -583,6 +653,118 @@ export function EntenderView() {
   );
 }
 
+/** Selector de proyecto: botón compacto + menú (patrón del selector de máquina). */
+function ProjectPicker({
+  projects,
+  value,
+  onChange,
+  disabled,
+}: {
+  projects: TutorProject[];
+  value: string | null;
+  onChange: (slug: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const current = projects.find((p) => p.slug === value);
+
+  useEffect(() => {
+    if (!open) return;
+    // Al abrir, el foco va al proyecto actual: flechas y Enter funcionan ya.
+    requestAnimationFrame(() =>
+      listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus(),
+    );
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const onListKey = (e: ReactKeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [...(listRef.current?.querySelectorAll<HTMLButtonElement>("[role=option]") ?? [])];
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length];
+    next?.focus();
+  };
+
+  return (
+    <div ref={ref} className="relative min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={disabled ? "Espera a que termine la respuesta para cambiar de proyecto" : undefined}
+        className="flex h-8 max-w-[280px] min-w-0 cursor-pointer items-center gap-2 rounded-sm border border-line bg-panel pr-2 pl-2.5 text-sm text-text shadow-[var(--shadow-card)] transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-default disabled:opacity-60"
+      >
+        <svg {...ICON} width={13} height={13} className="shrink-0 text-text-faint">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        </svg>
+        <span className="min-w-0 truncate font-medium">{current?.name ?? "Elige un proyecto"}</span>
+        <svg {...ICON} width={12} height={12} strokeWidth={2} className="shrink-0 text-text-faint">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label="Proyecto"
+          onKeyDown={onListKey}
+          className="absolute top-full left-0 z-40 mt-1 max-h-[60vh] w-72 overflow-y-auto rounded-sm border border-line bg-panel p-1 shadow-[var(--shadow-pop)]"
+        >
+          <div className="px-2 pt-1 pb-1.5 text-2xs text-text-faint">
+            {projects.length} proyectos con repos en esta máquina
+          </div>
+          {projects.map((p) => {
+            const on = p.slug === value;
+            return (
+              <button
+                key={p.slug}
+                type="button"
+                role="option"
+                aria-selected={on}
+                onClick={() => {
+                  onChange(p.slug);
+                  setOpen(false);
+                }}
+                className={`flex w-full cursor-pointer items-center gap-2 rounded-xs px-2 py-1.5 text-left transition-colors hover:bg-hover focus-visible:bg-hover ${
+                  on ? "bg-selected" : ""
+                }`}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-text">{p.name}</span>
+                  <span className="block truncate text-xs text-text-faint">
+                    {p.repos.length} repo{p.repos.length === 1 ? "" : "s"} · {p.meetings} actas
+                  </span>
+                </span>
+                {on && (
+                  <svg {...ICON} width={14} height={14} strokeWidth={2} className="shrink-0 text-accent">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiagramChips({
   diagrams,
   onDiagram,
@@ -594,18 +776,30 @@ function DiagramChips({
 }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {diagrams.map((d) => (
-        <button
-          key={d.id}
-          type="button"
-          onClick={() => onDiagram(d)}
-          className={`rounded-sm border px-2 py-0.5 text-xs ${
-            active?.id === d.id ? "border-accent/60 text-accent" : "border-line text-text-dim hover:text-text"
-          }`}
-        >
-          ◫ {d.title}
-        </button>
-      ))}
+      {diagrams.map((d) => {
+        const on = active?.id === d.id;
+        return (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => onDiagram(d)}
+            aria-pressed={on}
+            title="Ver en la pizarra"
+            className={`flex h-7 max-w-full cursor-pointer items-center gap-1.5 rounded-sm border px-2 text-xs transition-colors ${
+              on
+                ? "border-line-2 bg-selected text-text"
+                : "border-line text-text-dim hover:border-line-2 hover:bg-hover hover:text-text"
+            }`}
+          >
+            <svg {...ICON} width={12} height={12} className="shrink-0 text-text-faint">
+              <rect x="3" y="3" width="7" height="6" rx="1.5" />
+              <rect x="14" y="15" width="7" height="6" rx="1.5" />
+              <path d="M6.5 9v3a3 3 0 0 0 3 3h4.5" />
+            </svg>
+            <span className="truncate">{d.title}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -622,12 +816,15 @@ function MessageView({
   const [showTools, setShowTools] = useState(false);
   if (m.role === "user")
     return (
-      <div className="ml-8 rounded-sm bg-panel-2 px-3 py-2 text-sm leading-relaxed text-text">
-        {m.text}
+      // La burbuja del usuario es la misma que la del chat de Inicio.
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-lg border border-line bg-accent/10 px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-text">
+          {m.text}
+        </div>
       </div>
     );
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       <div className="text-sm leading-relaxed text-text">
         <Markdown source={m.text || "—"} />
       </div>
@@ -639,14 +836,24 @@ function MessageView({
           <button
             type="button"
             onClick={() => setShowTools((v) => !v)}
-            className="text-xs text-text-dim hover:text-text"
+            aria-expanded={showTools}
+            className="-ml-1.5 flex h-6 cursor-pointer items-center gap-1 rounded-xs px-1.5 text-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
           >
-            {showTools ? "▾" : "▸"} Leyó {m.tools.length} fuente{m.tools.length === 1 ? "" : "s"}
+            <svg
+              {...ICON}
+              width={12}
+              height={12}
+              strokeWidth={2}
+              className={`transition-transform ${showTools ? "rotate-90" : ""}`}
+            >
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+            Leyó {m.tools.length} fuente{m.tools.length === 1 ? "" : "s"}
           </button>
           {showTools && (
-            <ul className="mt-1 space-y-0.5">
+            <ul className="mt-1 space-y-0.5 border-l border-line pl-3">
               {m.tools.map((t, i) => (
-                <li key={i} className="truncate font-mono text-xs text-text-dim">
+                <li key={i} className="truncate font-mono text-xs text-text-faint">
                   {t}
                 </li>
               ))}
@@ -686,47 +893,43 @@ function VoiceBar({
   else if (transcribing) label = "Transcribiendo…";
   else if (listening) label = "Te escucho — habla y haz una pausa para enviar";
   else label = "En pausa";
+  // Punto de estado: rojo = el micrófono está abierto; cyan = en curso.
+  const dot = listening
+    ? "bg-red pulse-dot"
+    : speaking || thinking || transcribing
+      ? "bg-cyan pulse-dot"
+      : "bg-text-faint";
   return (
-    <div className="shrink-0 border-t border-line bg-accent/5 px-3 py-2">
+    <div className="mt-2 shrink-0 rounded-sm border border-line bg-panel-2 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
-        <span className={`text-xs ${listening || speaking ? "text-accent pulse-dot" : "text-text-dim"}`}>
-          ● {label}
+        <span className="flex min-w-0 items-center gap-2 text-xs text-text">
+          <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+          <span className="truncate">{label}</span>
         </span>
-        <span className="flex gap-1.5">
-          {(speaking || thinking) && (
-            <button
-              type="button"
-              onClick={onInterrupt}
-              className="rounded-sm border border-accent/60 px-2 py-0.5 text-xs text-accent hover:bg-accent/10"
-            >
-              Interrumpir
-            </button>
-          )}
+        <span className="flex shrink-0 gap-1">
+          {(speaking || thinking) && <Button onClick={onInterrupt}>Interrumpir</Button>}
           {listening ? (
-            <button
-              type="button"
-              onClick={onStopListening}
-              className="rounded-sm border border-line px-2 py-0.5 text-xs text-text-dim hover:text-text"
-            >
+            <Button variant="ghost" onClick={onStopListening}>
               Enviar ya
-            </button>
+            </Button>
           ) : (
             !speaking &&
             !thinking &&
             !transcribing && (
-              <button
-                type="button"
-                onClick={onListen}
-                className="rounded-sm border border-line px-2 py-0.5 text-xs text-text-dim hover:text-text"
-              >
+              <Button variant="ghost" onClick={onListen}>
                 Hablar
-              </button>
+              </Button>
             )
           )}
         </span>
       </div>
-      {listening && heard && <p className="mt-1 text-sm text-text">«{heard}»</p>}
-      {error && <p className="mt-1 text-xs text-amber">{error}</p>}
+      {listening && heard && <p className="mt-1.5 text-sm text-text">«{heard}»</p>}
+      {error && (
+        <p className="mt-1.5 flex items-center gap-2 text-xs text-text-dim">
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }

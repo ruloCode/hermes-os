@@ -138,11 +138,11 @@ export function KnowledgeGraph({
     // Tokens del design system (three no resuelve var(--…)).
     const COLOR = {
       bg: readToken("--color-bg", "#05060f"),
-      core: readToken("--color-accent-hot", "#e89a7d"),
+      core: readToken("--color-accent-hot", "#a5a7fa"),
       // Azul tranquilo del branding (no el cian eléctrico): con el bloom
       // encima, el cian saturado gritaba y las etiquetas no se leían.
       project: readToken("--color-blue", "#60a5fa"),
-      memory: readToken("--color-accent", "#d97757"),
+      memory: readToken("--color-accent", "#7c7ff5"),
       label: readToken("--color-text", "#e2e7ff"),
       line: "#7a84ff",
     };

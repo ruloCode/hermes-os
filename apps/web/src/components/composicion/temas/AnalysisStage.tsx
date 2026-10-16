@@ -414,7 +414,7 @@ export function AnalysisStage() {
             type="button"
             onClick={() => void listen()}
             disabled={!rows?.length}
-            className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-accent text-sm text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-accent-solid text-sm text-on-accent hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={playing ? "Parar (Espacio)" : "Escuchar desde la nota elegida (Espacio)"}
             title={playing ? "Parar (Espacio)" : "Escuchar desde la nota elegida (Espacio)"}
           >

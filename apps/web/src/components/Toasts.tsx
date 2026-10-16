@@ -49,8 +49,8 @@ export function Toasts({ events }: { events: AgentActivityEvent[] }) {
       runId: e.taskId,
       text:
         e.kind === "task_done"
-          ? `✅ Terminó: ${(e.detail || e.taskId || "tarea").slice(0, 90)}`
-          : `❌ ${(e.detail || "error del agente").slice(0, 90)}`,
+          ? `Terminó: ${(e.detail || e.taskId || "tarea").slice(0, 90)}`
+          : (e.detail || "Error del agente").slice(0, 90),
     }));
     setToasts((prev) => [...prev, ...incoming].slice(-MAX_TOASTS));
     for (const t of incoming) {
@@ -61,7 +61,7 @@ export function Toasts({ events }: { events: AgentActivityEvent[] }) {
   if (!toasts.length) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
+    <div className="pointer-events-none fixed right-4 bottom-4 z-[70] flex w-[340px] flex-col gap-2">
       {toasts.map((t) => {
         // Si el run sigue en el orquestador (ventana de 5 min), el clic abre
         // su stream; si ya se evictó, el clic solo cierra el aviso.
@@ -70,21 +70,28 @@ export function Toasts({ events }: { events: AgentActivityEvent[] }) {
           <div
             key={t.id}
             role="status"
-            className={`hud-in pointer-events-auto cursor-pointer rounded-md border bg-panel px-3 py-2 text-xs leading-snug text-text shadow-[var(--shadow-pop)] ${
-              t.kind === "ok" ? "border-green glow-box-green" : "border-red glow-box-red"
-            }`}
+            className="hud-in pointer-events-auto flex cursor-pointer items-start gap-3 rounded-md border border-line bg-panel px-3.5 py-3 shadow-[var(--shadow-pop)] transition-colors hover:border-line-2"
             onClick={() => {
               if (run) ws.openRun({ slug: run.projectSlug, runId: run.id, sessionId: run.sessionId });
               setToasts((prev) => prev.filter((x) => x.id !== t.id));
             }}
             title={run ? "Abrir el stream de este run" : "Cerrar"}
           >
-            {t.text}
-            {run && (
-              <span className="mt-0.5 block text-2xs tracking-label text-text-dim uppercase">
-                clic para abrir el stream ▸
-              </span>
-            )}
+            {/* El estado va en el punto (verde terminó · rojo falló). */}
+            <span
+              aria-hidden
+              className={`mt-[6px] h-2 w-2 shrink-0 rounded-full ${
+                t.kind === "ok" ? "bg-green" : "bg-red"
+              }`}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm leading-snug text-text">
+                {t.kind === "ok" ? t.text : `Falló: ${t.text}`}
+              </p>
+              {run && (
+                <p className="mt-1 text-xs text-text-faint">Clic para abrir el stream</p>
+              )}
+            </div>
           </div>
         );
       })}

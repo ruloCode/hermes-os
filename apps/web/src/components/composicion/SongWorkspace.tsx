@@ -10,12 +10,13 @@ import { useState } from "react";
 import { keyLabel } from "@/lib/music-theory";
 import { TabBar } from "@/components/ui/TabBar";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { useComposicion } from "./ComposicionContext";
 import { LyricsEditor } from "./LyricsEditor";
 import { KeyPicker } from "./KeyPicker";
 import { ChordBuilder } from "./ChordBuilder";
 import { StructureTab } from "./StructureTab";
-import { REF_KINDS, STAGES, STAGE_ORDER, TEXT_TONE, btnCls, fmtRelative, ghostBtnCls, inputCls } from "./labels";
+import { REF_KINDS, STAGES, STAGE_ORDER, TEXT_TONE, fmtRelative, ghostBtnCls, inputCls } from "./labels";
 import type { Song } from "./types";
 
 type Tab = "letra" | "tonalidad" | "acordes" | "estructura" | "referencias" | "historial";
@@ -37,7 +38,8 @@ export function SongWorkspace({
   onAskHermes,
 }: {
   song: Song;
-  onBack: () => void;
+  /** v5: el ← vive en la cabecera de la vista (ViewHeader); opcional aquí. */
+  onBack?: () => void;
   chatOpen: boolean;
   onToggleChat: () => void;
   onAskHermes: (sectionId: string) => void;
@@ -50,31 +52,49 @@ export function SongWorkspace({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <header className="flex shrink-0 flex-col gap-2">
+      <header className="flex shrink-0 flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onBack} className={ghostBtnCls} title="Volver a la lista (Esc)">← Canciones</button>
+          {onBack && (
+            <Button variant="ghost" onClick={onBack} title="Volver a la lista (Esc)">
+              Canciones
+            </Button>
+          )}
           <input
             value={song.title}
             onChange={(e) => patchSong(song.id, { title: e.target.value })}
-            className="min-w-0 flex-1 bg-transparent font-display text-xl tracking-title text-text uppercase focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-text focus:outline-none"
             aria-label="Título"
           />
           <div className="flex items-center gap-1">
-            <button onClick={() => setNotation(notation === "en" ? "latin" : "en")} className={ghostBtnCls} title="Cómo se escriben las notas">
+            <Button
+              variant="ghost"
+              onClick={() => setNotation(notation === "en" ? "latin" : "en")}
+              title="Cómo se escriben las notas"
+            >
               {notation === "en" ? "C D E" : "Do Re Mi"}
-            </button>
-            <button onClick={onToggleChat} className={`${btnCls} ${chatOpen ? "border-accent text-accent" : ""}`}>✦ Hermes</button>
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={onToggleChat}
+              aria-pressed={chatOpen}
+              title={chatOpen ? "Ocultar el copiloto" : "Mostrar el copiloto"}
+              className={chatOpen ? "bg-selected text-text" : ""}
+            >
+              Copiloto
+            </Button>
           </div>
         </div>
         <input
           value={song.seed}
           onChange={(e) => patchSong(song.id, { seed: e.target.value })}
           placeholder="La frase-semilla"
-          className="bg-transparent text-xs text-text-dim italic placeholder:text-text-faint focus:outline-none"
+          aria-label="Frase-semilla"
+          className="bg-transparent text-sm text-text-dim italic placeholder:text-text-faint focus:outline-none"
         />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          {/* Stepper de etapas: clic = mover (decisión humana, sin criterios automáticos) */}
-          <ol className="flex items-center gap-1">
+        <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-2">
+          {/* Stepper de etapas: clic = mover (decisión humana, sin criterios
+              automáticos). La actual va en gris "seleccionado", no en acento. */}
+          <ol className="flex items-center gap-1" aria-label="Etapa de la canción">
             {STAGE_ORDER.map((st, i) => {
               const s = STAGES[st];
               const state = i < stageIdx ? "past" : i === stageIdx ? "now" : "next";
@@ -83,30 +103,61 @@ export function SongWorkspace({
                   <button
                     onClick={() => setStage(song.id, st)}
                     title={s.hint}
-                    className={`flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-2xs tracking-label uppercase ${
-                      state === "now" ? "bg-accent/16 text-accent" : state === "past" ? "text-text-dim" : "text-text-faint hover:text-text-dim"
+                    aria-current={state === "now" ? "step" : undefined}
+                    className={`flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2 text-xs transition-colors ${
+                      state === "now"
+                        ? "bg-selected font-medium text-text"
+                        : state === "past"
+                          ? "text-text-dim hover:bg-hover hover:text-text"
+                          : "text-text-faint hover:bg-hover hover:text-text"
                     }`}
                   >
-                    <span aria-hidden>{state === "past" ? "✓" : state === "now" ? "●" : "○"}</span>
+                    <span
+                      aria-hidden
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                        state === "next" ? "border border-line-2" : state === "now" ? "bg-text" : "bg-text-faint"
+                      }`}
+                    />
                     <span className={state === "now" ? "" : "max-xl:hidden"}>{s.label}</span>
                   </button>
-                  {i < STAGE_ORDER.length - 1 && <span aria-hidden className="h-px w-2 bg-line" />}
+                  {i < STAGE_ORDER.length - 1 && <span aria-hidden className="h-px w-2 bg-line-2" />}
                 </li>
               );
             })}
           </ol>
-          <div className="flex items-center gap-2 font-mono text-2xs text-text-dim">
-            <button onClick={() => setTab("tonalidad")} className="text-text hover:text-accent">{keyLabel(song.key, notation)}</button>
-            <span>·</span>
-            <button onClick={() => setTab("acordes")} className="hover:text-text">{song.tempo} bpm</button>
-            <span>·</span>
-            <button onClick={() => setTab("estructura")} className="hover:text-text">{song.meter}</button>
-            <span className="text-text-faint">· {fmtRelative(song.updatedAt)}</span>
+          {/* Datos musicales: atajos a su tab. Sans con cifras tabulares (el
+              mono es para acordes y código, no para "90 bpm"). */}
+          <div className="flex items-center gap-1.5 text-xs text-text-faint tabular-nums">
+            <button
+              onClick={() => setTab("tonalidad")}
+              className="cursor-pointer text-text-dim hover:text-text"
+            >
+              {keyLabel(song.key, notation)}
+            </button>
+            <span aria-hidden>·</span>
+            <button onClick={() => setTab("acordes")} className="cursor-pointer hover:text-text">
+              {song.tempo} bpm
+            </button>
+            <span aria-hidden>·</span>
+            <button onClick={() => setTab("estructura")} className="cursor-pointer hover:text-text">
+              {song.meter}
+            </button>
+            <span aria-hidden>·</span>
+            <span>{fmtRelative(song.updatedAt)}</span>
           </div>
         </div>
       </header>
 
-      <TabBar tabs={TABS.map((t) => ({ id: t.id, label: t.label, badge: t.id === "referencias" ? linked.length || undefined : undefined }))} active={tab} onChange={(id) => setTab(id as Tab)} />
+      <TabBar
+        size="md"
+        tabs={TABS.map((t) => ({
+          id: t.id,
+          label: t.label,
+          badge: t.id === "referencias" ? linked.length || undefined : undefined,
+        }))}
+        active={tab}
+        onChange={(id) => setTab(id as Tab)}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
         {tab === "letra" && <LyricsEditor song={song} onAskHermes={onAskHermes} />}
@@ -120,14 +171,14 @@ export function SongWorkspace({
         {tab === "referencias" && (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <span className="text-2xs tracking-label text-text-dim uppercase">Enlazadas a esta canción · {linked.length}</span>
+              <span className="text-xs font-medium text-text-dim">Enlazadas a esta canción · {linked.length}</span>
               {linked.length === 0 && <p className="text-xs text-text-faint">Ninguna. Una referencia enlazada le da contexto real a Hermes cuando le pides caminos.</p>}
               {linked.map((r) => (
                 <RefRow key={r.id} r={r} action={{ label: "quitar", run: () => linkRef(song.id, r.id, false) }} />
               ))}
             </div>
             <div className="flex flex-col gap-1.5">
-              <span className="text-2xs tracking-label text-text-dim uppercase">Del tablero · {others.length}</span>
+              <span className="text-xs font-medium text-text-dim">Del tablero · {others.length}</span>
               {others.map((r) => (
                 <RefRow key={r.id} r={r} action={{ label: "enlazar", run: () => linkRef(song.id, r.id, true) }} />
               ))}

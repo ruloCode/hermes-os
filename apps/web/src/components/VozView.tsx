@@ -3,42 +3,41 @@
 import { useEffect, useRef } from "react";
 import { useConversationMode } from "@elevenlabs/react";
 import type { AgentActivityEvent } from "@hermes/shared";
-import { Panel } from "@/components/ui/Panel";
-import { toneHotVar, type Tone } from "@/components/ui/tones";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { Button } from "@/components/ui/Button";
 import { Markdown } from "./Markdown";
 import { VoiceWaveform } from "./VoiceWaveform";
 import { useVoice } from "./VoiceBusyContext";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
 
 /**
- * Modo VOZ EN VIVO (protagonista, centro de la pantalla). Tres zonas:
- *  - Cabecera: waveform real del audio + estado + control de llamada.
+ * Modo VOZ EN VIVO. Tres zonas:
+ *  - Cabecera (ViewHeader): estado de la llamada + waveform real + control.
  *  - Centro: PREVIEW en markdown de lo último que Hermes produjo (un reporte,
  *    un resumen, lo que sea) — llega solo cuando una tarea de voz termina.
- *  - Riel derecho: actividad EN VIVO (lo que el agente está haciendo) +
- *    transcripción de la llamada.
+ *  - Riel derecho a sangre: actividad EN VIVO (lo que el agente está haciendo)
+ *    + transcripción de la llamada.
+ *
+ * v5: sin tres cajas con el mismo peso. Lo que se LEE (preview, actividad,
+ * conversación) va sin marco; un riel con hairline separa el contexto del
+ * documento, igual que el riel de contexto de Inicio.
  */
 
-const ACT_ICON: Record<string, { icon: string; cls: string }> = {
-  task_start: { icon: "▶", cls: "text-cyan" },
-  tool_call: { icon: "⚙", cls: "text-accent" },
-  tool_result: { icon: "↩", cls: "text-text-dim" },
-  text: { icon: "…", cls: "text-text-dim" },
-  task_done: { icon: "✓", cls: "text-green" },
-  error: { icon: "✗", cls: "text-red" },
-  session_start: { icon: "◆", cls: "text-blue" },
+// Punto por tipo de evento: el color es ESTADO (cyan arranca, verde termina,
+// rojo falla); el resto en gris. Mismo código que la vista Actividad.
+const ACT_DOT: Record<string, string> = {
+  task_start: "bg-cyan",
+  tool_call: "bg-text-dim",
+  tool_result: "bg-line-2",
+  text: "bg-line-2",
+  task_done: "bg-green",
+  error: "bg-red",
+  session_start: "bg-text-dim",
 };
 
-// Tono de estado → clase de texto (acento usa la variante hot, como el orbe).
-const STATUS_CLS: Record<Tone, string> = {
-  accent: "text-accent-hot",
-  cyan: "text-cyan",
-  blue: "text-blue",
-  green: "text-green",
-  amber: "text-amber",
-  red: "text-red",
-  neutral: "text-text-dim",
-};
+/** "TÚ"/"HERMES" llegan en mayúsculas del bridge: en la UI, frase normal. */
+const whoLabel = (who: string) =>
+  who === "TÚ" ? "Tú" : who.charAt(0) + who.slice(1).toLowerCase();
 
 export function VozView({ events }: { events: AgentActivityEvent[] }) {
   const { transcript, action, artifact } = useVoice();
@@ -56,178 +55,215 @@ export function VozView({ events }: { events: AgentActivityEvent[] }) {
   }, [events.length]);
 
   const statusText = !configured
-    ? "VOZ NO CONFIGURADA"
+    ? "Voz no configurada"
     : connected
       ? action
         ? `Ejecutando · ${action}`
         : isSpeaking
-          ? "HERMES HABLANDO"
-          : "ESCUCHANDO"
+          ? "Hermes hablando"
+          : "Escuchando"
       : connecting
-        ? "CONECTANDO"
-        : "EN PAUSA";
-  const statusTone: Tone = !configured
-    ? "neutral"
+        ? "Conectando…"
+        : "En pausa";
+  // El color va en el punto: cyan trabajando, acento (el del orbe) hablando,
+  // verde escuchando, ámbar conectando, gris en pausa.
+  const statusDot = !configured
+    ? "bg-text-faint"
     : connected
       ? action
-        ? "cyan"
+        ? "bg-cyan pulse-dot"
         : isSpeaking
-          ? "accent"
-          : "green"
+          ? "bg-accent pulse-dot"
+          : "bg-green"
       : connecting
-        ? "amber"
-        : "neutral";
+        ? "bg-amber pulse-dot"
+        : "bg-text-faint";
 
   const recentActivity = events.slice(-40);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* ── Cabecera de voz ─────────────────────────────────────── */}
-      <Panel variant="hero" padding="none">
-        <div className="flex items-center gap-4 px-4 py-3">
-          {/* Orbe de estado: --orb es la var que consume .voice-orb */}
-          <span
-            className={`voice-orb ${connected ? "voice-orb-live" : ""}`}
-            style={{ ["--orb" as string]: toneHotVar(statusTone), width: 26, height: 26 }}
-          />
-          <div className="min-w-0 flex-1">
-            <div
-              className={`font-display text-xs font-bold tracking-title uppercase ${STATUS_CLS[statusTone]}`}
-            >
-              {statusText}
-            </div>
-            <div className="mt-0.5 truncate text-xs text-text-dim">
-              {transcript.length
-                ? `${transcript[transcript.length - 1].who}: ${transcript[transcript.length - 1].text}`
-                : connected
-                  ? "Hermes te escucha — pídele lo que sea."
-                  : "Inicia la llamada y háblale a Hermes en tiempo real."}
-            </div>
-          </div>
-          {/* Waveform real (línea plana y tenue en reposo) */}
-          <div className="hidden w-40 shrink-0 sm:block">
-            <VoiceWaveform height={40} />
-          </div>
-          {/* Control */}
-          {!configured ? (
-            <button className="cmd-btn w-auto justify-center px-4" disabled>
-              N/A
-            </button>
-          ) : connected ? (
-            <button className="cmd-btn w-auto justify-center px-4" onClick={() => disconnect()}>
-              Terminar
-            </button>
-          ) : (
-            <button
-              className="cmd-btn w-auto justify-center px-4"
-              disabled={connecting}
-              onClick={() => void connect()}
-            >
-              {connecting ? "Conectando…" : "Hablar con Hermes"}
-            </button>
-          )}
-        </div>
-      </Panel>
-
-      {error && <div className="text-xs text-red">⚠ {error}</div>}
-
-      {/* ── Cuerpo: preview central + riel de actividad/transcripción ── */}
-      <div className="grid min-h-0 flex-1 grid-cols-3 gap-3">
-        {/* PREVIEW markdown (centro, protagonista) */}
-        <Panel
-          title="Preview"
-          className="col-span-2"
-          scroll
-          right={
-            artifact ? (
-              <span
-                className={`text-2xs tracking-label uppercase ${
-                  artifact.status === "running"
-                    ? "text-amber"
-                    : artifact.status === "error"
-                      ? "text-red"
-                      : "text-green"
-                }`}
+    <div className="flex h-full min-h-0 flex-col">
+      <ViewHeader
+        title="Voz en vivo"
+        meta={
+          <span className="inline-flex items-center gap-1.5 text-text-dim">
+            <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+            <span className="max-w-[320px] truncate">{statusText}</span>
+          </span>
+        }
+        actions={
+          <>
+            {/* Waveform real, solo con llamada: en reposo era una línea
+                punteada que no decía nada. */}
+            {connected && (
+              <div className="hidden w-36 shrink-0 sm:block">
+                <VoiceWaveform height={28} />
+              </div>
+            )}
+            {!configured ? (
+              <Button size="md" disabled>
+                No disponible
+              </Button>
+            ) : connected ? (
+              <Button size="md" variant="danger" onClick={() => disconnect()}>
+                Terminar llamada
+              </Button>
+            ) : (
+              <Button
+                size="md"
+                variant="primary"
+                disabled={connecting}
+                onClick={() => void connect()}
+                icon={
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M4 13a8 8 0 0 1 16 0M4 13v4a2 2 0 0 0 2 2h1v-6H6a2 2 0 0 0-2 2Zm16 0v4a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2Z"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                }
               >
-                {artifact.status === "running"
-                  ? "generando…"
-                  : artifact.status === "error"
-                    ? "error"
-                    : "listo"}
-              </span>
-            ) : undefined
-          }
-        >
+                {connecting ? "Conectando…" : "Hablar con Hermes"}
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      {error && (
+        <p className="-mt-2 mb-3 flex items-start gap-2 text-xs leading-snug text-text">
+          <span aria-hidden className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-red" />
+          {error}
+        </p>
+      )}
+
+      {/* ── Cuerpo: preview central + riel de actividad/conversación ── */}
+      <div className="flex min-h-0 flex-1">
+        {/* PREVIEW markdown (centro, protagonista) */}
+        <section className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-6" aria-label="Preview">
           {!artifact ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-text-dim">
-              <span className="text-2xl opacity-40">◐</span>
-              <p className="max-w-xs text-xs leading-relaxed">
+            <div className="flex h-full flex-col items-center justify-center gap-1.5 text-center">
+              <span
+                aria-hidden
+                className="mb-2 grid h-10 w-10 place-items-center rounded-full border border-line bg-panel-2 text-text-faint"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5M9 13h6M9 17h4" />
+                </svg>
+              </span>
+              <p className="text-sm font-medium text-text">Sin documento todavía</p>
+              <p className="max-w-[40ch] text-xs leading-relaxed text-text-faint">
                 Pídele a Hermes por voz un reporte, un resumen o cualquier documento y aquí lo
                 verás renderizado en tiempo real.
               </p>
             </div>
           ) : (
-            <>
-              <div className="mb-2 text-xs font-bold text-accent-hot">{artifact.title}</div>
+            <article className="mx-auto w-full max-w-[760px] pb-6">
+              <div className="mb-4 flex items-center gap-3">
+                <h2 className="min-w-0 flex-1 truncate text-lg font-semibold text-text">
+                  {artifact.title}
+                </h2>
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-text-dim">
+                  <span
+                    aria-hidden
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      artifact.status === "running"
+                        ? "bg-cyan pulse-dot"
+                        : artifact.status === "error"
+                          ? "bg-red"
+                          : "bg-green"
+                    }`}
+                  />
+                  {artifact.status === "running"
+                    ? "Generando…"
+                    : artifact.status === "error"
+                      ? "Error"
+                      : "Listo"}
+                </span>
+              </div>
               {artifact.status === "running" ? (
-                <div className="flex items-center gap-2 text-xs text-amber">
-                  <span className="cursor-blink">Hermes está trabajando en ello</span>
+                <div className="space-y-2.5">
+                  <div className="skeleton h-3 w-3/4" />
+                  <div className="skeleton h-3 w-2/3" />
+                  <div className="skeleton h-3 w-1/2" />
+                  <p className="pt-2 text-xs text-text-faint">Hermes está trabajando en ello…</p>
                 </div>
               ) : (
                 <Markdown source={artifact.md} />
               )}
-            </>
+            </article>
           )}
-        </Panel>
+        </section>
 
-        {/* Riel derecho: actividad en vivo + transcripción */}
-        <div className="col-span-1 flex min-h-0 flex-col gap-3">
+        {/* Riel derecho a sangre: actividad en vivo + conversación */}
+        <aside
+          aria-label="Actividad y conversación"
+          className="-mt-5 -mr-6 -mb-5 hidden w-[340px] shrink-0 flex-col border-l border-line lg:flex"
+        >
           {/* Actividad en vivo */}
-          <Panel title="Actividad en vivo" className="min-h-0 flex-1" scroll>
-            <div className="space-y-1 text-2xs leading-snug">
+          <section className="flex min-h-0 flex-1 flex-col">
+            <h3 className="shrink-0 px-5 pt-4 pb-2 text-xs font-medium text-text-dim">
+              Actividad en vivo
+            </h3>
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
               {recentActivity.length === 0 ? (
-                <p className="pt-4 text-center text-2xs tracking-label text-text-dim uppercase">
-                  Sin actividad
-                </p>
+                <p className="px-2 pt-2 text-xs text-text-faint">Sin actividad todavía.</p>
               ) : (
-                recentActivity.map((ev, i) => {
-                  const st = ACT_ICON[ev.kind] ?? ACT_ICON.text;
-                  return (
-                    <div key={i} className="flex gap-1.5">
-                      <span className={st.cls}>{st.icon}</span>
-                      <span className="min-w-0 flex-1 truncate">
-                        {ev.toolName && <b className={`mr-1 ${st.cls}`}>{ev.toolName}</b>}
-                        <span className="text-text-dim">{ev.detail ?? ev.kind}</span>
-                      </span>
-                    </div>
-                  );
-                })
+                recentActivity.map((ev, i) => (
+                  <div
+                    key={i}
+                    title={ev.toolName ? `${ev.toolName} ${ev.detail ?? ""}` : (ev.detail ?? ev.kind)}
+                    className="flex h-7 min-w-0 items-center gap-2.5 rounded-sm px-2 text-xs"
+                  >
+                    <span
+                      aria-hidden
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${ACT_DOT[ev.kind] ?? ACT_DOT.text}`}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {ev.toolName && (
+                        <span className="mr-1.5 font-medium text-text">{ev.toolName}</span>
+                      )}
+                      <span className="text-text-dim">{ev.detail ?? ev.kind}</span>
+                    </span>
+                  </div>
+                ))
               )}
               <div ref={activityEndRef} />
             </div>
-          </Panel>
+          </section>
 
           {/* Transcripción de la llamada */}
-          <Panel title="Conversación" className="min-h-0 flex-1" scroll>
-            <div className="space-y-1.5 text-xs leading-snug">
+          <section className="flex min-h-0 flex-1 flex-col border-t border-line">
+            <h3 className="shrink-0 px-5 pt-4 pb-2 text-xs font-medium text-text-dim">
+              Conversación
+            </h3>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 pb-4">
               {transcript.length === 0 ? (
-                <p className="pt-4 text-center text-2xs tracking-label text-text-dim uppercase">
-                  {connected ? "Te escucho…" : "Sin conversación"}
+                <p className="pt-2 text-xs text-text-faint">
+                  {connected ? "Te escucho…" : "Sin conversación. Inicia la llamada para hablar."}
                 </p>
               ) : (
                 transcript.map((l, i) => (
-                  <div key={i} className="flex gap-1.5">
-                    <b className={`shrink-0 ${l.who === "TÚ" ? "text-cyan" : "text-accent"}`}>
-                      {l.who}
-                    </b>
-                    <span className="text-text">{l.text}</span>
+                  <div key={i}>
+                    <p className="text-2xs font-medium text-text-faint">{whoLabel(l.who)}</p>
+                    <p
+                      className={`mt-0.5 text-sm leading-snug ${
+                        l.who === "TÚ" ? "text-text-dim" : "text-text"
+                      }`}
+                    >
+                      {l.text}
+                    </p>
                   </div>
                 ))
               )}
               <div ref={transcriptEndRef} />
             </div>
-          </Panel>
-        </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

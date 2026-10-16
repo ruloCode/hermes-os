@@ -114,7 +114,7 @@ export function QueuePanel({
                 setPicked(new Set());
                 onPlan(text, project);
               }}
-              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded-lg bg-accent-solid px-3 py-1.5 text-sm font-medium text-on-accent disabled:opacity-50"
             >
               {planning ? "Pensando…" : "Proponer tareas"}
             </button>
@@ -156,7 +156,7 @@ export function QueuePanel({
                 type="button"
                 disabled={!chosen.length || simulated}
                 onClick={() => onEnqueue(chosen)}
-                className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                className="rounded-lg bg-accent-solid px-3 py-1.5 text-sm font-medium text-on-accent disabled:opacity-50"
               >
                 Encolar {chosen.length}
               </button>
@@ -180,7 +180,7 @@ export function QueuePanel({
                     role="radio"
                     aria-checked={queue.max === n}
                     onClick={() => onSettings({ max: n })}
-                    className={`h-8 w-8 rounded-lg text-sm ${queue.max === n ? "bg-accent text-white" : "border border-line text-text-dim hover:text-text"}`}
+                    className={`h-8 w-8 rounded-lg text-sm ${queue.max === n ? "bg-accent-solid text-on-accent" : "border border-line text-text-dim hover:text-text"}`}
                   >
                     {n}
                   </button>

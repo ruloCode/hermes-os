@@ -45,20 +45,51 @@ const VERB: Record<string, string> = {
   update_goal: "Actualizó una meta",
 };
 
-// Glifo por familia de tool (mismo vocabulario que la Actividad en vivo).
-const GLYPH: Record<string, string> = {
-  Read: "⌕",
-  Glob: "⌕",
-  Grep: "⌕",
-  Bash: "❯",
-  Write: "✎",
-  Edit: "✎",
-  WebSearch: "◈",
-  WebFetch: "◈",
-  TodoWrite: "☰",
-  ToolSearch: "⚙",
-  Task: "◆",
+// Icono por familia de tool (trazo fino, como el resto de la UI). v4 usaba
+// glifos de texto (⌕ ❯ ✎ ◈) en el color del acento: veinte "iconos falsos"
+// en índigo por respuesta.
+type Family = "read" | "run" | "write" | "web" | "plan" | "tool";
+
+const FAMILY: Record<string, Family> = {
+  Read: "read",
+  Glob: "read",
+  Grep: "read",
+  Bash: "run",
+  Write: "write",
+  Edit: "write",
+  WebSearch: "web",
+  WebFetch: "web",
+  TodoWrite: "plan",
 };
+
+const FAMILY_PATH: Record<Family, string> = {
+  read: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14ZM20 20l-4-4",
+  run: "m5 8 4 4-4 4M12 16h7",
+  write: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
+  web: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18",
+  plan: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
+  tool: "M14.5 6.5a3.5 3.5 0 0 0 4.4 4.4L20 12l-8 8-3.5-3.5 8-8 1.1-1.1a3.5 3.5 0 0 0-3.1-.9ZM4 20l3-3",
+};
+
+function StepIcon({ name }: { name: string }) {
+  const fam = FAMILY[name] ?? "tool";
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="shrink-0 translate-y-[2px]"
+    >
+      <path d={FAMILY_PATH[fam]} />
+    </svg>
+  );
+}
 
 /** Nombre corto de la tool: mcp__hermes__save_memory → save_memory. */
 function shortName(name: string): string {
@@ -69,10 +100,6 @@ function shortName(name: string): string {
 function verbOf(name: string): string {
   const short = shortName(name);
   return VERB[name] ?? VERB[short] ?? short;
-}
-
-function glyphOf(name: string): string {
-  return GLYPH[name] ?? (name.startsWith("mcp__") ? "◆" : "⚙");
 }
 
 /** Acorta el objetivo: URLs → host, rutas → últimos 2 segmentos, texto → 60. */
@@ -110,27 +137,44 @@ export function AgentSteps({ steps, busy }: { steps: ChatToolStep[]; busy: boole
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="flex items-center gap-1 text-2xs tracking-label text-text-dim uppercase transition-colors hover:text-accent"
+          className="-ml-1 flex h-6 cursor-pointer items-center gap-1 rounded-xs px-1 text-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
         >
-          <span aria-hidden>{open ? "▾" : "▸"}</span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+            className={`transition-transform ${open ? "rotate-90" : ""}`}
+          >
+            <path d="m9 6 6 6-6 6" />
+          </svg>
           {steps.length} paso{steps.length === 1 ? "" : "s"}
         </button>
       )}
       {expanded && (
-        <ul className="mt-1 space-y-0.5 border-l border-line pl-2">
+        <ul className="mt-1 space-y-1 border-l border-line pl-3">
           {steps.map((s, i) => {
             const target = shortTarget(s.target ?? "");
             const live = busy && i === steps.length - 1;
             return (
-              <li key={i} className="flex items-baseline gap-1.5 text-2xs leading-snug">
-                <span aria-hidden className={live ? "text-amber" : "text-accent"}>
-                  {glyphOf(s.name)}
+              <li
+                key={i}
+                className={`flex min-w-0 items-baseline gap-2 text-xs leading-snug ${
+                  live ? "text-text" : "text-text-dim"
+                }`}
+              >
+                {/* El paso EN CURSO lleva el cyan de "en curso"; los hechos, gris. */}
+                <span className={live ? "pulse-dot text-cyan" : "text-text-faint"}>
+                  <StepIcon name={s.name} />
                 </span>
-                <span className={`shrink-0 ${live ? "pulse-dot text-text" : "text-text-dim"}`}>
-                  {verbOf(s.name)}
-                </span>
+                <span className="shrink-0">{verbOf(s.name)}</span>
                 {target && (
-                  <span className="min-w-0 truncate font-mono text-text-dim opacity-70">
+                  <span className="min-w-0 truncate font-mono text-2xs text-text-faint">
                     {target}
                   </span>
                 )}

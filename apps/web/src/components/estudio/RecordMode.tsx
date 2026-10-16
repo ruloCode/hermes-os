@@ -43,7 +43,7 @@ const FONT_MAX = 56;
 const FONT_KEY = "hermes.estudio.teleprompter.px";
 
 const btn =
-  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs tracking-label text-text uppercase hover:border-accent disabled:opacity-35";
+  "rounded-sm border border-line-2 bg-panel-2 px-2.5 py-1 text-2xs text-text hover:border-accent disabled:opacity-35";
 
 /** "0:07" — cronómetro del beat en curso. */
 function mmss(seconds: number): string {
@@ -204,11 +204,11 @@ function Teleprompter({
         <div className="flex min-w-0 items-center gap-3">
           <button
             onClick={onExit}
-            className="shrink-0 text-2xs tracking-label text-text-faint uppercase hover:text-text"
+            className="shrink-0 text-2xs text-text-faint hover:text-text"
           >
             ← Salir
           </button>
-          <span className="shrink-0 text-2xs tracking-label text-red uppercase">● Grabando</span>
+          <span className="shrink-0 text-2xs text-red">● Grabando</span>
           <span className="min-w-0 truncate text-xs text-text-dim">{piece.title}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -249,7 +249,7 @@ function Teleprompter({
           </div>
           {notes.length > 0 && (
             <div className="shrink-0 border-t border-line px-3 py-2">
-              <p className="text-2xs tracking-label text-text-faint uppercase">Notas de set</p>
+              <p className="text-2xs text-text-faint">Notas de set</p>
               {notes.map((n) => (
                 <p key={n} className="mt-1 text-2xs leading-snug text-text-dim">
                   {n}
@@ -280,14 +280,14 @@ function Teleprompter({
                   }`}
                 >
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="text-2xs tracking-label text-accent uppercase">
+                    <span className="text-2xs text-accent">
                       {beat.kind === "hook" ? "✦ Hook" : (beat.heading ?? beat.label)}
                     </span>
                     {beat.heading && beat.time && (
                       <span className="text-2xs text-text-faint tabular-nums">{beat.time}</span>
                     )}
                     {beat.isCta && (
-                      <span className="text-2xs tracking-label text-cyan uppercase">CTA</span>
+                      <span className="text-2xs text-cyan">CTA</span>
                     )}
                   </div>
                   {beat.say.length ? (
@@ -333,7 +333,7 @@ function Teleprompter({
                       })()}
                       {beat.cues.length > 0 && (
                         <>
-                          <p className="mt-2 text-2xs tracking-label text-cyan uppercase">
+                          <p className="mt-2 text-2xs text-cyan">
                             En pantalla
                           </p>
                           {beat.cues.map((c) => (
@@ -345,7 +345,7 @@ function Teleprompter({
                       )}
                       {beat.directions.length > 0 && (
                         <>
-                          <p className="mt-2 text-2xs tracking-label text-text-faint uppercase">
+                          <p className="mt-2 text-2xs text-text-faint">
                             Cómo
                           </p>
                           {beat.directions.map((d) => (
@@ -382,7 +382,7 @@ function Teleprompter({
               go(idx + 1);
             }}
             disabled={!current}
-            className={`rounded-sm border px-3 py-1 text-2xs tracking-label uppercase ${
+            className={`rounded-sm border px-3 py-1 text-2xs ${
               take?.verdict === "buena"
                 ? "border-green bg-green/12 text-green"
                 : "border-line-2 bg-panel-2 text-text hover:border-green hover:text-green"
@@ -393,7 +393,7 @@ function Teleprompter({
           <button
             onClick={() => current && mark(current, "revisar")}
             disabled={!current}
-            className={`rounded-sm border px-3 py-1 text-2xs tracking-label uppercase ${
+            className={`rounded-sm border px-3 py-1 text-2xs ${
               take?.verdict === "revisar"
                 ? "border-amber bg-amber/12 text-amber"
                 : "border-line-2 bg-panel-2 text-text hover:border-amber hover:text-amber"
@@ -415,7 +415,7 @@ function Teleprompter({
             onClick={() => void toggleVoice()}
             disabled={!current || voice.saving || !voice.supported}
             title="Grabar la voz en off de este bloque (tecla R)"
-            className={`rounded-sm border px-3 py-1 text-2xs tracking-label uppercase disabled:opacity-35 ${
+            className={`rounded-sm border px-3 py-1 text-2xs disabled:opacity-35 ${
               voice.target
                 ? "border-red bg-red/12 text-red"
                 : "border-line-2 bg-panel-2 text-text hover:border-red hover:text-red"

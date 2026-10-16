@@ -139,7 +139,7 @@ export function AreaChartMini({
         )}
       </svg>
       {labels && (
-        <div className="mt-1 flex justify-between text-2xs text-text-faint tracking-label uppercase">
+        <div className="mt-1 flex justify-between text-2xs text-text-faint">
           <span>{labels[0]}</span>
           <span>{labels[1]}</span>
         </div>

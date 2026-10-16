@@ -11,8 +11,8 @@
 // significaba conversar en una pantalla que no estabas viendo.
 //
 // v3 (2026-09) separa las dos cosas que v2 había fundido:
-//  - La PRESENCIA (orbe + estado + hilo) subió al shell, a la PresenceBar del
-//    pie. Mide 40px y acompaña en las diez rutas.
+//  - La PRESENCIA (orbe + estado + hilo) subió al shell (v4: una barra
+//    flotante al pie; v5: el VoiceDock al pie de la barra lateral).
 //  - El CENTRO es ahora lo que sigue: saludo, las tareas reales del vault y el
 //    composer. Empiezas escribiendo o hablando, no mirando.
 //
@@ -34,13 +34,23 @@ import { LinearIssueView } from "@/components/LinearIssueView";
 import { VozView } from "@/components/VozView";
 import { MemoryView } from "@/components/views/MemoryView";
 import { CommandChips } from "@/components/CommandChips";
-import { Panel } from "@/components/ui/Panel";
 import { OWNER } from "@/lib/owner";
 
+// De madrugada no son "buenos días": a la 1:17 a. m. el saludo mentía.
 const SALUDO = () => {
   const h = new Date().getHours();
-  return h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches";
+  return h < 5 ? "Buenas noches" : h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches";
 };
+
+const FECHA = () =>
+  new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" });
+
+// El riel de contexto (agenda + proyectos) acompaña SOLO donde su contenido
+// cambia lo que haces: conversar y ejecutar sobre un proyecto, y elegir de qué
+// proyecto ver juntas. En Tareas, Memoria, Actividad y Voz le robaba 264px a
+// listas que ya traen su propio filtro — y en Tareas y Actividad ni se veía:
+// el contenido sin `min-w-0` lo empujaba fuera de la pantalla.
+const RAIL_TABS = new Set<CenterTab>(["consola", "claude", "reuniones"]);
 
 export function OrquestadorView() {
   const { projects, memories, online } = useHermesData();
@@ -52,7 +62,7 @@ export function OrquestadorView() {
   const [selectedIssue, setSelectedIssue] = useState<LinearBoardIssue | null>(null);
 
   // El hero vive en la consola vacía. Ya no depende de si hay llamada: la
-  // conversación pasa en la PresenceBar, así que "qué sigue" puede seguir
+  // conversación pasa en el VoiceDock, así que "qué sigue" puede seguir
   // visible mientras hablas — que es justo lo que quieres mirando.
   const hero = ws.tab === "consola" && consolaVacia;
 
@@ -80,55 +90,40 @@ export function OrquestadorView() {
       task: p.tareas_pendientes[0].replace(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g, "$1"),
     }));
 
+  const showRail = RAIL_TABS.has(ws.tab);
+
+  // Cada tab (Consola, Tareas, Reuniones…) abre con SU ViewHeader: ahí van sus
+  // controles (filtro de proyecto, nueva sesión, pestañas). Inicio no lleva —
+  // abre con el saludo, y una cabecera que dijera "Inicio" sería ruido.
   return (
     <>
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div className="flex min-h-0 flex-1 gap-6">
         {/* ── Centro ───────────────────────────────────────────── */}
-        <section className="relative flex min-h-0 flex-1 flex-col items-center">
-          {/* HERO: saludo + lo que sigue. Solo con la consola vacía.
-              Sin orbe: la presencia vive en la PresenceBar del pie. */}
+        {/* min-w-0: sin esto una fila larga (chips de proyectos, una línea
+            de log) fija el ancho mínimo y empuja todo fuera de la pantalla. */}
+        <section
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col items-center ${
+            hero ? "overflow-y-auto" : ""
+          }`}
+        >
+          {/* HERO: saludo. Solo con la consola vacía. Debajo va el composer
+              (lo primero que haces) y después "qué sigue" — el orden de
+              Claude/ChatGPT: saludo → pedir → sugerencias. */}
           {hero && (
-            <div className="w-full max-w-[680px] pt-[6vh]">
-              <h2 className="text-3xl font-light text-text">
+            <div className="w-full max-w-[680px] pt-[9vh]">
+              <p className="text-sm text-text-faint first-letter:uppercase" suppressHydrationWarning>
+                {FECHA()}
+              </p>
+              <h2 className="mt-1 text-2xl font-semibold text-text" suppressHydrationWarning>
                 {SALUDO()}
-                {OWNER ? (
-                  <>
-                    , <b className="font-semibold text-accent">{OWNER}</b>
-                  </>
-                ) : null}
+                {OWNER ? `, ${OWNER}` : ""}
               </h2>
               {/* Regla de oro: dato real o nada. Sale del vault. */}
               {activos > 0 && (
-                <p className="mt-2 text-sm text-text-faint">
+                <p className="mt-1.5 text-sm text-text-dim">
                   {activos} {activos === 1 ? "proyecto activo" : "proyectos activos"} · {pendientes}{" "}
                   {pendientes === 1 ? "tarea pendiente" : "tareas pendientes"} en el vault
                 </p>
-              )}
-
-              {/* Qué sigue: el trabajo real, a un clic de conversarlo. */}
-              {queSigue.length > 0 && (
-                <div className="mt-7 overflow-hidden rounded-md border border-line bg-panel">
-                  <h3 className="border-b border-line px-4 py-2.5 text-xs font-medium text-text-dim">
-                    Qué sigue
-                  </h3>
-                  <ul>
-                    {queSigue.map((t) => (
-                      <li key={t.slug} className="border-t border-line/60 first:border-t-0">
-                        <button
-                          type="button"
-                          onClick={() => ws.focusProject(t.slug)}
-                          title={`Conversar sobre ${t.project}`}
-                          className="group flex w-full cursor-pointer items-baseline gap-4 px-4 py-2.5 text-left"
-                        >
-                          <span className="min-w-0 flex-1 truncate text-sm text-text transition-colors group-hover:text-accent">
-                            {t.task}
-                          </span>
-                          <span className="shrink-0 text-xs text-text-faint">{t.project}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               )}
             </div>
           )}
@@ -139,12 +134,13 @@ export function OrquestadorView() {
             className={`flex w-full flex-col ${ws.tab === "consola" ? "" : "hidden"} ${
               // En hero el composer va PEGADO al saludo (sin flex-1 que lo
               // empuje al fondo); con hilo, ocupa toda la altura.
-              hero ? "mt-7 max-w-[680px]" : "min-h-0 flex-1 max-w-[760px]"
+              hero ? "mt-6 max-w-[680px]" : "min-h-0 flex-1 max-w-[760px] pt-5"
             }`}
           >
-            {/* La llamada NO se lee aquí: vive en la PresenceBar del pie, que
-                acompaña en todas las rutas. Escribir y hablar siguen siendo el
-                mismo canal, pero el centro se queda con el trabajo. */}
+            {/* La llamada NO se lee aquí: vive en el VoiceDock al pie de la
+                barra lateral, que acompaña en todas las rutas. Escribir y
+                hablar siguen siendo el mismo canal, pero el centro se queda
+                con el trabajo. */}
             <ChatPanel
               online={online}
               selectedProject={ws.selectedProject}
@@ -168,6 +164,34 @@ export function OrquestadorView() {
               </div>
             )}
           </div>
+
+          {/* Qué sigue: la PRÓXIMA tarea de cada proyecto, a un clic de
+              conversarla. */}
+          {hero && queSigue.length > 0 && (
+            <div className="mt-10 w-full max-w-[680px] pb-6">
+              <h3 className="mb-2 px-1 text-xs font-medium text-text-faint">Qué sigue</h3>
+              <ul className="overflow-hidden rounded-md border border-line bg-panel">
+                {queSigue.map((t) => (
+                  <li key={t.slug} className="border-t border-line first:border-t-0">
+                    <button
+                      type="button"
+                      onClick={() => ws.focusProject(t.slug)}
+                      title={`Conversar sobre ${t.project}`}
+                      className="group flex w-full cursor-pointer items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-hover"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm text-text">{t.task}</span>
+                      <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-2xs text-text-dim">
+                        {t.project}
+                      </span>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100">
+                        <path d="M5 12h14M13 6l6 6-6 6" />
+                      </svg>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Resto de tabs: montados y alternados con CSS para no perder
               scroll/streams al cambiar (misma regla que antes). */}
@@ -256,13 +280,16 @@ export function OrquestadorView() {
           </TabPanel>
         </section>
 
-        {/* ── Riel de contexto ─────────────────────────────────── */}
-        <aside
-          aria-label="Contexto"
-          className="hidden w-[264px] shrink-0 border-l border-line lg:flex lg:flex-col"
-        >
-          <ContextRail />
-        </aside>
+        {/* ── Riel de contexto: un panel lateral a sangre (toca el borde
+            derecho y el inferior del lienzo) ──────────────────────── */}
+        {showRail && (
+          <aside
+            aria-label="Contexto"
+            className="-mr-6 -mb-5 hidden w-[280px] shrink-0 border-l border-line lg:flex lg:flex-col"
+          >
+            <ContextRail />
+          </aside>
+        )}
       </div>
     </>
   );

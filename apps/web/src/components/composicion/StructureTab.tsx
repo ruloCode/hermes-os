@@ -62,7 +62,7 @@ export function StructureTab({ song }: { song: Song }) {
               style={{ flexGrow: s.bars, flexBasis: 0 }}
               title={k.hint}
             >
-              <span className="truncate text-2xs tracking-label text-text uppercase">{s.label}</span>
+              <span className="truncate text-2xs text-text">{s.label}</span>
               <span className="font-mono text-2xs text-text-dim">{s.bars} comp · {lines} versos</span>
               <span className="truncate font-mono text-2xs text-text-faint">{s.chords.map(show).join(" ") || "—"}</span>
             </div>
@@ -80,7 +80,7 @@ export function StructureTab({ song }: { song: Song }) {
               <select
                 value={s.kind}
                 onChange={(e) => patchSection(song.id, s.id, { kind: e.target.value as SectionKind })}
-                className="rounded-sm border border-line bg-panel-2 px-1 py-0.5 text-2xs text-text-dim uppercase focus:outline-none"
+                className="rounded-sm border border-line bg-panel-2 px-1 py-0.5 text-2xs text-text-dim focus:outline-none"
               >
                 {(Object.keys(SECTION_KINDS) as SectionKind[]).map((kk) => (
                   <option key={kk} value={kk}>{SECTION_KINDS[kk].label}</option>
@@ -101,7 +101,7 @@ export function StructureTab({ song }: { song: Song }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        <span className="mr-1 text-2xs tracking-label text-text-dim uppercase">agregar</span>
+        <span className="mr-1 text-2xs text-text-dim">agregar</span>
         {(Object.keys(SECTION_KINDS) as SectionKind[]).map((kk) => (
           <button key={kk} onClick={() => addSection(song.id, kk)} className={btnCls}>+ {SECTION_KINDS[kk].label}</button>
         ))}

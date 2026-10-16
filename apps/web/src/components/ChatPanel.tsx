@@ -15,6 +15,7 @@ import { useSpeechDictation } from "@/hooks/useSpeechDictation";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
 import { useWorkspace } from "@/state/WorkspaceContext";
 import { ClaudeExecBar, claudeModelLabel } from "./ClaudeExecBar";
+import { HermesMark } from "./shell/HermesMark";
 import { AgentSteps } from "./AgentSteps";
 import { PanelState } from "@/components/ui/PanelState";
 
@@ -79,7 +80,7 @@ function TurnAction({ children, onClick }: { children: string; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="cursor-pointer rounded-sm px-2 py-1 text-2xs text-text-faint transition-colors hover:bg-accent/8 hover:text-accent"
+      className="cursor-pointer rounded-xs px-2 py-1 text-2xs text-text-faint transition-colors hover:bg-hover hover:text-text"
     >
       {children}
     </button>
@@ -442,8 +443,8 @@ export function ChatPanel({
           aria-label="Historial de conversaciones"
           aria-expanded={histOpen}
           onClick={() => void toggleHist()}
-          className={`grid h-6 w-6 shrink-0 place-items-center rounded-sm transition-colors ${
-            histOpen ? "text-accent" : "text-text-dim"
+          className={`grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-xs transition-colors hover:bg-hover ${
+            histOpen ? "bg-selected text-text" : "text-text-faint hover:text-text"
           }`}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -465,17 +466,13 @@ export function ChatPanel({
                 key={t.key}
                 onClick={() => setState((s) => ({ ...s, active: t.key }))}
                 title={t.title || "Conversación nueva"}
-                className={`group flex max-w-[160px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-sm border px-2 py-1 text-2xs leading-none transition-colors ${
+                className={`group flex h-7 max-w-[180px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-xs px-2 text-xs transition-colors ${
                   isActive
-                    ? "border-accent bg-accent/10 text-text"
-                    : "border-line bg-transparent text-text-dim"
+                    ? "bg-selected font-medium text-text"
+                    : "text-text-dim hover:bg-hover hover:text-text"
                 }`}
               >
-                {t.busy && (
-                  <span className="pulse-dot shrink-0 text-amber">
-                    ●
-                  </span>
-                )}
+                {t.busy && <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />}
                 <span className="truncate">{t.title || "nueva"}</span>
                 <button
                   type="button"
@@ -497,7 +494,7 @@ export function ChatPanel({
             title="Nueva conversación"
             aria-label="Nueva conversación"
             onClick={addTab}
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-dashed border-line text-text-dim transition-colors hover:opacity-100"
+            className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
           >
             +
           </button>
@@ -507,8 +504,8 @@ export function ChatPanel({
         {histOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setHistOpen(false)} />
-            <div className="absolute top-8 left-0 z-20 max-h-80 w-[26rem] max-w-full overflow-y-auto rounded-sm border border-line-2 bg-panel-2 p-1 backdrop-blur-md">
-              <p className="px-2 pt-1 pb-1.5 text-2xs tracking-label text-text-dim uppercase">
+            <div className="absolute top-9 left-0 z-20 max-h-80 w-[26rem] max-w-full overflow-y-auto rounded-md border border-line bg-panel p-1 shadow-[var(--shadow-pop)]">
+              <p className="px-2 pt-1.5 pb-1.5 text-2xs font-medium text-text-faint">
                 Sesiones de {selectedProject ? (projectName ?? selectedProject) : "Hermes (vault)"} · ~/.claude
               </p>
               {histError ? (
@@ -524,12 +521,12 @@ export function ChatPanel({
                     type="button"
                     onClick={() => void openSession(s.id)}
                     title={s.title}
-                    className="flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent/10"
+                    className="flex w-full cursor-pointer items-baseline gap-2 rounded-xs px-2 py-1.5 text-left transition-colors hover:bg-hover"
                   >
-                    <span className="min-w-0 flex-1 truncate text-xs text-text">
+                    <span className="min-w-0 flex-1 truncate text-sm text-text">
                       {s.title}
                     </span>
-                    <span className="shrink-0 text-2xs text-text-dim tabular-nums">
+                    <span className="shrink-0 text-2xs text-text-faint tabular-nums">
                       {timeAgo(s.updatedAt)} · {s.messages} msg
                     </span>
                   </button>
@@ -559,17 +556,20 @@ export function ChatPanel({
         {/* Con hero (home vacío) el saludo ya dice todo esto: repetirlo aquí
             era ruido duplicado. */}
         {active.messages.length === 0 && !hideEmptyHint && (
-          <p className="pt-6 text-center text-xs leading-relaxed tracking-label text-text-dim">
-            {online
-              ? selectedProject
-                ? `CONVERSACIÓN NUEVA SOBRE ${(projectName ?? selectedProject).toUpperCase()}`
-                : "CONSOLA DIRECTA AL AGENTE — escribe una orden"
-              : "AGENTE OFFLINE — corre `pnpm dev:agent`"}
-            <br />
-            <span className="text-2xs tracking-[0.15em] opacity-70">
-              Enter envía · Shift+Enter salto de línea · ⟲ abre el historial del repo
-            </span>
-          </p>
+          <div className="pt-10 text-center">
+            <p className="text-sm font-medium text-text">
+              {online
+                ? selectedProject
+                  ? `Conversación nueva sobre ${projectName ?? selectedProject}`
+                  : "Conversación nueva con Hermes"
+                : "El agente está desconectado"}
+            </p>
+            <p className="mt-1 text-xs text-text-faint">
+              {online
+                ? "Enter envía · Shift+Enter salto de línea · el reloj abre el historial del repo"
+                : "Arráncalo con `pnpm dev:agent` (o revisa el servicio de launchd)."}
+            </p>
+          </div>
         )}
         {/* Asimetría deliberada (patrón ChatGPT · Claude · Copilot): el turno
             del USUARIO es un objeto discreto (píldora a la derecha); el del
@@ -582,7 +582,7 @@ export function ChatPanel({
           if (m.role === "user") {
             return (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[78%] rounded-lg border border-line bg-accent/10 px-3.5 py-2.5 text-base leading-relaxed whitespace-pre-wrap">
+                <div className="max-w-[78%] rounded-lg bg-panel-2 px-3.5 py-2.5 text-base leading-relaxed whitespace-pre-wrap text-text">
                   {m.content}
                 </div>
               </div>
@@ -592,13 +592,14 @@ export function ChatPanel({
           const ultimo = i === active.messages.length - 1;
           return (
             <div key={i} className="flex flex-col gap-2.5">
-              <span className="text-2xs tracking-title text-text-faint uppercase">
-                <b className="font-normal text-accent">Hermes</b>
+              <span className="flex items-center gap-2 text-xs font-medium text-text-dim">
+                <HermesMark size={18} />
+                Hermes
               </span>
               {/* Pasos del turno ANTES del texto: el trabajo se ve mientras
                   ocurre y la respuesta aterriza debajo (patrón Replit). */}
               {steps.length > 0 && <AgentSteps steps={steps} busy={streaming} />}
-              <div className="text-base leading-loose whitespace-pre-wrap text-text-dim">
+              <div className="text-base leading-relaxed whitespace-pre-wrap text-text">
                 {m.content ||
                   // "pensando…" solo hasta el primer paso: a partir de ahí los
                   // pasos ya cuentan qué está haciendo.
@@ -641,13 +642,16 @@ export function ChatPanel({
 
       {/* Chip de foco de proyecto */}
       {selectedProject && (
-        <div className="mt-2 flex items-center gap-2 self-start rounded-sm border border-cyan bg-cyan/5 px-2 py-1 text-2xs tracking-label text-cyan uppercase">
-          <span className="glow-text-cyan">◈</span>
-          <span>Hablando de {projectName ?? selectedProject}</span>
+        <div className="mt-2 flex h-7 items-center gap-2 self-start rounded-full border border-line bg-panel pr-1 pl-2.5 text-xs text-text-dim">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          <span>
+            Hablando de <b className="font-medium text-text">{projectName ?? selectedProject}</b>
+          </span>
           <button
             type="button"
             title="Quitar foco de proyecto"
-            className="opacity-60 hover:opacity-100"
+            aria-label="Quitar foco de proyecto"
+            className="grid h-5 w-5 cursor-pointer place-items-center rounded-full text-text-faint transition-colors hover:bg-hover hover:text-text"
             onClick={onClearProject}
           >
             ✕
@@ -655,33 +659,22 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Selector de ejecución de Claude Code (modelo · esfuerzo · permisos) */}
-      <ClaudeExecBar
-        config={claudeConfig}
-        onChange={onClaudeConfigChange}
-        onRun={(mode) => void runClaude(mode)}
-        disabled={active.busy || claudeBusy}
-      />
-      {claudeNote && (
-        <p className="mt-1 text-2xs tracking-[0.1em] text-text-dim">
-          {claudeNote}
-        </p>
-      )}
+      {claudeNote && <p className="mt-2 text-xs text-text-dim">{claudeNote}</p>}
 
       {/* Input: textarea auto-crecible · Enter envía · mic · enviar */}
       {/* Composer como CAJA, no como línea con borde superior: es el objeto
           más importante de la vista, así que se lee como objeto. El anillo de
           foco vive aquí (focus-within), no en el textarea. */}
+      {/* v5: UNA caja (patrón Claude/ChatGPT/Cursor) — el texto arriba y la
+          barra de herramientas abajo, dentro. Antes la config de Claude Code
+          era otra caja encima del composer y competía con él. */}
       <form
-        className="hud-field mt-3 flex items-end gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-[var(--shadow-pop)] transition-colors focus-within:border-line-2"
+        className="hud-field mt-3 flex flex-col gap-2 rounded-lg border border-line-2 bg-panel px-3.5 pt-3 pb-2 shadow-[var(--shadow-card)] transition-colors focus-within:border-text-faint/60"
         onSubmit={(e) => {
           e.preventDefault();
           void send(active.key);
         }}
       >
-        <span className="pb-1 text-accent">
-          {active.busy ? "◌" : "›"}
-        </span>
         <textarea
           ref={inputRef}
           value={active.draft}
@@ -703,12 +696,22 @@ export function ChatPanel({
               : listening
                 ? "Escuchando… habla ahora"
                 : selectedProject
-                  ? `pregunta sobre ${projectName ?? selectedProject}…`
-                  : "ordena algo…"
+                  ? `Pregunta sobre ${projectName ?? selectedProject}…`
+                  : "Pídele algo a Hermes…"
           }
-          className="max-h-[120px] flex-1 resize-none bg-transparent text-base leading-snug outline-none placeholder:opacity-40"
+          className="max-h-[160px] min-h-[24px] w-full resize-none bg-transparent px-0.5 text-base leading-relaxed text-text outline-none placeholder:text-text-faint"
           disabled={active.busy}
         />
+
+        <div className="flex items-center gap-1">
+          {/* Selector de ejecución de Claude Code (modelo · esfuerzo · permisos) */}
+          <ClaudeExecBar
+            config={claudeConfig}
+            onChange={onClaudeConfigChange}
+            onRun={(mode) => void runClaude(mode)}
+            disabled={active.busy || claudeBusy}
+          />
+          <span className="flex-1" />
 
         {/* Llamada de voz con Hermes (entrada canónica; conectada = ir a Voz) */}
         {voice.configured && (
@@ -727,15 +730,15 @@ export function ChatPanel({
               if (voice.connected) void voice.disconnect();
               else if (!voice.connecting) void voice.connect();
             }}
-            className={`grid h-6 w-6 shrink-0 place-items-center rounded-full transition-colors ${
+            className={`grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full transition-colors ${
               voice.connected
                 ? "bg-green/10 text-green"
                 : voice.connecting
                   ? "animate-pulse text-amber"
-                  : "text-accent"
+                  : "text-text-dim hover:bg-hover hover:text-text"
             }`}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
               <path
                 d="M4 13a8 8 0 0 1 16 0M4 13v4a2 2 0 0 0 2 2h1v-6H6a2 2 0 0 0-2 2Zm16 0v4a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2Z"
                 stroke="currentColor"
@@ -762,14 +765,14 @@ export function ChatPanel({
             aria-pressed={listening}
             onClick={toggleMic}
             disabled={active.busy}
-            className={`relative grid h-6 w-6 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-40 ${
-              listening ? "bg-red/10 text-red" : "bg-transparent text-text-dim"
+            className={`relative grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:opacity-40 ${
+              listening ? "bg-red/10 text-red" : "text-text-dim hover:bg-hover hover:text-text"
             }`}
           >
             {listening && (
               <span className="absolute inset-0 animate-ping rounded-full bg-red/35" />
             )}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="relative">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="relative">
               <path
                 d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Z"
                 stroke="currentColor"
@@ -793,11 +796,11 @@ export function ChatPanel({
           title="Enviar (Enter)"
           aria-label="Enviar"
           disabled={active.busy || !active.draft.trim()}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-accent bg-accent/5 text-accent transition-opacity disabled:opacity-30"
+          className="ml-0.5 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-accent-solid text-on-accent transition-colors disabled:cursor-default disabled:bg-selected disabled:text-text-faint"
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
             <path
-              d="M4 12h14M13 6l6 6-6 6"
+              d="M12 19V5M6 11l6-6 6 6"
               stroke="currentColor"
               strokeWidth="1.8"
               strokeLinecap="round"
@@ -805,6 +808,7 @@ export function ChatPanel({
             />
           </svg>
         </button>
+        </div>
       </form>
     </div>
   );

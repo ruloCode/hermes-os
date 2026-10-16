@@ -27,34 +27,38 @@ export function VoicePanel() {
   }, [transcript.length]);
 
   const statusText = !configured
-    ? "N/A"
+    ? "No disponible"
     : connected
       ? action
         ? "Ejecutando"
         : isSpeaking
-          ? "HABLANDO"
-          : "ESCUCHANDO"
+          ? "Hablando"
+          : "Escuchando"
       : connecting
-        ? "CONECTANDO"
-        : "OFF";
-  const statusClass = !configured
-    ? "text-text-dim"
+        ? "Conectando"
+        : "Apagada";
+  // El color va en el punto; el texto queda gris.
+  const statusDot = !configured
+    ? "bg-text-faint"
     : connected
       ? action
-        ? "text-cyan"
+        ? "bg-cyan"
         : isSpeaking
-          ? "text-accent-hot"
-          : "text-green"
+          ? "bg-accent"
+          : "bg-green"
       : connecting
-        ? "text-amber"
-        : "text-text-dim";
+        ? "bg-amber"
+        : "bg-text-faint";
 
   return (
     <Panel
       title="Voz"
       delay={150}
       right={
-        <span className={`text-2xs tracking-label uppercase ${statusClass}`}>{statusText}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-text-dim">
+          <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+          {statusText}
+        </span>
       }
     >
       <div className="flex flex-col gap-2.5">
@@ -62,7 +66,12 @@ export function VoicePanel() {
         <VoiceWaveform height={44} idleMessage />
 
         {/* Acción de voz en curso */}
-        {action && <div className="text-2xs text-cyan">⚙ {action}…</div>}
+        {action && (
+          <div className="flex items-center gap-2 text-xs text-text-dim">
+            <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan" />
+            {action}…
+          </div>
+        )}
 
         {/* Transcripción en vivo */}
         <div
@@ -70,7 +79,7 @@ export function VoicePanel() {
           className="max-h-24 min-h-[28px] space-y-1 overflow-y-auto pr-1 text-xs leading-snug"
         >
           {error ? (
-            <span className="text-red">⚠ {error}</span>
+            <span className="text-text">{error}</span>
           ) : !configured ? (
             <span className="text-text-dim">
               Voz no configurada — agrega <code className="text-2xs">ELEVENLABS_API_KEY</code> y
@@ -79,16 +88,16 @@ export function VoicePanel() {
           ) : transcript.length ? (
             transcript.map((l, i) => (
               <div key={i} className="flex gap-1.5">
-                <b className={`shrink-0 ${l.who === "TÚ" ? "text-cyan" : "text-accent"}`}>
-                  {l.who}
-                </b>
+                <span className="shrink-0 font-medium text-text-dim">
+                  {l.who === "TÚ" ? "Tú" : l.who.charAt(0) + l.who.slice(1).toLowerCase()}
+                </span>
                 <span className="text-text">{l.text}</span>
               </div>
             ))
           ) : connected ? (
             <span className="cursor-blink text-text-dim">Hermes te escucha</span>
           ) : connecting ? (
-            <span className="text-amber">Conectando la llamada…</span>
+            <span className="text-text-dim">Conectando la llamada…</span>
           ) : (
             <span className="text-text-dim">
               Hablar con Hermes vive en la consola (botón de audífonos) o en ⌘K.
@@ -98,7 +107,11 @@ export function VoicePanel() {
 
         {/* Solo colgar: iniciar vive en el composer de la consola / ⌘K */}
         {connected && (
-          <button className="cmd-btn justify-center" onClick={() => disconnect()}>
+          <button
+            type="button"
+            className="inline-flex h-7 cursor-pointer items-center justify-center rounded-sm border border-red/30 text-xs font-medium text-red transition-colors hover:bg-red/10"
+            onClick={() => disconnect()}
+          >
             Terminar llamada
           </button>
         )}

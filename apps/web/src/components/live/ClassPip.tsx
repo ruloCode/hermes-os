@@ -155,12 +155,16 @@ function ClassPipContent() {
   return (
     <div className="flex h-screen flex-col gap-2 bg-bg p-2.5 text-text">
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <span className="text-2xs text-accent pulse-dot">
-          ● Clase {live.startedAt ? fmtLiveClock(Date.now() - live.startedAt) : ""}
+        <span className="flex items-center gap-1.5 text-xs text-text-dim">
+          <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-green" />
+          Clase{" "}
+          <span className="font-mono tabular-nums">
+            {live.startedAt ? fmtLiveClock(Date.now() - live.startedAt) : ""}
+          </span>
         </span>
         {cls && (
           <span
-            className={`text-2xs tabular-nums ${cls.selfShare < 0.4 ? "text-amber" : "text-green"}`}
+            className={`text-xs tabular-nums ${cls.selfShare < 0.4 ? "text-amber" : "text-green"}`}
           >
             hablas {Math.round(cls.selfShare * 100)} % · {cls.corrections} correcciones
           </span>
@@ -169,13 +173,16 @@ function ClassPipContent() {
 
       {!live.selfSpeaker && live.speakerOrder.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <span className="text-2xs text-amber">¿Cuál eres tú?</span>
+          <span className="flex items-center gap-1.5 text-xs font-medium text-text">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber" />
+            ¿Cuál eres tú?
+          </span>
           {live.speakerOrder.slice(0, 3).map((label, i) => (
             <button
               key={label}
               type="button"
               onClick={() => live.markSelf(label)}
-              className="rounded-sm border border-line px-2 py-0.5 text-2xs text-text hover:border-line-2"
+              className="h-6 cursor-pointer rounded-xs border border-line bg-panel px-2 text-xs text-text hover:border-line-2 hover:bg-hover"
             >
               Voz {i + 1}
             </button>
@@ -185,18 +192,19 @@ function ClassPipContent() {
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {streaming ? (
-          <div className="rounded-sm border border-cyan/60 border-l-2 border-l-cyan bg-cyan/5 p-2">
-            <p className="text-2xs text-cyan pulse-dot">
+          <div className="rounded-md border border-cyan/40 bg-cyan/5 px-2.5 py-2">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-text-dim">
+                  <span aria-hidden className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
               {HELP_LABEL[streaming.kind] ?? "Ayuda"}
             </p>
             <p className="mt-0.5 text-base leading-snug whitespace-pre-line">
               {streaming.text || "pensando…"}
-              <span className="text-cyan">▌</span>
+              <span className="text-text-faint">▍</span>
             </p>
           </div>
         ) : lastHelp ? (
-          <div className="rounded-sm border border-line border-l-2 border-l-green p-2">
-            <p className="text-2xs text-green">{HELP_LABEL[lastHelp.kind] ?? "Ayuda"}</p>
+          <div className="rounded-md border border-line bg-panel px-2.5 py-2">
+            <p className="text-xs font-medium text-text-dim">{HELP_LABEL[lastHelp.kind] ?? "Ayuda"}</p>
             <p className="mt-0.5 text-base leading-snug whitespace-pre-line">{lastHelp.text}</p>
           </div>
         ) : null}
@@ -204,16 +212,16 @@ function ClassPipContent() {
         {corrections.map((c) => {
           const [said, better] = c.text.split(" → ");
           return (
-            <div key={c.id} className="rounded-sm border border-line border-l-2 border-l-amber p-2">
+            <div key={c.id} className="rounded-md border border-line bg-panel px-2.5 py-2">
               <p className="text-xs leading-snug text-text-dim line-through">{said}</p>
               <p className="text-sm leading-snug">{better ?? c.text}</p>
-              {c.why && <p className="mt-0.5 text-2xs leading-snug text-text-dim">{c.why}</p>}
+              {c.why && <p className="mt-0.5 text-xs leading-snug text-text-faint">{c.why}</p>}
             </div>
           );
         })}
 
         {!streaming && !lastHelp && corrections.length === 0 && (
-          <p className="text-2xs leading-snug text-text-dim">
+          <p className="text-xs leading-snug text-text-faint">
             {live.selfSpeaker
               ? "Habla tranquilo: te ayudo cuando la profe pregunte y corrijo cuando termines."
               : "Marca cuál voz es la tuya para recibir correcciones."}
@@ -231,7 +239,7 @@ function ClassPipContent() {
             type="button"
             onClick={() => live.suggestNow(h.intent)}
             disabled={!live.wsConnected || !live.fastCopilot}
-            className="rounded-sm border border-accent/50 bg-accent/5 px-1.5 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
+            className="h-8 cursor-pointer rounded-sm border border-line bg-panel px-1.5 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {h.label}
           </button>
@@ -282,10 +290,14 @@ function MeetingPipContent() {
   return (
     <div className="flex h-screen flex-col gap-2 bg-bg p-2.5 text-text">
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <span className="text-2xs text-accent pulse-dot">
-          ● {live.isTeam ? "Reunión" : "Junta"} {live.startedAt ? fmtLiveClock(nowMs) : ""}
+        <span className="flex items-center gap-1.5 text-xs text-text-dim">
+          <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-green" />
+          {live.isTeam ? "Reunión" : "Junta"}{" "}
+          <span className="font-mono tabular-nums">
+            {live.startedAt ? fmtLiveClock(nowMs) : ""}
+          </span>
         </span>
-        <span className="text-2xs text-text-dim tabular-nums">
+        <span className="text-xs text-text-dim tabular-nums">
           {windows.length > 0 &&
             `${windows.length} ventana${windows.length === 1 ? "" : "s"}${live.selfSpeaker ? ` · hablaste en ${spoke}` : ""}`}
           {share !== null && `${windows.length ? " · " : ""}hablas ${share} %`}
@@ -294,13 +306,16 @@ function MeetingPipContent() {
 
       {!live.selfSpeaker && live.speakerOrder.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <span className="text-2xs text-amber">¿Cuál eres tú?</span>
+          <span className="flex items-center gap-1.5 text-xs font-medium text-text">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber" />
+            ¿Cuál eres tú?
+          </span>
           {live.speakerOrder.slice(0, 4).map((label, i) => (
             <button
               key={label}
               type="button"
               onClick={() => live.markSelf(label)}
-              className="rounded-sm border border-line px-2 py-0.5 text-2xs text-text hover:border-line-2"
+              className="h-6 cursor-pointer rounded-xs border border-line bg-panel px-2 text-xs text-text hover:border-line-2 hover:bg-hover"
             >
               Voz {i + 1}
             </button>
@@ -313,25 +328,26 @@ function MeetingPipContent() {
           (() => {
             const { angle, body } = splitStreamingAngle(streaming.kind, streaming.text);
             return (
-              <div className="rounded-sm border border-cyan/60 border-l-2 border-l-cyan bg-cyan/5 p-2">
-                <p className="text-2xs text-cyan pulse-dot">
+              <div className="rounded-md border border-cyan/40 bg-cyan/5 px-2.5 py-2">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-text-dim">
+                  <span aria-hidden className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
                   {MAIN_LABEL[streaming.kind] ?? "Ayuda"}
                   {angle ? ` · ${angle}` : ""} · {streaming.trigger}
                 </p>
                 <p className="mt-0.5 text-base leading-snug whitespace-pre-line">
                   {body || "pensando…"}
-                  <span className="text-cyan">▌</span>
+                  <span className="text-text-faint">▍</span>
                 </p>
               </div>
             );
           })()
         ) : main ? (
           <div
-            className={`rounded-sm border border-line border-l-2 border-l-green p-2 ${
+            className={`rounded-md border border-line bg-panel px-2.5 py-2 ${
               nowMs - main.atMs > STALE_MS ? "opacity-50" : ""
             }`}
           >
-            <p className="text-2xs text-green">
+            <p className="text-xs text-text-dim">
               {MAIN_LABEL[main.kind] ?? "Ayuda"}
               {main.angle ? ` · ${main.angle}` : ""} · {main.why} · hace{" "}
               {Math.max(0, Math.round((nowMs - main.atMs) / 1000))} s
@@ -343,7 +359,7 @@ function MeetingPipContent() {
         {concepts.map((c) => {
           const [term, ...rest] = c.text.split(" — ");
           return (
-            <div key={c.id} className="rounded-sm border border-line border-l-2 border-l-blue p-2">
+            <div key={c.id} className="rounded-md border border-line bg-panel px-2.5 py-2">
               <p className="text-xs leading-snug">
                 <span className="font-semibold">{term}</span>
                 {rest.length > 0 && <span className="text-text-dim"> — {rest.join(" — ")}</span>}
@@ -353,7 +369,7 @@ function MeetingPipContent() {
         })}
 
         {!streaming && !main && concepts.length === 0 && (
-          <p className="text-2xs leading-snug text-text-dim">
+          <p className="text-xs leading-snug text-text-faint">
             {live.isTeam
               ? "Escucho la reunión: te aviso cuando se abra una ventana para aportar y te explico lo nuevo."
               : "Escucho la junta: te sopla la respuesta cuando te pregunten."}
@@ -370,7 +386,7 @@ function MeetingPipContent() {
               onClick={() => live.suggestNow(h.intent)}
               disabled={!live.wsConnected || !live.fastCopilot}
               title={h.title}
-              className="rounded-sm border border-accent/50 bg-accent/5 px-1.5 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
+              className="h-8 cursor-pointer rounded-sm border border-line bg-panel px-1.5 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {h.label}
             </button>
@@ -381,7 +397,7 @@ function MeetingPipContent() {
           type="button"
           onClick={() => live.suggestNow()}
           disabled={!live.wsConnected || !!streaming}
-          className="shrink-0 rounded-sm border border-accent/50 bg-accent/5 px-1.5 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
+          className="h-8 shrink-0 cursor-pointer rounded-sm border border-line bg-panel px-1.5 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           Soplar ahora
         </button>

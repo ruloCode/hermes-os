@@ -40,7 +40,7 @@ export function ThemeToggle() {
       onClick={cycle}
       title={`Apariencia: ${LABEL[pref]} · clic → ${LABEL[next]}`}
       aria-label={`Apariencia: ${LABEL[pref]}`}
-      className="grid h-8 w-8 cursor-pointer place-items-center rounded-sm text-text-dim transition-colors hover:bg-panel-2 hover:text-text"
+      className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-xs text-text-faint transition-colors hover:bg-hover hover:text-text"
     >
       <Icon pref={pref} resolved={resolved} />
     </button>

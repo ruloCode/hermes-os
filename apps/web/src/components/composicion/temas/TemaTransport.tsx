@@ -185,7 +185,7 @@ export function TemaTransport() {
           aria-label={playing ? "Detener (Espacio)" : "Tocar el loop de la sección (Espacio)"}
           title={playing ? "Detener · Espacio" : "Tocar el loop · Espacio"}
           className={`grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full border transition-colors ${
-            playing ? "border-accent bg-accent text-white" : "border-line-2 text-text hover:border-accent hover:text-accent"
+            playing ? "border-accent bg-accent-solid text-on-accent" : "border-line-2 text-text hover:border-accent hover:text-accent"
           }`}
         >
           {playing ? (

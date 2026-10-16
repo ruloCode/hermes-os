@@ -330,7 +330,7 @@ export const OficinaScene = forwardRef<OficinaSceneHandle, Props>(function Ofici
         {/* Nombre del dueño sobre su cabeza. */}
         <div
           ref={headRef}
-          className="absolute top-0 left-0 rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-white opacity-0 shadow-md"
+          className="absolute top-0 left-0 rounded-full bg-accent-solid px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-on-accent opacity-0 shadow-md"
           style={{ willChange: "transform" }}
         >
           {ownerName || "Tú"}

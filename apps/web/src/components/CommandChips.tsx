@@ -1,8 +1,11 @@
 "use client";
 
 // Fila de slash-commands bajo el input de la consola (referencia). Cada chip
-// ejecuta una capacidad real del registry; los que requieren proyecto se
-// deshabilitan con tooltip.
+// ejecuta una capacidad real del registry.
+//
+// v5: los que requieren proyecto NO se muestran hasta que hay uno enfocado.
+// Antes salían al 40% de opacidad con un tooltip — se leían como rotos, y la
+// mitad de la fila era ruido justo en la primera pantalla.
 
 import { SlashChip } from "./ui/SlashChip";
 import { CHIP_IDS, COMMANDS, useCommandContext } from "@/lib/commands";
@@ -15,20 +18,16 @@ export function CommandChips() {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" aria-label="Comandos rápidos">
-      {chips.map((cmd) => {
-        const disabled = Boolean(cmd.requiresProject && !ctx.selectedProject);
-        return (
+      {chips
+        .filter((cmd) => !(cmd.requiresProject && !ctx.selectedProject))
+        .map((cmd) => (
           <SlashChip
             key={cmd.id}
             command={cmd.slash!}
-            description={
-              disabled ? `${cmd.hint ?? cmd.label} — enfoca un proyecto primero` : cmd.hint
-            }
-            disabled={disabled}
+            description={cmd.hint}
             onClick={() => void cmd.run(ctx)}
           />
-        );
-      })}
+        ))}
     </div>
   );
 }

@@ -5,21 +5,23 @@ import { toneVar, type Tone } from "./tones";
 // Mapa estado → tono semántico + label por defecto. El label siempre se
 // muestra (el default se puede sobreescribir con la prop `label`).
 const STATUS: Record<
-  "active" | "paused" | "ok" | "warn" | "error" | "idle" | "offline",
+  "active" | "running" | "paused" | "ok" | "warn" | "error" | "idle" | "offline",
   { tone: Tone; labelDefault: string }
 > = {
-  active: { tone: "green", labelDefault: "ACTIVO" },
-  paused: { tone: "amber", labelDefault: "PAUSA" },
+  active: { tone: "green", labelDefault: "Activo" },
+  running: { tone: "cyan", labelDefault: "En curso" },
+  paused: { tone: "amber", labelDefault: "En pausa" },
   ok: { tone: "green", labelDefault: "OK" },
-  warn: { tone: "amber", labelDefault: "ATENCIÓN" },
-  error: { tone: "red", labelDefault: "ERROR" },
-  idle: { tone: "neutral", labelDefault: "IDLE" },
-  offline: { tone: "red", labelDefault: "OFFLINE" },
+  warn: { tone: "amber", labelDefault: "Atención" },
+  error: { tone: "red", labelDefault: "Error" },
+  idle: { tone: "neutral", labelDefault: "Inactivo" },
+  offline: { tone: "red", labelDefault: "Sin conexión" },
 };
 
 /**
- * StatusPill — dot con glow + label de estado. `pulse` anima el dot
- * (clase .pulse-dot); `size` ajusta dot y separación.
+ * StatusPill — punto de color + etiqueta. El COLOR va en el punto; el texto
+ * queda en gris legible (v5): una columna de estados en verde/ámbar/rojo
+ * puro se leía como semáforo, no como lista.
  */
 export function StatusPill({
   status,
@@ -51,12 +53,7 @@ export function StatusPill({
           background: color,
         }}
       />
-      <span
-        className="text-2xs tracking-label uppercase"
-        style={{ color }}
-      >
-        {text}
-      </span>
+      <span className="text-xs text-text-dim">{text}</span>
     </span>
   );
 }

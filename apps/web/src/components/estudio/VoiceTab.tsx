@@ -219,7 +219,7 @@ export function VoiceTab({ piece }: { piece: ContentPiece }) {
     <div className="flex flex-col gap-2">
       {/* Cabecera: estado real + fuentes y preferencias de la sesión. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-2xs tracking-label text-text-dim uppercase">
+        <span className="text-2xs text-text-dim">
           Voz en off · {doneCount}/{rows.length} bloques
           {totalSec > 0 && (
             <span className="ml-1.5 text-text-faint normal-case tabular-nums">
@@ -554,7 +554,7 @@ function TakeList({
     );
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-2xs tracking-label text-text-faint uppercase">
+      <span className="text-2xs text-text-faint">
         Tomas · {takes.length}
       </span>
       {takes.map((f, i) => (
@@ -645,7 +645,7 @@ function TakeRow({
         {fmtSeconds(file.duration_sec)} · {fmtBytes(file.size_bytes)}
       </span>
       {active ? (
-        <span className="shrink-0 text-2xs tracking-label text-accent uppercase">manda</span>
+        <span className="shrink-0 text-2xs text-accent">manda</span>
       ) : (
         <button
           onClick={onPromote}

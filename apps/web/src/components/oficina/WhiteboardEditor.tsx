@@ -125,7 +125,7 @@ export function WhiteboardEditor({
             type="button"
             aria-pressed={eraser}
             onClick={() => setEraser((v) => !v)}
-            className={`rounded-lg px-2.5 py-1.5 text-sm ${eraser ? "bg-accent text-white" : "text-text-dim hover:bg-panel-2 hover:text-text"}`}
+            className={`rounded-lg px-2.5 py-1.5 text-sm ${eraser ? "bg-accent-solid text-on-accent" : "text-text-dim hover:bg-panel-2 hover:text-text"}`}
           >
             Borrador
           </button>
@@ -140,7 +140,7 @@ export function WhiteboardEditor({
               onSave(empty ? null : (canvasRef.current?.toDataURL("image/png") ?? null));
               setDirty(false);
             }}
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-lg bg-accent-solid px-3 py-1.5 text-sm font-medium text-on-accent disabled:opacity-50"
           >
             {saving ? "Guardando…" : "Guardar"}
           </button>

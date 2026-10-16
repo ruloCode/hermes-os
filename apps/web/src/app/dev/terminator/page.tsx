@@ -220,7 +220,7 @@ export default function TerminatorDemo() {
           <button
             type="button"
             onClick={() => void capture()}
-            className="cursor-pointer rounded-sm bg-accent px-6 py-2.5 text-sm font-medium text-bg transition-opacity hover:opacity-90"
+            className="cursor-pointer rounded-sm bg-accent-solid px-6 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
           >
             Capturar
             <kbd className="ml-2 rounded-xs border border-bg/30 px-1 font-sans text-2xs">espacio</kbd>

@@ -86,14 +86,14 @@ export function PlatformCard({
 
       <div className="flex w-full items-center gap-1">
         <span
-          className={`rounded-xs px-1 py-px text-[9px] tracking-label uppercase ${
+          className={`rounded-xs px-1 py-px text-[9px] ${
             auto ? "bg-green/15 text-green" : "bg-panel-2 text-text-faint"
           }`}
         >
           {auto ? "automática" : "la subes tú"}
         </span>
         {active && pill && (
-          <span className={`text-[9px] tracking-label uppercase ${TONE_TEXT[pill.tone]}`}>
+          <span className={`text-[9px] ${TONE_TEXT[pill.tone]}`}>
             {pill.label}
           </span>
         )}

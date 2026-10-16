@@ -855,7 +855,7 @@ export function RecordStage({
               disabled={phase === "saving"}
               aria-label={phase === "recording" ? "Parar y guardar (R)" : phase === "idle" ? "Grabar (R)" : "Cancelar la cuenta (Esc)"}
               title={phase === "recording" ? "Parar y guardar (R)" : "Grabar con 1 compás de entrada (R)"}
-              className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-full bg-accent text-white transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
+              className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-full bg-accent-solid text-on-accent transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
             >
               {phase === "recording" ? (
                 <span className="h-3.5 w-3.5 rounded-[3px] bg-white" />

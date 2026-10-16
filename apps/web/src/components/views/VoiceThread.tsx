@@ -21,27 +21,28 @@ export function VoiceThread() {
 
   return (
     <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5 py-1">
         {transcript.map((l, i) =>
           l.who === "TÚ" ? (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[78%] rounded-lg border border-line bg-accent/10 px-3.5 py-2.5 text-base leading-relaxed">
+              {/* Misma píldora que el turno del usuario en el chat de texto. */}
+              <div className="max-w-[82%] rounded-lg bg-panel-2 px-3 py-2 text-sm leading-relaxed text-text">
                 {l.text}
               </div>
             </div>
           ) : (
-            <div key={i} className="flex flex-col gap-2.5">
-              <span className="text-2xs tracking-title text-text-faint uppercase">
-                <b className="font-normal text-accent">{l.who}</b>
+            <div key={i} className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-text-dim">
+                {l.who.charAt(0) + l.who.slice(1).toLowerCase()}
               </span>
-              <div className="text-base leading-loose text-text-dim">{l.text}</div>
+              <div className="text-sm leading-relaxed text-text">{l.text}</div>
             </div>
           ),
         )}
         {/* Client tool en curso: el trabajo real que dispara la voz */}
         {action && (
-          <div className="flex items-center gap-2 text-2xs tracking-label text-cyan uppercase">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan" />
+          <div className="flex items-center gap-2 text-xs text-text-dim">
+            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan" />
             {action}
           </div>
         )}

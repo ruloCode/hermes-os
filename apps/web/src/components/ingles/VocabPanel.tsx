@@ -5,9 +5,14 @@
 // de repaso; luego el resto. Patrón "Ready for review" de Memrise.
 // Los términos tocados en la práctica en vivo llegan SIN significado
 // (meaning_es vacío) → estado "por definir" hasta que el tutor los complete.
+//
+// v5: filas del riel (aire + hover), no cajas con borde ámbar. "Toca repasar"
+// es un estado, así que lo dice UN punto ámbar junto al título del grupo; el
+// botón es secundario y neutro.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { VocabEntry } from "@hermes/shared";
+import { Button } from "@/components/ui/Button";
 import { PanelState } from "@/components/ui/PanelState";
 import { reviewVocabEntry } from "@/lib/hermes";
 
@@ -18,6 +23,27 @@ export function isVocabDue(v: VocabEntry): boolean {
   if (v.learned) return false;
   if (!v.last_reviewed_at) return true;
   return Date.now() - new Date(v.last_reviewed_at).getTime() > REVIEW_AFTER_MS;
+}
+
+/** Subtítulo de grupo dentro de una sección del riel (punto = estado, opcional). */
+export function GroupLabel({
+  children,
+  dot,
+}: {
+  children: ReactNode;
+  dot?: "amber" | "cyan";
+}) {
+  return (
+    <h3 className="flex items-center gap-1.5 px-2 pb-0.5 text-xs font-medium text-text-dim">
+      {dot && (
+        <span
+          aria-hidden
+          className={`h-1.5 w-1.5 rounded-full ${dot === "amber" ? "bg-amber" : "bg-cyan"}`}
+        />
+      )}
+      {children}
+    </h3>
+  );
 }
 
 export function VocabTerm({
@@ -33,38 +59,53 @@ export function VocabTerm({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`rounded-sm border px-2 py-1.5 ${due ? "border-amber/40" : "border-line"}`}>
-      <div className="flex items-center gap-2">
+    <div className={`rounded-sm transition-colors ${open ? "bg-hover" : "hover:bg-hover"}`}>
+      <div className="flex min-h-8 items-center gap-2 pr-1">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="min-w-0 flex-1 truncate text-left text-xs text-text"
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 self-stretch px-2 text-left text-sm text-text"
           title={open ? "Ocultar significado" : "Ver significado"}
         >
-          {v.term}
-          {v.learned && <span className="ml-1.5 text-2xs text-green">✓</span>}
+          <span className="truncate">{v.term}</span>
+          {v.learned && (
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-label="Aprendida"
+              className="shrink-0 text-green"
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          )}
         </button>
         {!v.learned && (
-          <span className="shrink-0 text-2xs text-text-faint tabular-nums" title="Repasos">
+          <span className="shrink-0 text-xs text-text-faint tabular-nums" title="Repasos">
             {v.times_reviewed}/3
           </span>
         )}
         {due && (
-          <button
-            type="button"
+          <Button
             onClick={() => onReview(v.id)}
             disabled={busy}
             title="Marcar como repasado"
-            className="shrink-0 rounded-sm border border-amber/50 px-1.5 py-0.5 text-2xs tracking-label text-amber uppercase transition-colors hover:border-amber disabled:opacity-40"
+            className="h-6! px-2!"
           >
-            {busy ? "…" : "repasar"}
-          </button>
+            {busy ? "…" : "Repasar"}
+          </Button>
         )}
       </div>
       {open && (
-        <div className="mt-1 border-t border-line pt-1 text-2xs leading-snug text-text-dim">
+        <div className="px-2 pb-2 text-xs leading-relaxed text-text-dim">
           {v.meaning_es || (
-            <span className="text-amber italic">
+            <span className="text-text-faint italic">
               Por definir — el tutor la explicará en tu próxima práctica.
             </span>
           )}
@@ -108,26 +149,33 @@ export function VocabPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pr-1">
+    <div className="flex flex-col gap-3">
       {due.length > 0 && (
-        <>
-          <h3 className="text-2xs tracking-label text-amber uppercase">
-            Por repasar · {due.length}
-          </h3>
+        <div className="flex flex-col gap-px">
+          <GroupLabel dot="amber">
+            Por repasar <span className="font-normal text-text-faint tabular-nums">{due.length}</span>
+          </GroupLabel>
           {due.map((v) => (
-            <VocabTerm key={v.id} v={v} due busy={busyId === v.id} onReview={(id) => void review(id)} />
+            <VocabTerm
+              key={v.id}
+              v={v}
+              due
+              busy={busyId === v.id}
+              onReview={(id) => void review(id)}
+            />
           ))}
-        </>
+        </div>
       )}
       {rest.length > 0 && (
-        <>
-          <h3 className={`text-2xs tracking-label text-text-dim uppercase ${due.length ? "mt-1" : ""}`}>
-            Todos · {vocab.length}
-          </h3>
+        <div className="flex flex-col gap-px">
+          <GroupLabel>
+            {due.length ? "El resto" : "Todas"}{" "}
+            <span className="font-normal text-text-faint tabular-nums">{rest.length}</span>
+          </GroupLabel>
           {rest.map((v) => (
             <VocabTerm key={v.id} v={v} due={false} busy={false} onReview={() => undefined} />
           ))}
-        </>
+        </div>
       )}
     </div>
   );

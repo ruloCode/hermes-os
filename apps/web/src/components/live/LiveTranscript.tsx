@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CHART_OTHER, CHART_SLOTS, chartVar } from "@/components/ui/tones";
 import { fmtLiveClock, liveSpeakerName, useLiveMeeting } from "@/state/LiveMeetingProvider";
 
-// Mismo campo de texto que MeetingsPanel (borde/focus del design system).
+// Mismo campo de texto que el resto del design system.
 const FIELD =
-  "rounded-sm border border-line bg-transparent outline-none transition-colors focus:border-line-2";
+  "rounded-xs border border-line bg-panel outline-none transition-colors focus:border-line-2";
 
 /** Segmentos renderizados a la vez; "cargar más" suma otra tanda (sin lib de
  *  virtualización: filas de texto plano a 300 nodos son baratas). */
@@ -96,9 +96,13 @@ export function LiveTranscript() {
       >
         {rows.length === 0 ? (
           <div className="grid h-full place-items-center px-4 text-center">
-            <p className="text-2xs tracking-label text-text-dim uppercase pulse-dot">
-              ◈ Escuchando… el transcript aparece con la primera intervención
-            </p>
+            <div className="flex flex-col items-center gap-2">
+              <span aria-hidden className="pulse-dot h-2 w-2 rounded-full bg-cyan" />
+              <p className="text-sm font-medium text-text">Escuchando…</p>
+              <p className="text-xs text-text-faint">
+                El transcript aparece con la primera intervención.
+              </p>
+            </div>
           </div>
         ) : (
           <>
@@ -106,16 +110,16 @@ export function LiveTranscript() {
               <button
                 type="button"
                 onClick={() => setVisibleCount((n) => n + RENDER_CAP)}
-                className="mb-1 w-full rounded-sm border border-line px-2 py-1 text-2xs tracking-label text-text-dim uppercase transition-colors hover:border-line-2 hover:text-text"
+                className="mb-2 h-7 w-full cursor-pointer rounded-sm border border-line text-xs text-text-dim transition-colors hover:border-line-2 hover:bg-hover hover:text-text"
               >
-                ↑ Cargar más · {hiddenCount} intervenciones anteriores
+                Cargar {hiddenCount} intervenciones anteriores
               </button>
             )}
             {visible.map((s) => {
               const color = speakerColor(s.speaker, live.speakerOrder);
               const isEditing = editing?.segId === s.id;
               return (
-                <div key={s.id} className="flex items-start gap-2 py-1">
+                <div key={s.id} className="flex min-w-0 items-start gap-3 rounded-sm px-1 py-1.5">
                   {isEditing ? (
                     <span className="flex shrink-0 items-center gap-1">
                       <input
@@ -129,7 +133,7 @@ export function LiveTranscript() {
                         }}
                         placeholder="Nombre…"
                         aria-label="Renombrar hablante"
-                        className={`${FIELD} w-24 px-1.5 py-px text-2xs text-text`}
+                        className={`${FIELD} h-6 w-24 px-1.5 text-xs text-text`}
                       />
                       <button
                         type="button"
@@ -140,13 +144,13 @@ export function LiveTranscript() {
                           setEditing(null);
                         }}
                         title="El copiloto no responde a tus propias intervenciones"
-                        className={`rounded-sm border px-1.5 py-px text-2xs tracking-label uppercase transition-colors ${
+                        className={`h-6 cursor-pointer rounded-xs border px-1.5 text-xs transition-colors ${
                           live.selfSpeaker === s.speaker
-                            ? "border-cyan text-cyan"
+                            ? "border-line-2 bg-selected text-text"
                             : "border-line text-text-dim hover:border-line-2 hover:text-text"
                         }`}
                       >
-                        {live.selfSpeaker === s.speaker ? "✓ soy yo" : "soy yo"}
+                        {live.selfSpeaker === s.speaker ? "Soy yo ✓" : "Soy yo"}
                       </button>
                     </span>
                   ) : (
@@ -160,23 +164,30 @@ export function LiveTranscript() {
                         })
                       }
                       title="Renombrar hablante"
-                      // El color viene de chartVar (paleta categórica del
-                      // design system) — sancionado para style, como en charts.
-                      className="shrink-0 rounded-sm border px-1.5 py-px text-2xs tracking-label uppercase opacity-90 transition-opacity hover:opacity-100"
-                      style={{ borderColor: color, color }}
+                      // El color del hablante viene de chartVar (paleta
+                      // categórica, como una serie de un gráfico) y va SOLO en
+                      // el punto: el nombre queda en gris legible.
+                      className="flex w-[112px] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs pt-px text-left text-xs font-medium text-text-dim transition-colors hover:text-text"
                     >
-                      {liveSpeakerName(s.speaker, live.speakerNames, live.speakerOrder)}
-                      {live.selfSpeaker === s.speaker && !live.isClass ? " · yo" : ""}
+                      <span
+                        aria-hidden
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: color }}
+                      />
+                      <span className="min-w-0 truncate">
+                        {liveSpeakerName(s.speaker, live.speakerNames, live.speakerOrder)}
+                        {live.selfSpeaker === s.speaker && !live.isClass ? " · yo" : ""}
+                      </span>
                     </button>
                   )}
                   <p
-                    className={`min-w-0 flex-1 text-xs leading-relaxed ${
+                    className={`min-w-0 flex-1 text-sm leading-relaxed ${
                       s.final ? "text-text" : "text-text-dim italic"
                     }`}
                   >
                     {s.text}
                   </p>
-                  <span className="shrink-0 text-2xs text-text-faint tabular-nums">
+                  <span className="shrink-0 pt-0.5 font-mono text-2xs text-text-faint tabular-nums">
                     {fmtLiveClock(s.startMs)}
                   </span>
                 </div>
@@ -190,9 +201,12 @@ export function LiveTranscript() {
         <button
           type="button"
           onClick={resume}
-          className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-sm border border-cyan bg-bg px-2.5 py-1 text-2xs tracking-label text-cyan uppercase transition-colors hover:bg-cyan/10"
+          className="absolute bottom-2 left-1/2 flex h-7 -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-full border border-line-2 bg-panel px-3 text-xs text-text shadow-[var(--shadow-pop)] transition-colors hover:bg-hover"
         >
-          ↓ {newCount} nuevos
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 5v14M6 13l6 6 6-6" />
+          </svg>
+          {newCount} nuevos
         </button>
       )}
     </div>

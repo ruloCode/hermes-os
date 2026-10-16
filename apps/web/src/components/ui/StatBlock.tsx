@@ -45,7 +45,7 @@ export function StatBlock({
 
   return (
     <div className="flex flex-col">
-      <span className="text-2xs tracking-label text-text-dim uppercase">{label}</span>
+      <span className="text-2xs text-text-dim">{label}</span>
       <div className="flex items-baseline gap-1.5">
         <span
           className={`font-display tabular-nums leading-tight ${VALUE_SIZE[size]} ${tone === "neutral" ? "text-text" : ""}`}

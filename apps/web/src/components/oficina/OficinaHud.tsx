@@ -108,7 +108,7 @@ export function ToolButton({
       onClick={onClick}
       title={title}
       className={`rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
-        active ? "bg-accent text-white" : "text-text-dim hover:bg-panel-2 hover:text-text"
+        active ? "bg-accent-solid text-on-accent" : "text-text-dim hover:bg-panel-2 hover:text-text"
       }`}
     >
       {children}
@@ -464,7 +464,7 @@ export function FloorPicker({ floor, mode, onPick }: { floor: number; mode: Offi
             aria-pressed={on}
             onClick={() => onPick(i)}
             title={mode === "aerial" ? `Ver el piso ${i + 1}` : `Ver el piso ${i + 1} desde arriba (tecla ${i + 1})`}
-            className={`rounded-lg px-2.5 py-1 text-xs ${on ? "bg-accent font-medium text-white" : "text-text-dim hover:text-text"}`}
+            className={`rounded-lg px-2.5 py-1 text-xs ${on ? "bg-accent-solid font-medium text-on-accent" : "text-text-dim hover:text-text"}`}
           >
             {i + 1} · {name}
           </button>

@@ -15,9 +15,15 @@
  * `active`: el AppShell deja la vista montada (oculta) al navegar a otra ruta;
  * sin esto, los atajos del Playground (Espacio, flechas) se disparaban desde
  * /finanzas sobre un memo que no se ve.
+ *
+ * v5 (2026-10): abre con ViewHeader; las secciones van en su Segmented con
+ * el conteo real (antes: un selector propio con superíndices cyan y sin
+ * título de vista). La lista de cada sección ya no va dentro de un Panel
+ * "hero": el lienzo es la hoja, y el riel es una columna con hairline.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Panel } from "@/components/ui/Panel";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { Segmented } from "@/components/ui/Segmented";
 import { ComposicionProvider, useComposicion } from "@/components/composicion/ComposicionContext";
 import { SongList } from "@/components/composicion/SongList";
 import { SongWorkspace } from "@/components/composicion/SongWorkspace";
@@ -84,22 +90,26 @@ function WithPlayground() {
 /** Lo que dice la cabecera sobre dónde vive el tablero: siempre el estado REAL. */
 function BoardStatus() {
   const { source, saveState, saveError, flush } = useComposicion();
-  if (source === "cargando") return <span className="text-2xs text-text-faint">cargando…</span>;
+  if (source === "cargando") return <span className="text-xs text-text-faint">Cargando…</span>;
   if (source === "mock")
     return (
-      <span className="text-2xs text-amber" title="El agente no responde: nada de lo que edites se guarda">
-        sin agente · datos de prueba, no se guarda
+      <span className="text-xs text-amber" title="El agente no responde: nada de lo que edites se guarda">
+        Sin agente · datos de prueba, no se guarda
       </span>
     );
   if (saveState === "error")
     return (
-      <button onClick={() => void flush()} className="text-2xs text-red hover:underline" title={saveError ?? ""}>
-        no se guardó · reintentar
+      <button
+        onClick={() => void flush()}
+        className="cursor-pointer text-xs text-red hover:underline"
+        title={saveError ?? ""}
+      >
+        No se guardó · reintentar
       </button>
     );
   return (
-    <span className="text-2xs text-text-faint">
-      {saveState === "saving" ? "guardando…" : saveState === "saved" ? "guardado" : "tablero en este equipo"}
+    <span className="text-xs text-text-faint">
+      {saveState === "saving" ? "Guardando…" : saveState === "saved" ? "Guardado" : "Tablero en este equipo"}
     </span>
   );
 }
@@ -145,28 +155,31 @@ function Inner() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="flex gap-0.5 self-start rounded-sm border border-line p-0.5">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => {
-                setSection(s.id);
-                if (s.id !== "canciones") setSelectedId(null);
-              }}
-              title={s.hint}
-              className={`rounded-xs px-3 py-1 text-2xs tracking-label uppercase ${
-                section === s.id && !(selected && s.id !== "canciones")
-                  ? "bg-accent/16 text-accent"
-                  : "text-text-faint hover:text-text-dim"
-              }`}
-            >
-              {s.label} <sup className="text-cyan">{counts[s.id]}</sup>
-            </button>
-          ))}
-        </div>
-        <BoardStatus />
-      </div>
+      <ViewHeader
+        title="Composición"
+        // En una canción, ← vuelve a la lista (igual que Esc).
+        onBack={selected ? () => setSelectedId(null) : undefined}
+        backLabel="Canciones"
+        tabs={
+          <Segmented
+            ariaLabel="Secciones de Composición"
+            // Con una canción abierta la sección es Canciones (el takeover vive ahí).
+            value={selected ? "canciones" : section}
+            onChange={(id) => {
+              setSection(id);
+              if (id !== "canciones") setSelectedId(null);
+            }}
+            options={SECTIONS.map((s) => ({
+              value: s.id,
+              label: s.label,
+              title: s.hint,
+              count: counts[s.id],
+            }))}
+          />
+        }
+        // Dónde vive el tablero y si se guardó: estado REAL, a la derecha.
+        actions={<BoardStatus />}
+      />
 
       {/* Temas y Sesiones ocupan todo el ancho (traen su propio contexto) */}
       {section === "temas" && !selected ? (
@@ -179,88 +192,54 @@ function Inner() {
         </div>
       ) : /* Canción abierta: takeover con el copiloto a la derecha */
       selected ? (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
-          <div
-            className={`grid min-h-0 gap-3 ${chatOpen ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "lg:grid-cols-1"} lg:grid-rows-[minmax(0,1fr)]`}
-          >
-            <div className="flex min-h-0 min-w-0 flex-col">
-              <Panel
-                title="Canción"
-                variant="hero"
-                delay={40}
-                className="min-h-[520px] flex-1 lg:min-h-0"
-                padding="sm"
-              >
-                <SongWorkspace
-                  song={selected}
-                  onBack={() => setSelectedId(null)}
-                  chatOpen={chatOpen}
-                  onToggleChat={() => setChatOpen((v) => !v)}
-                  onAskHermes={askHermes}
-                />
-              </Panel>
-            </div>
-            {chatOpen && (
-              <div className="flex min-h-0 min-w-0 flex-col">
-                <Panel
-                  title="Copiloto · Hermes"
-                  tone="cyan"
-                  delay={80}
-                  className="min-h-[360px] flex-1 lg:min-h-0"
-                  padding="sm"
-                >
-                  <CoWriterPanel
-                    song={selected}
-                    focusSectionId={focusSection}
-                    onFocusHandled={focusHandled}
-                  />
-                </Panel>
-              </div>
-            )}
+        <div
+          className={`grid min-h-0 flex-1 grid-cols-1 gap-x-6 gap-y-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] ${
+            chatOpen ? "lg:grid-cols-[minmax(0,1fr)_360px]" : ""
+          }`}
+        >
+          <div className="flex min-h-[520px] min-w-0 flex-col lg:min-h-0">
+            <SongWorkspace
+              song={selected}
+              chatOpen={chatOpen}
+              onToggleChat={() => setChatOpen((v) => !v)}
+              onAskHermes={askHermes}
+            />
           </div>
+          {chatOpen && (
+            /* Copiloto = columna con hairline a sangre (patrón del riel): sube
+               hasta la línea de la cabecera (-mt-8 = mb-5 del ViewHeader +
+               gap-3) y baja hasta el borde del lienzo. */
+            <aside
+              aria-label="Copiloto"
+              className="flex min-h-[360px] min-w-0 flex-col border-line max-lg:border-t max-lg:pt-3 lg:-mt-8 lg:-mr-6 lg:-mb-5 lg:min-h-0 lg:border-l"
+            >
+              <p className="shrink-0 px-4 pt-4 pb-2 text-2xs font-medium text-text-faint">
+                Copiloto
+              </p>
+              <div className="min-h-0 flex-1 px-4 pb-4">
+                <CoWriterPanel
+                  song={selected}
+                  focusSectionId={focusSection}
+                  onFocusHandled={focusHandled}
+                />
+              </div>
+            </aside>
+          )}
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-12 gap-x-6 gap-y-6 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
+          {/* La lista de la sección ES la pantalla: sin Panel alrededor. */}
           <div className="col-span-12 flex min-h-[420px] min-w-0 flex-col lg:col-span-9 lg:min-h-0">
-            {section === "canciones" && (
-              <Panel
-                title={`Canciones · ${songs.length}`}
-                variant="hero"
-                delay={40}
-                className="min-h-0 flex-1"
-                padding="sm"
-              >
-                <SongList />
-              </Panel>
-            )}
-            {section === "referencias" && (
-              <Panel
-                title={`Referencias · ${refs.length}`}
-                variant="hero"
-                tone="cyan"
-                delay={40}
-                className="min-h-0 flex-1"
-                padding="sm"
-              >
-                <ReferencesBoard />
-              </Panel>
-            )}
-            {section === "cuaderno" && (
-              <Panel
-                title={`Cuaderno · ${notebook.length}`}
-                variant="hero"
-                tone="amber"
-                delay={40}
-                className="min-h-0 flex-1"
-                padding="sm"
-              >
-                <NotebookPanel />
-              </Panel>
-            )}
+            {section === "canciones" && <SongList />}
+            {section === "referencias" && <ReferencesBoard />}
+            {section === "cuaderno" && <NotebookPanel />}
           </div>
-          <div className="col-span-12 flex min-h-0 min-w-0 flex-col lg:col-span-3">
+          <aside
+            aria-label="Ritual y principios"
+            className="col-span-12 flex min-h-0 min-w-0 flex-col border-line max-lg:border-t lg:col-span-3 lg:-mt-8 lg:-mr-6 lg:-mb-5 lg:border-l"
+          >
             <ComposicionRail />
-          </div>
+          </aside>
         </div>
       )}
     </div>
