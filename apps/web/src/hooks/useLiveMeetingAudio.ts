@@ -32,12 +32,30 @@ const MIC_PRESENCIAL: MediaTrackConstraints = {
 
 // Remoto: los otros suenan por las bocinas → el AEC evita que el mic los
 // duplique (el audio limpio de ellos ya entra por la pestaña compartida).
+// Sin supresión de ruido: en la clase del 16-oct solo pasaron tus
+// exclamaciones fuertes ("Wow", "Bye") y se perdieron tus respuestas a
+// volumen normal — el STT aguanta el ruido de fondo, no una voz recortada.
 const MIC_REMOTO: MediaTrackConstraints = {
   channelCount: 1,
   echoCancellation: true,
-  noiseSuppression: true,
+  noiseSuppression: false,
   autoGainControl: true,
 };
+
+/** Constraints del mic con el dispositivo elegido (vacío = el predeterminado del sistema). */
+function micConstraints(mode: "presencial" | "remoto", deviceId?: string | null): MediaTrackConstraints {
+  const base = mode === "remoto" ? MIC_REMOTO : MIC_PRESENCIAL;
+  return deviceId ? { ...base, deviceId: { exact: deviceId } } : base;
+}
+
+/** Qué le pasó al mic a media sesión (otra app lo tomó, se desconectó…). */
+export type MicIssue = "muted" | "unmuted" | "ended";
+
+/** El micrófono que de verdad se está capturando. */
+export interface MicInfo {
+  deviceId: string | null;
+  label: string;
+}
 
 const TARGET_RATE = 16_000;
 
@@ -189,6 +207,10 @@ export interface LiveAudioStartOptions {
   appAudioUrl?: string;
   /** El audio de la llamada se cortó a media junta (dejó de compartir / el helper murió). */
   onSystemAudioEnded?: () => void;
+  /** Micrófono elegido (deviceId); si ya no existe se cae al predeterminado. */
+  micDeviceId?: string | null;
+  /** El sistema silenció o cortó el mic a media sesión. */
+  onMicIssue?: (issue: MicIssue) => void;
 }
 
 /**
@@ -218,10 +240,24 @@ export interface LiveMeetingAudio {
   stop: () => void;
   /** RMS del último frame (0..~1) — para el VU con rAF, sin estado React. */
   levelRef: RefObject<number>;
+  /** RMS de TU micrófono solo (antes de mezclar): el medidor "Tú". */
+  micLevelRef: RefObject<number>;
+  /** RMS del audio de la llamada solo (pestaña o app): el medidor de la otra parte. */
+  callLevelRef: RefObject<number>;
+  /** El micrófono que se está capturando (null = no hay captura). */
+  micInfoRef: RefObject<MicInfo | null>;
+  /** Cambia de micrófono sin cortar la sesión (el STT ni se entera). */
+  switchMic: (deviceId: string | null) => Promise<MicInfo>;
 }
 
 export function useLiveMeetingAudio(): LiveMeetingAudio {
   const levelRef = useRef(0);
+  const micLevelRef = useRef(0);
+  const callLevelRef = useRef(0);
+  const micInfoRef = useRef<MicInfo | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const modeRef = useRef<"presencial" | "remoto">("presencial");
+  const onMicIssueRef = useRef<((issue: MicIssue) => void) | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const displayRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -281,16 +317,79 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
         /* ya desconectado */
       }
     }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((t) => {
+      t.onmute = null;
+      t.onunmute = null;
+      t.onended = null;
+      t.stop();
+    });
     streamRef.current = null;
     micAnalyserRef.current = null;
+    micSourceRef.current = null;
+    micInfoRef.current = null;
+    onMicIssueRef.current = null;
     stopDisplay();
     onSysEndedRef.current = null;
     const ctx = ctxRef.current;
     ctxRef.current = null;
     if (ctx && ctx.state !== "closed") void ctx.close().catch(() => {});
     levelRef.current = 0;
+    micLevelRef.current = 0;
+    callLevelRef.current = 0;
   }, [stopDisplay]);
+
+  /** Conecta un stream de mic al grafo vivo (worklet + analizador) y vigila su pista. */
+  const attachMic = useCallback((stream: MediaStream): MicInfo => {
+    const ctx = ctxRef.current;
+    const node = nodeRef.current;
+    if (!ctx || !node) throw new Error("sin contexto de audio");
+    const track = stream.getAudioTracks()[0];
+    const micSource = ctx.createMediaStreamSource(stream);
+    micSource.connect(node);
+    const micAnalyser = ctx.createAnalyser();
+    micAnalyser.fftSize = 2048;
+    micSource.connect(micAnalyser);
+    micSourceRef.current = micSource;
+    micAnalyserRef.current = micAnalyser;
+    streamRef.current = stream;
+    if (track) {
+      // macOS le quita el mic a una pestaña cuando otra app lo toma en
+      // exclusiva: la pista queda "muted" y entrega silencio sin error.
+      track.onmute = () => onMicIssueRef.current?.("muted");
+      track.onunmute = () => onMicIssueRef.current?.("unmuted");
+      track.onended = () => onMicIssueRef.current?.("ended");
+    }
+    const info: MicInfo = {
+      deviceId: track?.getSettings().deviceId ?? null,
+      label: track?.label || "Micrófono",
+    };
+    micInfoRef.current = info;
+    return info;
+  }, []);
+
+  const switchMic = useCallback(
+    async (deviceId: string | null): Promise<MicInfo> => {
+      if (!ctxRef.current || !nodeRef.current) throw new Error("no hay sesión de audio");
+      // El nuevo PRIMERO: si falla, el que estaba sigue capturando.
+      const next = await navigator.mediaDevices.getUserMedia({
+        audio: micConstraints(modeRef.current, deviceId),
+      });
+      const old = streamRef.current;
+      try {
+        micSourceRef.current?.disconnect();
+      } catch {
+        /* ya desconectado */
+      }
+      old?.getTracks().forEach((t) => {
+        t.onmute = null;
+        t.onunmute = null;
+        t.onended = null;
+        t.stop();
+      });
+      return attachMic(next);
+    },
+    [attachMic],
+  );
 
   /**
    * App de escritorio (Teams, Zoom…): el agente captura el audio del sistema
@@ -424,14 +523,24 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
     ): Promise<{ systemAudio: boolean }> => {
       stop();
       const mode = opts?.mode ?? "presencial";
+      modeRef.current = mode;
+      onMicIssueRef.current = opts?.onMicIssue ?? null;
       sourceRef.current = opts?.source ?? "tab";
       appUrlRef.current = opts?.appAudioUrl ?? null;
       systemAudioErrorRef.current = null;
       onSysEndedRef.current = opts?.onSystemAudioEnded ?? null;
-      // El mic va PRIMERO (si falla, no queda nada abierto que limpiar).
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: mode === "remoto" ? MIC_REMOTO : MIC_PRESENCIAL,
-      });
+      // El mic va PRIMERO (si falla, no queda nada abierto que limpiar). Con
+      // un dispositivo guardado que ya no está (audífonos apagados), cae al
+      // predeterminado en vez de no arrancar.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: micConstraints(mode, opts?.micDeviceId),
+        });
+      } catch (err) {
+        if (!opts?.micDeviceId) throw err;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(mode) });
+      }
       streamRef.current = stream;
       try {
         let ctx: AudioContext;
@@ -448,17 +557,15 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
         node.port.onmessage = (ev: MessageEvent) => {
           const data = ev.data as { pcm: ArrayBuffer; rms: number };
           levelRef.current = data.rms;
-          onFrame(data.pcm, {
+          const levels = {
             mic: rmsOf(micAnalyserRef.current),
             tab: rmsOf(tabAnalyserRef.current),
-          });
+          };
+          micLevelRef.current = levels.mic;
+          callLevelRef.current = levels.tab;
+          onFrame(data.pcm, levels);
         };
-        const micSource = ctx.createMediaStreamSource(stream);
-        micSource.connect(node);
-        const micAnalyser = ctx.createAnalyser();
-        micAnalyser.fftSize = 2048;
-        micSource.connect(micAnalyser);
-        micAnalyserRef.current = micAnalyser;
+        attachMic(stream);
         // Gain 0 hacia destination: garantiza que el grafo procese en todos
         // los motores sin playback audible (el worklet es nodo "terminal").
         const mute = ctx.createGain();
@@ -472,11 +579,21 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
         throw err;
       }
     },
-    [stop, enableSystemAudio, rmsOf],
+    [stop, enableSystemAudio, rmsOf, attachMic],
   );
 
   // Al desmontar el dueño (el provider vive en el shell: en la práctica nunca).
   useEffect(() => stop, [stop]);
 
-  return { start, enableSystemAudio, stop, levelRef, systemAudioErrorRef };
+  return {
+    start,
+    enableSystemAudio,
+    stop,
+    levelRef,
+    micLevelRef,
+    callLevelRef,
+    micInfoRef,
+    switchMic,
+    systemAudioErrorRef,
+  };
 }

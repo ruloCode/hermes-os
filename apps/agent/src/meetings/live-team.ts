@@ -8,8 +8,8 @@
  *   algo, alguien plantea un problema, una pregunta en el aire, o llevas rato
  *   callado) y propone UNA intervención con su ángulo — trade-off, riesgo,
  *   alcance, precedente, siguiente paso, medición, pregunta, o el "puente"
- *   honesto cuando el tema es nuevo. Motor interrumpible: la ventana más
- *   reciente gana. A mano: "Aportar", "Pregunta" y "¿De qué hablan?".
+ *   honesto cuando el tema es nuevo. Pool de motores en cola: lo que empieza
+ *   termina y queda en el historial; de lo que espera, gana lo más reciente. A mano: "Aportar", "Pregunta" y "¿De qué hablan?".
  * - entender: cada ~8 s de conversación ajena, los términos o conceptos que
  *   acaban de salir, en una línea. Motor en COLA y sin streaming (corre en
  *   paralelo con el aporte y la UI tiene un solo carril de streaming).
@@ -29,7 +29,13 @@ import {
   type LiveSuggestionLang,
   type OpeningKind,
 } from "@hermes/shared";
-import { detectQuestion, lastQuestion, type FastCopilot, type FastEngine } from "./live-copilot.js";
+import {
+  detectQuestion,
+  lastQuestion,
+  lazyRequest,
+  type FastCopilot,
+  type FastEngine,
+} from "./live-copilot.js";
 import type { NormalizedTurn } from "./live-stt.js";
 import { meetingContextBlocks, type MeetingContext } from "./meeting-context.js";
 import { OWNER } from "../owner.js";
@@ -42,11 +48,13 @@ export const CONCEPT_ID_PREFIX = "concept-";
 // respuesta (en una junta real "¿en qué estado estamos?" llegó 5 s después de
 // otra pregunta y con 12 s parejos se perdió: era el mejor momento para el dato
 // de la reunión anterior). Una decisión o un problema suelen ser la misma
-// discusión: más espacio. Que te nombren salta el piso.
+// discusión: más espacio. Que te nombren salta el piso. Con el pool (dos
+// motores en cola) una pregunta encadenada ya no corta a la anterior, así que
+// el piso de pregunta/opinión solo evita el doble disparo de una misma frase.
 const WINDOW_FLOOR_MS: Record<WhyKey, number> = {
   named: 0,
-  question: 4_000,
-  opinion: 4_000,
+  question: 1_500,
+  opinion: 1_500,
   decision: 10_000,
   problem: 10_000,
   quiet: 12_000,
@@ -154,25 +162,30 @@ export class TeamCopilotController implements FastCopilot {
     this.lastAutoAt = Date.now(); // lo pedido a mano cuenta: nada automático encima
     this.seq += 1;
     const id = `team-${this.seq}`;
-    const ctx = this.contextFor(this.helpEngine);
     if (intent === "explain") {
-      this.helpEngine.generate({
-        id,
-        trigger: reason ?? "¿de qué están hablando?",
-        manual: true,
-        kind: "entender",
-        prompt: `${ctx}\n\nTAREA: ENTENDER`,
-      });
+      this.helpEngine.generate(
+        lazyRequest(
+          { id, trigger: reason ?? "¿de qué están hablando?", manual: true, kind: "entender" },
+          (engine) => `${this.contextFor(engine)}\n\nTAREA: ENTENDER`,
+          this.helpEngine,
+        ),
+      );
       return;
     }
     const question = intent === "question";
-    this.helpEngine.generate({
-      id,
-      trigger: reason ?? (question ? "pediste una pregunta" : "pediste qué aportar"),
-      manual: true,
-      kind: question ? "preguntar" : "aportar",
-      prompt: `${ctx}\n\nMOMENTO: ${OWNER} pidió apoyo AHORA para este momento exacto.\nTAREA: ${question ? "PREGUNTA" : "APORTAR"}`,
-    });
+    this.helpEngine.generate(
+      lazyRequest(
+        {
+          id,
+          trigger: reason ?? (question ? "pediste una pregunta" : "pediste qué aportar"),
+          manual: true,
+          kind: question ? "preguntar" : "aportar",
+        },
+        (engine) =>
+          `${this.contextFor(engine)}\n\nMOMENTO: ${OWNER} pidió apoyo AHORA para este momento exacto.\nTAREA: ${question ? "PREGUNTA" : "APORTAR"}`,
+        this.helpEngine,
+      ),
+    );
   }
 
   destroy(): void {
@@ -194,13 +207,13 @@ export class TeamCopilotController implements FastCopilot {
     this.deps.onWindow?.();
     this.seq += 1;
     const momento = `${OPENING_WHY[why]}${focus ? ` — «${focus.trim()}»` : ""}`;
-    this.helpEngine.generate({
-      id: `team-${this.seq}`,
-      trigger: OPENING_WHY[why],
-      manual: false,
-      kind: "aportar",
-      prompt: `${this.contextFor(this.helpEngine)}\n\nMOMENTO: ${momento}.\nTAREA: APORTAR`,
-    });
+    this.helpEngine.generate(
+      lazyRequest(
+        { id: `team-${this.seq}`, trigger: OPENING_WHY[why], manual: false, kind: "aportar" },
+        (engine) => `${this.contextFor(engine)}\n\nMOMENTO: ${momento}.\nTAREA: APORTAR`,
+        this.helpEngine,
+      ),
+    );
   }
 
   private queueConcepts(text: string): void {

@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { TEAM_COACH_MODE } from "@hermes/shared";
 import type { CallAudioSource } from "@/hooks/useLiveMeetingAudio";
+import { MicPreferencePicker } from "./MicControls";
 import { Segmented } from "@/components/ui/Segmented";
 import { Button } from "@/components/ui/Button";
 
@@ -129,6 +130,7 @@ export function LiveSetupCard({
             options={AUDIO.map((a) => ({ value: a.id, label: a.label, title: a.hint }))}
           />
         </Field>
+        <MicPreferencePicker />
         <Field label="Idioma">
           <Segmented
             ariaLabel="Idiomas de la junta"

@@ -10,7 +10,7 @@ import { fmtLiveClock, useLiveMeeting } from "@/state/LiveMeetingProvider";
 import { LiveCoachStrip } from "./LiveCoachStrip";
 import { LiveTranscript } from "./LiveTranscript";
 import { LiveSuggestionsRail } from "./LiveSuggestionsRail";
-import { LiveVuMeter } from "./LiveVuMeter";
+import { LiveSourceMeters, MicWarningBanner } from "./MicControls";
 import { useClassPip } from "./ClassPip";
 
 /**
@@ -143,7 +143,7 @@ export function LiveMeetingView({ asView = false }: { asView?: boolean } = {}) {
   const liveControls = (
     <>
       <span className="hidden md:block">
-        <LiveVuMeter levelRef={live.micLevelRef} />
+        <LiveSourceMeters />
       </span>
       {/* Fuente de audio: solo en remoto (presencial siempre es MIC). */}
       {live.mode === "remoto" && (
@@ -245,6 +245,7 @@ export function LiveMeetingView({ asView = false }: { asView?: boolean } = {}) {
         <LiveCoachStrip />
 
         {/* ── Banners (estado real, nunca decorativos) ─────────────── */}
+        <MicWarningBanner />
         {live.mode === "remoto" && live.systemAudio === false && live.phase === "live" && (
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-sm border border-amber/30 bg-amber/5 px-3 py-2 text-xs leading-snug text-text">
             <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />

@@ -107,3 +107,14 @@ Detalles:
   - Arrancarlo corre `reconcileRunningTasks()`, que pasa a pendientes las tareas `running` que no son suyas: mira antes que no haya ninguna.
   - Matarlo con una reunión viva deja un `.live-*.json` que el siguiente arranque ingesta como acta "(interrumpida)".
   - Su fila de `agent_presence` (`hermes-sim`) aparece en el selector de máquinas hasta que la borras.
+
+## Pool en cola e historial (2026-10-20)
+
+Lo mismo que se hizo en la clase de inglés tras la clase del 16-oct, ahora en junta y equipo:
+
+- **Nada se corta.** El motor de aportes era interrumpible: la ventana siguiente cortaba el aporte a medio escribir (se veía arrancar y desaparecer). Ahora es `createFastEnginePool` (`meetings/live-copilot.ts`): dos sesiones persistentes en cola. Una ventana nueva va al motor libre; si los dos están ocupados espera (de lo que espera solo sigue lo último, y lo pedido a mano no lo desplaza un automático).
+- **Contexto armado al enviar.** `lazyRequest` + `promptFor(engine)`: el prompt incremental se arma para el motor que lo envía y en el momento de enviarlo. Armado al encolar, un pedido descartado se llevaba líneas que ningún motor veía; y con dos sesiones, cada una tiene su propio cursor.
+- **Más rápido.** Pisos de disparo: junta 4 → 1,5 s; pregunta/opinión de equipo 4 → 1,5 s (la cola ya evita la ráfaga). Medido con Sonnet real sobre el guion de equipo: 9/9 aportes terminados, 0 cortados, primer texto p50 1,4 s (los dos primeros 3,8–4,7 s: los motores aún calentaban). Junta (Haiku): 5/5, ~1,4 s.
+- **Historial.** `MeetingHelpFeed` en el riel y en la ventanita (que antes solo mostraba el último aporte y 2 conceptos): todo queda, ordenado por el momento en que se pidió (`fastStartedAt` en live.ts — no salta de lugar al terminar). Lo que aún no tiene texto, o solo el "—" del silencio, es una línea de estado y no una tarjeta. "Soplar ahora" ya no se bloquea mientras otra se escribe.
+- **Micrófono.** Medidores Tú/Llamada, aviso si el sistema silencia o corta el mic, y selector de micrófono en la tarjeta de inicio. El aviso por lo medido ("casi no te oigo") queda solo en la clase: en una reunión pasar minutos callado es normal.
+- Tests: `meetings/pool.test.ts`.

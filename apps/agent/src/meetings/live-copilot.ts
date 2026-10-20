@@ -29,7 +29,11 @@ import { OWNER } from "../owner.js";
 
 // ── Cadencia y umbrales del gatillo ────────────────────────────────────
 
-const FAST_MIN_INTERVAL_MS = 4_000; // debounce global entre triggers automáticos
+// Debounce entre triggers automáticos. Era 4 s con un motor interrumpible:
+// una segunda pregunta a los 3 s se quedaba sin respuesta. Con el pool (dos
+// motores + cola) la ráfaga ya no pisa nada, así que el piso solo frena el
+// doble disparo de una misma frase.
+const FAST_MIN_INTERVAL_MS = 1_500;
 const SOFT_MIN_INTERVAL_MS = 30_000; // el soplo "suave" (sin pregunta) es raro a propósito
 const SOFT_MIN_NEW_CHARS = 200;
 const EARLY_MIN_CHARS = 15; // end_of_turn crudo demasiado corto = ruido
@@ -124,7 +128,10 @@ export interface FastCopilot {
 
 /** null = capa rápida desactivada (HERMES_COPILOT=off); live.ts sigue como hoy. */
 export function createFastCopilot(deps: FastCopilotDeps): FastCopilot | null {
-  const engine = createFastEngine(deps.systemStatic, deps.onEvent);
+  // Pool en cola: lo que empieza a escribirse termina (antes la pregunta
+  // siguiente lo cortaba a la mitad) y una pregunta nueva no espera a la
+  // anterior mientras haya un motor libre.
+  const engine = createFastEnginePool(deps.systemStatic, deps.onEvent);
   return engine ? new FastCopilotController(engine, deps) : null;
 }
 
@@ -197,8 +204,35 @@ export interface FastGenRequest {
   trigger: string;
   manual: boolean;
   prompt: string;
+  /**
+   * El prompt armado en el momento de ENVIARSE, para el motor que lo envía.
+   * Los controllers con contexto incremental (solo lo que el motor no vio) lo
+   * necesitan: armado al encolar, un pedido que se descartaba esperando se
+   * llevaba esas líneas y el modelo nunca las veía. Ausente = `prompt`.
+   */
+  promptFor?: (engine: FastEngine) => string;
   /** Viaja en start/done (ausente = "decir"). */
   kind?: LiveSuggestionKind;
+}
+
+/**
+ * Un pedido cuyo prompt se arma recién cuando un motor lo envía (memoizado:
+ * se arma una sola vez). `prompt` lo arma contra `fallback` — es lo que leen
+ * los motores falsos y los tests.
+ */
+export function lazyRequest(
+  base: Omit<FastGenRequest, "prompt" | "promptFor">,
+  build: (engine: FastEngine) => string,
+  fallback: FastEngine,
+): FastGenRequest {
+  let memo: string | undefined;
+  return {
+    ...base,
+    promptFor: (engine) => (memo ??= build(engine)),
+    get prompt() {
+      return (memo ??= build(fallback));
+    },
+  };
 }
 
 export interface FastEngine {
@@ -277,21 +311,22 @@ class FastCopilotController implements FastCopilot {
     this.charsSinceTrigger = 0;
     this.seq += 1;
     const id = `fast-${this.seq}`;
-    const windowText = this.deps.getWindow().slice(-WINDOW_CHARS);
     const ask = manual
       ? `${OWNER} pidió apoyo AHORA para este momento exacto de la conversación.`
       : question
         ? `Pregunta que le acaban de hacer a ${OWNER}: "${question}"`
         : `Acaban de plantear un punto que puede requerir la respuesta de ${OWNER}.`;
-    const prompt = `Transcript reciente (el final es lo que se está diciendo ahora):
+    // La ventana se toma al ENVIAR: si el pedido esperó a que se liberara un
+    // motor, lleva lo último que se dijo, no lo de hace tres segundos.
+    const build = () => `Transcript reciente (el final es lo que se está diciendo ahora):
 """
-${windowText}
+${this.deps.getWindow().slice(-WINDOW_CHARS)}
 """
 
 ${ask}
 
 La respuesta que ${OWNER} debería decir AHORA (o "—" si no amerita):`;
-    this.engine.generate({ id, trigger, manual, prompt });
+    this.engine.generate(lazyRequest({ id, trigger, manual }, build, this.engine));
   }
 }
 
@@ -372,9 +407,16 @@ class SdkFastEngine implements FastEngine {
     if (this.closed) return;
     if (this.interrupt) this.cancelActive(); // la pregunta nueva pisa a la anterior
     else {
-      // En cola: si ya hay demasiados esperando, el más viejo sobra.
-      const waiting = this.queue.filter((o) => !o.silent);
-      if (waiting.length >= this.maxQueue) this.cancelOwner(waiting[0]);
+      // En cola: si ya hay demasiados esperando, sobra el más viejo AUTOMÁTICO.
+      // Lo pedido a mano no lo desplaza una pregunta detectada: si todo lo que
+      // espera es a mano, la automática nueva es la que no entra.
+      const waiting = this.queue.filter((o) => !o.silent && !o.cancelled);
+      if (waiting.length >= this.maxQueue) {
+        const victim = waiting.find((o) => !o.req.manual);
+        if (victim) this.cancelOwner(victim);
+        else if (!req.manual) return;
+        else this.cancelOwner(waiting[0]);
+      }
     }
     const owner: TurnOwner = {
       req,
@@ -439,14 +481,22 @@ class SdkFastEngine implements FastEngine {
     const self = this;
     async function* input(): AsyncGenerator<SDKUserMessage> {
       while (!self.closed) {
-        const owner = self.queue.shift();
+        // En cola, el siguiente sale solo cuando el anterior cerró: si no, todo
+        // se le entregaba al CLI al instante, se respondía en serie y una
+        // ráfaga de preguntas acumulaba segundos de atraso (maxQueue no
+        // limitaba nada). Interrumpible sigue igual: entrega ya y corta.
+        const gated = !self.interrupt && self.yielded.length > 0;
+        const owner = gated ? undefined : self.queue.shift();
         if (owner) {
           if (owner.cancelled) continue; // lo pisaron antes de salir de la cola
           owner.yielded = true;
           self.yielded.push(owner);
           yield {
             type: "user",
-            message: { role: "user", content: owner.req.prompt },
+            message: {
+              role: "user",
+              content: owner.req.promptFor ? owner.req.promptFor(self) : owner.req.prompt,
+            },
             parent_tool_use_id: null,
           } as SDKUserMessage;
           continue;
@@ -506,6 +556,7 @@ class SdkFastEngine implements FastEngine {
           // El result CIERRA el turno más viejo — incluso interrumpido sin
           // mensaje assistant (subtype error_during_execution).
           const owner = this.yielded.shift();
+          this.wake?.(); // en cola, el que esperaba ya puede salir
           if (owner && !owner.settled && !owner.cancelled) {
             // Turno cerrado sin assistant (raro): lo que haya en buf o abort.
             owner.settled = true;
@@ -598,6 +649,125 @@ class SdkFastEngine implements FastEngine {
   }
 }
 
+// ── Pool: varios motores en cola, el pedido va al que esté libre ───────
+
+/** Motores por pool: cada uno es un proceso CLI vivo toda la junta. */
+const POOL_SIZE = 2;
+
+export interface FastEnginePoolOptions extends Omit<FastEngineOptions, "interrupt"> {
+  /** Motores (default 2). */
+  size?: number;
+}
+
+/**
+ * Varios motores persistentes detrás de UNA interfaz. Un pedido va al que esté
+ * libre; si todos están ocupados espera (máximo `maxQueue`, default 1: de lo
+ * que espera solo sigue lo último, y lo pedido a mano no lo desplaza un
+ * automático). Nada que ya empezó a escribirse se corta.
+ *
+ * Por qué: con UN motor interrumpible, una pregunta encadenada mataba la
+ * respuesta a medias (se veía arrancar y desaparecer); con UN motor en cola,
+ * esperaba los 2-4 s de la anterior. Con dos, ninguna de las dos cosas.
+ *
+ * Contexto incremental: cada motor del pool tiene su propia sesión, así que
+ * quien manda solo lo nuevo debe usar `promptFor(engine)` (lazyRequest): el
+ * prompt se arma para el motor que de verdad lo envía.
+ */
+export function createFastEnginePool(
+  systemStatic: string,
+  onEvent: (ev: FastCopilotEvent) => void,
+  opts: FastEnginePoolOptions = {},
+): FastEngine | null {
+  if (env.COPILOT_PROVIDER === "off") return null;
+  const engineOpts = { ...opts, interrupt: false, maxQueue: 1 };
+  return new FastEnginePool(
+    (sink) => createFastEngine(systemStatic, sink, engineOpts),
+    onEvent,
+    opts,
+  );
+}
+
+interface PoolSlot {
+  engine: FastEngine;
+  /** Id del pedido que está respondiendo (null = libre). */
+  busy: string | null;
+}
+
+export class FastEnginePool implements FastEngine {
+  private readonly slots: PoolSlot[] = [];
+  private waiting: FastGenRequest[] = [];
+  /** Ids cuyo `start` ya salió (al esperar): el del motor se omite. */
+  private readonly announced = new Set<string>();
+  private readonly maxQueue: number;
+  private closed = false;
+
+  constructor(
+    /** Crea un motor EN COLA que reporta sus eventos a `sink`. */
+    factory: (sink: (ev: FastCopilotEvent) => void) => FastEngine | null,
+    private readonly onEvent: (ev: FastCopilotEvent) => void,
+    opts: { size?: number; maxQueue?: number } = {},
+  ) {
+    this.maxQueue = Math.max(1, opts.maxQueue ?? 1);
+    const size = Math.max(1, opts.size ?? POOL_SIZE);
+    for (let i = 0; i < size; i++) {
+      const slot = { busy: null } as PoolSlot;
+      const engine = factory((ev) => this.observe(slot, ev));
+      if (!engine) continue;
+      slot.engine = engine;
+      this.slots.push(slot);
+    }
+  }
+
+  generate(req: FastGenRequest): void {
+    if (this.closed) return;
+    const free = this.slots.find((s) => !s.busy);
+    if (free) return this.dispatch(free, req);
+    if (this.waiting.length >= this.maxQueue) {
+      const victim = this.waiting.find((w) => !w.manual);
+      if (victim) this.drop(victim);
+      else if (!req.manual) return; // todo lo que espera es a mano: la automática no entra
+      else this.drop(this.waiting[0]);
+    }
+    this.waiting.push(req);
+    this.announced.add(req.id);
+    this.onEvent({ type: "start", id: req.id, trigger: req.trigger, kind: req.kind });
+  }
+
+  epoch(): number {
+    return this.slots.reduce((n, s) => n + (s.engine.epoch?.() ?? 0), 0);
+  }
+
+  destroy(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.waiting = [];
+    for (const s of this.slots) s.engine.destroy();
+  }
+
+  private dispatch(slot: PoolSlot, req: FastGenRequest): void {
+    slot.busy = req.id;
+    slot.engine.generate(req);
+  }
+
+  private drop(req: FastGenRequest): void {
+    this.waiting = this.waiting.filter((w) => w !== req);
+    this.announced.delete(req.id);
+    this.onEvent({ type: "aborted", id: req.id });
+  }
+
+  private observe(slot: PoolSlot, ev: FastCopilotEvent): void {
+    if (this.closed) return;
+    if (ev.type === "start" && this.announced.has(ev.id)) return;
+    this.onEvent(ev);
+    if ((ev.type === "done" || ev.type === "aborted") && slot.busy === ev.id) {
+      slot.busy = null;
+      this.announced.delete(ev.id);
+      const next = this.waiting.shift();
+      if (next) this.dispatch(slot, next);
+    }
+  }
+}
+
 // ── Motor fake: e2e sin gastar (HERMES_COPILOT=fake) ───────────────────
 
 const FAKE_ANSWER =
@@ -609,7 +779,8 @@ const FAKE_BY_KIND: Partial<Record<LiveSuggestionKind, string>> = {
   andamio: 'Clave: weekend (fin de semana) · relaxing (relajante)\nArranca: "Last weekend I spent some time…"',
   explicar: "Te preguntó cómo estuvo tu fin de semana y qué hiciste.\nClave: weekend = fin de semana",
   // Solo la clase/práctica pide `decir` con kind; la junta va sin kind → FAKE_ANSWER.
-  decir: "It was great, thanks! I went to the park with my family and we had empanadas.",
+  decir:
+    "It was a great weekend — I took my family to the park and we treated ourselves to empanadas.\nSube: treated ourselves to = nos dimos el gusto de",
   // Reunión de equipo (live-team.ts): ángulo + frase · pregunta · conceptos.
   aportar:
     "Riesgo\nAntes de mover pagos a la cola, definamos qué pasa con un mensaje que falla tres veces: si no hay dead-letter, perdemos transacciones sin enterarnos.",

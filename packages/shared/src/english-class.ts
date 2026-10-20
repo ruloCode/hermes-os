@@ -6,6 +6,60 @@
  */
 import type { EnglishError, LiveClassMetrics, LiveSegment, LiveSuggestion } from "./types.js";
 
+/** Prefijo de la línea opcional de la FRASE con la expresión que sube el nivel. */
+export const LEVEL_UP_PREFIX = "Sube:";
+
+/** Una ayuda de la compañera, leída por partes (la UI pinta cada una distinto). */
+export interface ClassHelpParts {
+  /** Lo que se dice (FRASE) o la explicación en español (EXPLICAR). */
+  main: string;
+  /** "Clave:" — expresiones útiles (chips). */
+  keys: string[];
+  /** "Arranca:" — el comienzo de frase que se termina solo. */
+  start: string | null;
+  /** "Sube:" — la expresión un escalón arriba que trae la frase. */
+  levelUp: { expr: string; meaning: string } | null;
+}
+
+const unquote = (t: string) => t.trim().replace(/^["“«]+|["”»]+$/g, "").trim();
+
+/**
+ * Parte el texto de una ayuda (FRASE · ANDAMIO · EXPLICAR) en sus líneas con
+ * prefijo. Tolera el texto a medio streamear: lo que aún no tiene prefijo
+ * cuenta como `main`.
+ */
+export function parseClassHelp(text: string): ClassHelpParts {
+  const out: ClassHelpParts = { main: "", keys: [], start: null, levelUp: null };
+  const main: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(clave|arranca|sube)\s*:\s*(.*)$/i);
+    if (!m) {
+      main.push(line);
+      continue;
+    }
+    const body = m[2].trim();
+    const tag = m[1].toLowerCase();
+    if (tag === "clave") out.keys.push(...body.split(/\s+·\s+/).map((k) => k.trim()).filter(Boolean));
+    else if (tag === "arranca") out.start = unquote(body) || null;
+    else {
+      const [expr, ...rest] = body.split(/\s+=\s+/);
+      if (unquote(expr)) out.levelUp = { expr: unquote(expr), meaning: rest.join(" = ").trim() };
+    }
+  }
+  out.main = unquote(main.join("\n"));
+  return out;
+}
+
+/**
+ * ¿Lo que lleva streameado la ayuda es (o empieza a ser) el silencio del
+ * modelo? Mientras sea así no se pinta tarjeta: si no, aparece y desaparece.
+ */
+export function looksLikeSilence(text: string): boolean {
+  return /^[\s—–-]*$/.test(text);
+}
+
 /** Key del modo en COACH_MODES y en el snapshot. */
 export const CLASS_COACH_MODE = "clase-ingles";
 /** La clase vive en el proyecto Inglés del vault (snapshots anti-reinicio incluidos). */
@@ -226,4 +280,72 @@ export function inferSelfSpeaker(
   }
   const candidates = [...votes.entries()].filter(([, v]) => v.mic >= 2 && v.mic >= v.tab * 3);
   return candidates.length === 1 ? candidates[0][0] : undefined;
+}
+
+// ── ¿Te está oyendo? (salud del micrófono en una sesión remota) ─────────
+
+/** Ventana que se mira hacia atrás para decidir que el mic está mudo. */
+const SILENT_WINDOW_MS = 90_000;
+/** RMS de tu mic (antes de mezclar) por encima del cual cuenta como voz. */
+const MIC_VOICE_LEVEL = 0.01;
+/** Igual para el audio de la llamada. */
+const CALL_VOICE_LEVEL = 0.01;
+/** La otra parte habló al menos esto en la ventana… */
+const CALL_VOICE_MIN_MS = 20_000;
+/** …y tu mic no llegó ni a esto: no te está oyendo. */
+const MIC_VOICE_MAX_MS = 1_000;
+/** Ventana del chequeo por transcript. */
+const LOPSIDED_WINDOW_MS = 180_000;
+const LOPSIDED_MIN_WORDS = 250;
+/** Tu parte de las palabras transcritas por debajo de esto = casi no te transcribe. */
+const LOPSIDED_MAX_SHARE = 0.04;
+
+export type MicHealthReason = "silent" | "lopsided";
+
+/**
+ * ¿Tu micrófono está entrando de verdad? En la clase del 16-oct el STT se
+ * quedó con la profe y de ti solo exclamaciones sueltas, y nada lo avisó: el
+ * medidor era de la MEZCLA y con la pestaña sonando se movía igual. Dos
+ * señales, ambas medidas (nada se supone):
+ *
+ * - silent: en los últimos 90 s la llamada tuvo ≥20 s de voz y tu mic ni 1 s.
+ * - lopsided: en los últimos 3 min hay ≥250 palabras transcritas y las tuyas
+ *   (o las de todo el que no es la voz dominante, si aún no se sabe cuál eres)
+ *   no llegan al 4 %. Atrapa el mic que sí suena pero tan bajo que el STT lo
+ *   descarta.
+ *
+ * `frames` y `segments` van en el MISMO reloj (ms de audio enviado).
+ */
+export function micHealth(
+  frames: SourceEnergy[],
+  segments: LiveSegment[],
+  selfSpeaker?: string,
+): MicHealthReason | null {
+  const now = frames.length ? frames[frames.length - 1].ms : 0;
+  if (frames.length && now - frames[0].ms >= SILENT_WINDOW_MS) {
+    let micMs = 0;
+    let callMs = 0;
+    for (let i = frames.length - 1; i >= 0; i--) {
+      const f = frames[i];
+      if (now - f.ms > SILENT_WINDOW_MS) break;
+      const step = i > 0 ? Math.max(0, f.ms - frames[i - 1].ms) : 0;
+      if (f.mic > MIC_VOICE_LEVEL) micMs += step;
+      if (f.tab > CALL_VOICE_LEVEL) callMs += step;
+    }
+    if (callMs >= CALL_VOICE_MIN_MS && micMs < MIC_VOICE_MAX_MS) return "silent";
+  }
+  const lastEnd = segments.reduce((m, s) => (s.final ? Math.max(m, s.endMs) : m), 0);
+  const words = new Map<string, number>();
+  let total = 0;
+  for (const seg of segments) {
+    if (!seg.final || seg.endMs < lastEnd - LOPSIDED_WINDOW_MS) continue;
+    const n = wordCount(seg.text);
+    words.set(seg.speaker, (words.get(seg.speaker) ?? 0) + n);
+    total += n;
+  }
+  if (total < LOPSIDED_MIN_WORDS) return null;
+  let mine: number;
+  if (selfSpeaker) mine = words.get(selfSpeaker) ?? 0;
+  else mine = total - Math.max(...words.values());
+  return mine / total < LOPSIDED_MAX_SHARE ? "lopsided" : null;
 }

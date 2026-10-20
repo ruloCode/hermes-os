@@ -11,13 +11,22 @@ import {
   correctionsFromSuggestions,
   guessLang,
   inferSelfSpeaker,
+  looksLikeSilence,
+  micHealth,
+  parseClassHelp,
   type SourceEnergy,
   correctionText,
   parseCorrection,
   type LiveSegment,
   type LiveSuggestion,
 } from "@hermes/shared";
-import { askOf, ClassCompanionController, CORRECTION_ID_PREFIX } from "./class-companion.js";
+import {
+  askOf,
+  buildHelpSystemPrompt,
+  ClassCompanionController,
+  CORRECTION_ID_PREFIX,
+  worthAnswering,
+} from "./class-companion.js";
 import type { FastEngine, FastGenRequest } from "../meetings/live-copilot.js";
 import type { NormalizedTurn } from "../meetings/live-stt.js";
 import { countFillers } from "../meetings/live-coach.js";
@@ -180,7 +189,8 @@ class SpyEngine implements FastEngine {
     return this.session;
   }
   generate(req: FastGenRequest): void {
-    this.reqs.push(req);
+    // Como un motor libre: el prompt se arma al enviarse, para este motor.
+    this.reqs.push({ ...req, prompt: req.promptFor ? req.promptFor(this) : req.prompt });
   }
   destroy(): void {
     this.destroyed = true;
@@ -412,5 +422,121 @@ describe("inferSelfSpeaker", () => {
 
   it("sin energía registrada no decide", () => {
     assert.equal(inferSelfSpeaker(turns, []), undefined);
+  });
+});
+
+// ── Clase del 16-oct: lo que se aprendió de la sesión real ─────────────
+
+describe("worthAnswering (preguntas de trámite)", () => {
+  it("las de confirmar audio o ritmo no piden una frase", () => {
+    for (const q of [
+      "Sound good?",
+      "Can you hear me okay now?",
+      "Okay, so sound good?",
+      "Which one?",
+      "Did you hear me?",
+      "Ready?",
+      "What's that?",
+      "How do you spell that?",
+    ])
+      assert.equal(worthAnswering(q), false, q);
+  });
+
+  it("las preguntas de verdad sí", () => {
+    for (const q of [
+      "What would you say are some of your strengths?",
+      "Tell me a little bit about yourself.",
+      "How did the protest go in Bogotá?",
+      "Can you justify the price to me?",
+    ])
+      assert.equal(worthAnswering(q), true, q);
+  });
+
+  it("una pregunta de trámite no arranca ayuda; la siguiente de verdad sí", () => {
+    const { help, ctl } = setup();
+    ctl.onTurn(turn("A", "We'll do the homework and then a mini interview. Sound good?"), "B");
+    assert.equal(help.reqs.length, 0);
+    ctl.onTurn(turn("A", "So first question. What opportunities are you looking for?"), "B");
+    assert.equal(help.reqs.length, 1);
+    assert.match(help.reqs[0].trigger, /opportunities/);
+    ctl.destroy();
+  });
+});
+
+describe("parseClassHelp", () => {
+  it("FRASE: lo que se dice y la expresión que sube el nivel, por separado", () => {
+    const p = parseClassHelp(
+      "Our app crashed under heavy load, so I moved the slow work to a queue.\nSube: under heavy load = con mucha carga",
+    );
+    assert.equal(p.main, "Our app crashed under heavy load, so I moved the slow work to a queue.");
+    assert.deepEqual(p.levelUp, { expr: "under heavy load", meaning: "con mucha carga" });
+  });
+
+  it("ANDAMIO: chips y arranque sin comillas", () => {
+    const p = parseClassHelp('Clave: trade-off (compromiso) · on the roadmap (en los planes)\nArranca: "The hardest part was…"');
+    assert.deepEqual(p.keys, ["trade-off (compromiso)", "on the roadmap (en los planes)"]);
+    assert.equal(p.start, "The hardest part was…");
+    assert.equal(p.levelUp, null);
+  });
+
+  it("a medio streamear, lo que no tiene prefijo es el texto principal", () => {
+    assert.equal(parseClassHelp("It's been a busy").main, "It's been a busy");
+  });
+
+  it("el silencio del modelo (o su primer carácter) no es tarjeta", () => {
+    assert.ok(looksLikeSilence(""));
+    assert.ok(looksLikeSilence("—"));
+    assert.ok(looksLikeSilence(" — "));
+    assert.ok(!looksLikeSilence("— well"));
+    assert.ok(!looksLikeSilence("It"));
+  });
+});
+
+describe("prompt de ayuda: articulación", () => {
+  const prompt = buildHelpSystemPrompt({ recurring: [] });
+  it("trae las reglas que la profe corrigió en clases reales", () => {
+    assert.match(prompt, /so yeah/);
+    assert.match(prompt, /I haven't been in that situation yet/);
+    assert.match(prompt, /dos partes/);
+    assert.match(prompt, /sujeto explícito/);
+  });
+  it("el ejemplo de FRASE usa el prefijo que la UI sabe leer", () => {
+    const example = prompt.split("Ejemplo de FRASE")[1] ?? "";
+    assert.ok(parseClassHelp(example.split("\n").slice(1, 3).join("\n")).levelUp);
+  });
+});
+
+describe("micHealth", () => {
+  /** Frames de 100 ms durante `secs`, con la energía que diga cada fuente. */
+  const frames = (secs: number, mic: (t: number) => number, tab: (t: number) => number): SourceEnergy[] =>
+    Array.from({ length: secs * 10 }, (_, i) => ({ ms: i * 100, mic: mic(i * 100), tab: tab(i * 100) }));
+
+  it("la profe habla y tu mic no tiene voz en 90 s: silent", () => {
+    assert.equal(micHealth(frames(100, () => 0.002, (t) => (t % 4000 < 2000 ? 0.08 : 0.001)), []), "silent");
+  });
+
+  it("hablas a ratos: todo bien", () => {
+    assert.equal(
+      micHealth(frames(100, (t) => (t % 10_000 < 3000 ? 0.05 : 0.002), (t) => (t % 10_000 >= 3000 ? 0.08 : 0.001)), []),
+      null,
+    );
+  });
+
+  it("menos de 90 s de audio todavía no decide", () => {
+    assert.equal(micHealth(frames(60, () => 0, () => 0.1), []), null);
+  });
+
+  it("el mic suena pero el STT casi no te transcribe (la clase del 16-oct): lopsided", () => {
+    const words = (n: number) => Array.from({ length: n }, () => "word").join(" ");
+    const segs = [
+      seg("A", words(150), 0, 60_000),
+      seg("B", "Okay.", 61_000, 61_500),
+      seg("A", words(150), 62_000, 120_000),
+      seg("B", "Wow.", 121_000, 121_500),
+    ];
+    assert.equal(micHealth([], segs), "lopsided");
+    assert.equal(micHealth([], segs, "B"), "lopsided");
+    // Con tus respuestas transcritas, nada que avisar.
+    assert.equal(micHealth([], [...segs, seg("B", words(60), 122_000, 140_000)], "B"), null);
   });
 });

@@ -65,6 +65,7 @@ import {
   COACH_MODES,
   createFastCopilot,
   createFastEngine,
+  createFastEnginePool,
   resolveCoachMode,
   type FastCopilot,
   type FastCopilotEvent,
@@ -166,6 +167,8 @@ interface LiveSession {
   fastCopilot: FastCopilot | null;
   /** Label del hablante que es el dueño — la capa rápida no dispara sobre él. */
   selfSpeaker?: string;
+  /** Capa rápida: ms de sesión en que se pidió cada sugerencia en curso (por id). */
+  fastStartedAt: Map<string, number>;
   mode: LiveAudioMode;
   languages: string[];
   suggestionLang: LiveSuggestionLang;
@@ -257,6 +260,7 @@ export async function startLiveMeeting(input: {
     segments: [],
     segmentIndex: new Map(),
     speakerNames: {},
+    fastStartedAt: new Map(),
     suggestions: [],
     stt: null,
     sttName: provider.name,
@@ -763,7 +767,13 @@ async function initClassCompanion(s: LiveSession): Promise<void> {
       maxQueue: 2,
       warmup: 'Clase iniciada. Responde únicamente "—".',
     });
-    const help = createFastEngine(buildHelpSystemPrompt(knowledge), onEvent, {
+    // La ayuda va en COLA, no interrumpible: en la clase real la profe encadena
+    // preguntas ("Sound good? … Which one?") y cada una mataba la frase que ya
+    // se estaba escribiendo — se veía arrancar y desaparecer. Lo que empieza,
+    // termina y queda en el historial; de lo que espera, solo sigue lo último
+    // (y lo pedido a mano nunca lo saca una pregunta detectada).
+    const help = createFastEnginePool(buildHelpSystemPrompt(knowledge), onEvent, {
+      model: env.COPILOT_CLASS_MODEL,
       warmup: 'Clase iniciada. Responde únicamente "OK".',
     });
     if (!correct || !help) {
@@ -781,7 +791,7 @@ async function initClassCompanion(s: LiveSession): Promise<void> {
 }
 
 /**
- * Reunión de equipo: motor de aportes (interrumpible: la ventana más reciente
+ * Reunión de equipo: pool de aportes (en cola: nada se corta; la ventana más reciente
  * gana) + glosario en cola. Ambos con el proyecto, sus tareas, el historial
  * relevante y quién eres (SOUL "Quién soy") congelados al arrancar.
  */
@@ -806,7 +816,10 @@ async function initTeamCopilot(s: LiveSession): Promise<void> {
     const onEvent = (ev: FastCopilotEvent) => handleFastEvent(s, ev);
     // El warm-up NO es "—": la sesión recuerda su primer turno, y uno que
     // practica el silencio dejaba callado al motor en las primeras ventanas.
-    const help = createFastEngine(buildTeamHelpPrompt(ctx), onEvent, {
+    // Pool en cola (antes un motor interrumpible): el aporte que empezó a
+    // escribirse termina aunque se abra otra ventana, y la nueva va al motor
+    // libre en vez de esperar.
+    const help = createFastEnginePool(buildTeamHelpPrompt(ctx), onEvent, {
       model: env.COPILOT_TEAM_MODEL,
       warmup: 'Reunión iniciada; aún no hay conversación. Responde únicamente "OK".',
     });
@@ -1024,18 +1037,25 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
     return;
   }
   if (ev.type === "start") {
+    // La hora de la tarjeta es cuando se PIDIÓ (el momento de la conversación
+    // al que responde), y no cambia al terminar: el historial no salta de orden.
+    const atMs = Date.now() - s.startedAt;
+    s.fastStartedAt.set(ev.id, atMs);
     broadcast(s, {
       type: "suggestion_start",
       id: ev.id,
       kind: ev.kind ?? "decir",
       trigger: ev.trigger,
-      atMs: Date.now() - s.startedAt,
+      atMs,
     });
   } else if (ev.type === "delta") {
     broadcast(s, { type: "suggestion_delta", id: ev.id, text: ev.text });
   } else if (ev.type === "aborted") {
+    s.fastStartedAt.delete(ev.id);
     broadcast(s, { type: "suggestion_aborted", id: ev.id });
   } else if (ev.type === "done") {
+    const startedAtMs = s.fastStartedAt.get(ev.id);
+    s.fastStartedAt.delete(ev.id);
     const text = ev.text.trim();
     // "—" es la señal de silencio del modelo: este momento no ameritaba soplo.
     if (!text || text === "—") {
@@ -1056,7 +1076,7 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
       kind: ev.kind ?? "decir",
       text: contribution?.text ?? text,
       why: ev.trigger,
-      atMs: Date.now() - s.startedAt,
+      atMs: startedAtMs ?? Date.now() - s.startedAt,
       manual: ev.manual || undefined,
       source: "fast",
       ...(contribution?.angle ? { angle: contribution.angle } : {}),

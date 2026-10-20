@@ -9,7 +9,13 @@ const BARS = 12;
  * worklet) con rAF y prende barras con peak-hold. Solo este componente
  * repinta — nada de estado React por frame de audio.
  */
-export function LiveVuMeter({ levelRef }: { levelRef: RefObject<number> }) {
+export function LiveVuMeter({
+  levelRef,
+  label = "Nivel del micrófono",
+}: {
+  levelRef: RefObject<number>;
+  label?: string;
+}) {
   const boxRef = useRef<HTMLDivElement>(null);
   const peakRef = useRef(0);
 
@@ -39,7 +45,7 @@ export function LiveVuMeter({ levelRef }: { levelRef: RefObject<number> }) {
     <div
       ref={boxRef}
       role="img"
-      aria-label="Nivel del micrófono"
+      aria-label={label}
       className="flex h-3.5 items-end gap-[2px]"
     >
       {Array.from({ length: BARS }, (_, i) => (

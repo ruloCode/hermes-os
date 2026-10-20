@@ -22,7 +22,7 @@ import {
   useConversationMode,
   useConversationStatus,
 } from "@elevenlabs/react";
-import type { VocabEntry } from "@hermes/shared";
+import { parseClassHelp, type VocabEntry } from "@hermes/shared";
 import { useVoice, type VoiceLine } from "@/components/VoiceBusyContext";
 import { VoiceWaveform } from "@/components/VoiceWaveform";
 import { ScrollArea } from "@/components/ui/ScrollArea";
@@ -229,6 +229,25 @@ function TurnDock({ companion, live }: { companion: PracticeCompanion; live: boo
             )}
             {hints.start && <p className="text-2xl leading-snug text-text">{hints.start}</p>}
           </div>
+        ) : cur && cur.kind === "decir" ? (
+          (() => {
+            const parts = parseClassHelp(cur.text);
+            return (
+              <div>
+                <p className="whitespace-pre-line text-2xl leading-snug text-text">
+                  {parts.main || <span className="text-text-faint">…</span>}
+                  {cur.streaming && <span className="text-accent">▌</span>}
+                </p>
+                {parts.levelUp && (
+                  <p className="mt-2 text-sm leading-snug text-text-dim">
+                    <span className="font-medium">Sube de nivel:</span>{" "}
+                    <span className="font-medium text-text">{parts.levelUp.expr}</span>
+                    {parts.levelUp.meaning ? ` — ${parts.levelUp.meaning}` : ""}
+                  </p>
+                )}
+              </div>
+            );
+          })()
         ) : cur ? (
           <p
             className={`whitespace-pre-line text-text ${cur.kind === "explicar" ? "text-lg leading-relaxed" : "text-2xl leading-snug"}`}

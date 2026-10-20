@@ -69,6 +69,10 @@ export const env = {
   // Loop estratégico de juntas (dato/rumbo/preguntar cada 20-45 s y en cada
   // ventana del modo equipo), sin razonamiento extendido.
   COPILOT_DEEP_MODEL: process.env.HERMES_COPILOT_DEEP_MODEL || "sonnet",
+  // Clase de inglés: el motor que da la FRASE / el andamio. Es el inglés que el
+  // dueño va a repetir en voz alta, así que la articulación pesa más que el
+  // medio segundo de Haiku (las correcciones siguen con HERMES_COPILOT_MODEL).
+  COPILOT_CLASS_MODEL: process.env.HERMES_COPILOT_CLASS_MODEL || "sonnet",
   // "Dilo más claro" (meetings/live-articulation.ts): reescribe TUS
   // intervenciones con el punto primero, en juntas y equipo con «soy yo».
   // "" = activado (con HERMES_COPILOT_MODEL) · "off" = apagado.

@@ -22,7 +22,10 @@ import {
   CLASS_PROJECT_SLUG,
   classSpeakerNames,
   inferSelfSpeaker,
+  looksLikeSilence,
+  micHealth,
   TEAM_COACH_MODE,
+  type MicHealthReason,
   type SourceEnergy,
 } from "@hermes/shared";
 import type {
@@ -49,6 +52,8 @@ import {
 import {
   useLiveMeetingAudio,
   type CallAudioSource,
+  type MicInfo,
+  type MicIssue,
   type SourceLevels,
 } from "@/hooks/useLiveMeetingAudio";
 import { readAutoHelp, useAutoHelp } from "@/lib/auto-help";
@@ -67,6 +72,21 @@ export type LivePhase =
   | "stopping"
   | "processing"
   | "error";
+
+/** Una sugerencia de la capa rápida que se está escribiendo. */
+export interface StreamingSuggestion {
+  id: string;
+  kind: LiveSuggestionKind;
+  trigger: string;
+  text: string;
+  atMs: number;
+}
+
+/**
+ * Por qué no te estaría oyendo: el sistema silenció o cortó el mic, o lo
+ * medido (energía o transcript) dice que tu voz casi no entra.
+ */
+export type MicWarning = MicHealthReason | "muted" | "ended";
 
 export interface LiveMeetingValue {
   phase: LivePhase;
@@ -89,8 +109,15 @@ export interface LiveMeetingValue {
   dismissed: ReadonlySet<string>;
   /** El loop LLM del copiloto está generando (estado real del server). */
   suggesting: boolean;
-  /** Sugerencia de la capa rápida streameándose AHORA (tarjeta destacada). */
-  streamingSuggestion: { id: string; kind: LiveSuggestionKind; trigger: string; text: string; atMs: number } | null;
+  /** Sugerencia de la capa rápida streameándose AHORA (la más reciente con texto). */
+  streamingSuggestion: StreamingSuggestion | null;
+  /**
+   * Todas las que están en curso, en orden de llegada (en la clase la ayuda va
+   * en cola: puede haber una escribiéndose y otra esperando). Las que aún no
+   * traen texto, o solo traen el "—" del silencio, también están aquí: la UI
+   * decide no pintarlas como tarjeta.
+   */
+  streamingSuggestions: StreamingSuggestion[];
   /** La capa rápida está activa en el server (define el modo de "Soplar ahora"). */
   fastCopilot: boolean;
   /** Label del hablante marcado como "yo" (la capa rápida no me responde a mí). */
@@ -108,7 +135,18 @@ export interface LiveMeetingValue {
   sttState: LiveSttState;
   wsConnected: boolean;
   error: string | null;
+  /** RMS de TU micrófono solo (antes de mezclar). */
   micLevelRef: RefObject<number>;
+  /** RMS del audio de la llamada solo (pestaña o app). */
+  callLevelRef: RefObject<number>;
+  /** El micrófono que se está capturando. */
+  mic: MicInfo | null;
+  /** Clase remota: tu voz no está entrando (null = todo bien o aviso pospuesto). */
+  micWarning: MicWarning | null;
+  /** "Te oigo bien": pospone el aviso medido 5 min. */
+  dismissMicWarning(): void;
+  /** Cambia de micrófono en caliente y lo recuerda para la próxima. */
+  switchMic(deviceId: string | null): Promise<void>;
   /** Junta cerrada e ingestada → MeetingsPanel navega y llama consumeResult().
    *  Con englishSessionId fue una clase de inglés: la consume /ingles. */
   result: { project: string; meetingId: string; englishSessionId?: number } | null;
@@ -161,7 +199,15 @@ const LiveMeetingContext = createContext<LiveMeetingValue | null>(null);
 const STORAGE_KEY = "hermes_live_meeting";
 /** Fuente del audio de la llamada: tras ⌘R la app se reengancha sola (no pide gesto). */
 const SOURCE_KEY = "hermes_live_source";
-const MAX_SUGGESTIONS = 50;
+// Historial de la sesión: una clase de 1 h deja ~100 ayudas y correcciones, y
+// lo que se generó se queda (nada se pisa).
+const MAX_SUGGESTIONS = 300;
+/** Micrófono elegido para juntas y clases (por equipo: localStorage). */
+const MIC_KEY = "hermes_live_mic";
+/** Cada cuánto se revisa si tu voz está entrando. */
+const MIC_HEALTH_EVERY_MS = 5_000;
+/** "Te oigo bien" pospone el aviso medido. */
+const MIC_SNOOZE_MS = 5 * 60_000;
 /** Backpressure del WS: por encima se descarta el frame (hueco honesto). */
 const MAX_BUFFERED_BYTES = 256_000;
 /** El server manda ping cada 15 s → 20 s sin mensajes = conexión muerta. */
@@ -223,6 +269,22 @@ function readSource(): CallAudioSource {
     return "tab";
   }
 }
+/** Micrófono elegido para juntas y clases (null = el predeterminado del sistema). */
+export function readMicPref(): string | null {
+  try {
+    return localStorage.getItem(MIC_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+export function saveMicPref(deviceId: string | null): void {
+  try {
+    if (deviceId) localStorage.setItem(MIC_KEY, deviceId);
+    else localStorage.removeItem(MIC_KEY);
+  } catch {
+    /* sin localStorage */
+  }
+}
 function clearStorage(): void {
   try {
     sessionStorage.removeItem(SOURCE_KEY);
@@ -249,9 +311,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const [suggestions, setSuggestions] = useState<LiveSuggestion[]>([]);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [suggesting, setSuggesting] = useState(false);
-  const [streamingSuggestion, setStreamingSuggestion] = useState<
-    LiveMeetingValue["streamingSuggestion"]
-  >(null);
+  const [streaming, setStreaming] = useState<StreamingSuggestion[]>([]);
+  const [mic, setMic] = useState<MicInfo | null>(null);
+  const [micIssue, setMicIssue] = useState<"muted" | "ended" | null>(null);
+  const [micHealthWarning, setMicHealthWarning] = useState<MicHealthReason | null>(null);
   const [fastCopilot, setFastCopilot] = useState(false);
   const [selfSpeaker, setSelfSpeaker] = useState<string | null>(null);
   const [mode, setMode] = useState<LiveAudioMode | null>(null);
@@ -284,6 +347,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const sentMsRef = useRef(0);
   /** El "soy yo" automático ya decidió (o el humano marcó): no se repite. */
   const selfDecidedRef = useRef(false);
+  /** Hasta cuándo no se avisa de nuevo que no te oye (epoch ms). */
+  const micSnoozeRef = useRef(0);
+  /** Desde qué ms de audio enviado se mide la salud del mic (sube al cambiar de mic). */
+  const micHealthFromRef = useRef(0);
 
   function setPhase(p: LivePhase): void {
     phaseRef.current = p;
@@ -339,7 +406,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setSuggesting(snap.suggesting);
     // El replay no retoma un stream a medias: la tarjeta streaming se limpia
     // (si la sugerencia terminó, viene completa en snap.suggestions).
-    setStreamingSuggestion(null);
+    setStreaming([]);
     setFastCopilot(Boolean(snap.fastCopilot));
     setSelfSpeaker(snap.selfSpeaker ?? null);
     setMode(snap.mode ?? "presencial");
@@ -464,19 +531,26 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       // Capa rápida: la sugerencia llega streameada a la tarjeta destacada.
       case "suggestion_start":
         setFastCopilot(true); // llegó un stream = la capa está viva
-        setStreamingSuggestion({ id: ev.id, kind: ev.kind, trigger: ev.trigger, text: "", atMs: ev.atMs });
+        setStreaming((prev) => [
+          ...prev.filter((x) => x.id !== ev.id),
+          { id: ev.id, kind: ev.kind, trigger: ev.trigger, text: "", atMs: ev.atMs },
+        ]);
         break;
       case "suggestion_delta":
-        setStreamingSuggestion((prev) =>
-          prev && prev.id === ev.id ? { ...prev, text: prev.text + ev.text } : prev,
+        setStreaming((prev) =>
+          prev.map((x) => (x.id === ev.id ? { ...x, text: x.text + ev.text } : x)),
         );
         break;
       case "suggestion_done":
-        setSuggestions((prev) => [...prev, ev.suggestion].slice(-MAX_SUGGESTIONS));
-        setStreamingSuggestion((prev) => (prev && prev.id === ev.suggestion.id ? null : prev));
+        setSuggestions((prev) =>
+          prev.some((x) => x.id === ev.suggestion.id)
+            ? prev
+            : [...prev, ev.suggestion].slice(-MAX_SUGGESTIONS),
+        );
+        setStreaming((prev) => prev.filter((x) => x.id !== ev.suggestion.id));
         break;
       case "suggestion_aborted":
-        setStreamingSuggestion((prev) => (prev && prev.id === ev.id ? null : prev));
+        setStreaming((prev) => prev.filter((x) => x.id !== ev.id));
         break;
       case "self_marked":
         setSelfSpeaker(ev.speaker ?? null);
@@ -685,6 +759,8 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     energyRef.current = [];
     sentMsRef.current = 0;
     selfDecidedRef.current = false;
+    micSnoozeRef.current = 0;
+    micHealthFromRef.current = 0;
     liveIdRef.current = null;
     projectRef.current = null;
     setLiveIdState(null);
@@ -696,7 +772,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setSuggestions([]);
     setDismissed(new Set());
     setSuggesting(false);
-    setStreamingSuggestion(null);
+    setStreaming([]);
+    setMic(null);
+    setMicIssue(null);
+    setMicHealthWarning(null);
     setFastCopilot(false);
     setSelfSpeaker(null);
     setMode(null);
@@ -756,7 +835,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         source,
         appAudioUrl: systemAudioWsUrl(),
         onSystemAudioEnded: onCallAudioEnded,
+        micDeviceId: readMicPref(),
+        onMicIssue,
       });
+      setMic(audio.micInfoRef.current);
       setSystemAudio(mode === "remoto" ? res.systemAudio : null);
       setCallSource(mode === "remoto" ? source : null);
       setSystemAudioError(mode === "remoto" ? audio.systemAudioErrorRef.current : null);
@@ -849,6 +931,25 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setSystemAudioError(audio.systemAudioErrorRef.current);
   }
 
+  function onMicIssue(issue: MicIssue): void {
+    setMicIssue(issue === "unmuted" ? null : issue);
+  }
+
+  async function switchMic(deviceId: string | null): Promise<void> {
+    const info = await audio.switchMic(deviceId);
+    saveMicPref(deviceId);
+    setMic(info);
+    setMicIssue(null);
+    setMicHealthWarning(null);
+    // Lo medido con el mic anterior ya no cuenta.
+    micHealthFromRef.current = sentMsRef.current;
+  }
+
+  function dismissMicWarning(): void {
+    micSnoozeRef.current = Date.now() + MIC_SNOOZE_MS;
+    setMicHealthWarning(null);
+  }
+
   function markSelf(speaker: string): void {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -914,7 +1015,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
             source,
             appAudioUrl: systemAudioWsUrl(),
             onSystemAudioEnded: onCallAudioEnded,
+            micDeviceId: readMicPref(),
+            onMicIssue,
           });
+          setMic(audio.micInfoRef.current);
           setSystemAudio(remote ? res.systemAudio : null);
           setCallSource(remote ? source : null);
           setSystemAudioError(remote ? audio.systemAudioErrorRef.current : null);
@@ -975,6 +1079,23 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finalCount, coachMode, mode, systemAudio, selfSpeaker, phase]);
 
+  // Clase remota: ¿tu voz está entrando? (energía de tu mic vs la llamada y
+  // reparto de palabras del transcript). Solo en clase: en una reunión pasar
+  // minutos callado es normal; en la clase, no.
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+  useEffect(() => {
+    if (coachMode !== CLASS_COACH_MODE || mode !== "remoto" || phase !== "live") return;
+    const t = setInterval(() => {
+      if (Date.now() < micSnoozeRef.current) return;
+      const from = micHealthFromRef.current;
+      const frames = from ? energyRef.current.filter((f) => f.ms >= from) : energyRef.current;
+      const segs = from ? segmentsRef.current.filter((x) => x.startMs >= from) : segmentsRef.current;
+      setMicHealthWarning(micHealth(frames, segs, selfSpeaker ?? undefined));
+    }, MIC_HEALTH_EVERY_MS);
+    return () => clearInterval(t);
+  }, [coachMode, mode, phase, selfSpeaker]);
+
   // Aviso nativo del browser antes de cerrar la pestaña con junta en curso.
   useEffect(() => {
     if (!active) return;
@@ -1005,6 +1126,14 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     return names;
   }, [isClass, segments, selfSpeaker, speakerNames]);
 
+  // La tarjeta destacada (junta/equipo): la más reciente que ya trae texto de verdad.
+  const streamingSuggestion = useMemo(() => {
+    for (let i = streaming.length - 1; i >= 0; i--)
+      if (!looksLikeSilence(streaming[i].text)) return streaming[i];
+    return streaming.length ? streaming[streaming.length - 1] : null;
+  }, [streaming]);
+  const micWarning: MicWarning | null = micIssue ?? micHealthWarning;
+
   const value = useMemo<LiveMeetingValue>(
     () => ({
       phase,
@@ -1020,6 +1149,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       dismissed,
       suggesting,
       streamingSuggestion,
+      streamingSuggestions: streaming,
       fastCopilot,
       selfSpeaker,
       mode,
@@ -1030,7 +1160,12 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       sttState,
       wsConnected,
       error,
-      micLevelRef: audio.levelRef,
+      micLevelRef: audio.micLevelRef,
+      callLevelRef: audio.callLevelRef,
+      mic,
+      micWarning,
+      dismissMicWarning,
+      switchMic,
       result,
       coachMode,
       isClass,
@@ -1071,7 +1206,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       suggestions,
       dismissed,
       suggesting,
-      streamingSuggestion,
+      streaming,
       fastCopilot,
       selfSpeaker,
       mode,
@@ -1082,6 +1217,8 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       sttState,
       wsConnected,
       error,
+      mic,
+      micWarning,
       result,
       coachMode,
       isClass,

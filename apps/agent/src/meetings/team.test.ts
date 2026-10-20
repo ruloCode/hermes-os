@@ -202,7 +202,8 @@ describe("teamWindows / teamReviewMarkdown", () => {
 class RecordingEngine implements FastEngine {
   readonly requests: FastGenRequest[] = [];
   generate(req: FastGenRequest): void {
-    this.requests.push(req);
+    // Como un motor libre: el prompt se arma al enviarse, para este motor.
+    this.requests.push({ ...req, prompt: req.promptFor ? req.promptFor(this) : req.prompt });
   }
   destroy(): void {}
   epoch(): number {

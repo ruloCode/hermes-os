@@ -1,10 +1,9 @@
 "use client";
 
 // Ventanita flotante de la junta en vivo (Document Picture-in-Picture de
-// Chrome): queda ENCIMA de la llamada (Meet, Teams) con lo urgente. En la
-// clase de inglés: la ayuda que está llegando, las 2 últimas correcciones y
-// los botones. En reuniones: el aporte vigente en grande, los conceptos que
-// acaban de salir y Aportar · Pregunta · ¿De qué hablan? Es un portal de React
+// Chrome): queda ENCIMA de la llamada (Meet, Teams). En la clase de inglés y
+// en reuniones: el historial (lo nuevo arriba, nada se pisa), si tu voz está
+// entrando y los pedidos a mano (Ayúdame… / Aportar · Pregunta · ¿De qué hablan?). Es un portal de React
 // a la ventana PiP (los eventos funcionan: React escucha en el contenedor del
 // portal), con los estilos y el tema del dashboard copiados al abrir.
 //
@@ -23,10 +22,12 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { teamWindows, type LiveHelpIntent, type LiveSuggestion } from "@hermes/shared";
+import { teamWindows, type LiveHelpIntent } from "@hermes/shared";
 import { fmtLiveClock, useLiveMeeting } from "@/state/LiveMeetingProvider";
 import { AutoHelpToggle } from "@/components/ingles/AutoHelpToggle";
-import { splitStreamingAngle, TEAM_HELP } from "./LiveSuggestionsRail";
+import { MeetingHelpFeed, TEAM_HELP } from "./LiveSuggestionsRail";
+import { ClassHelpFeed } from "./ClassHelpFeed";
+import { LiveSourceMeters, MicWarningBanner } from "./MicControls";
 
 // window.documentPictureInPicture ya está tipado en GestureControlProvider.
 
@@ -87,7 +88,7 @@ export function ClassPipProvider({ children }: { children: ReactNode }) {
     if (!dpip) return;
     let w: Window;
     try {
-      w = await dpip.requestWindow({ width: 380, height: live.isClass ? 360 : 420 });
+      w = await dpip.requestWindow({ width: 400, height: 560 });
     } catch {
       return; // sin gesto de usuario o bloqueado: la vista del dashboard sigue
     }
@@ -129,13 +130,10 @@ const HELP: { intent: LiveHelpIntent; label: string }[] = [
   { intent: "full", label: "Dame la frase" },
 ];
 
-const HELP_LABEL: Record<string, string> = {
-  andamio: "Para responder",
-  explicar: "Qué dijo",
-  decir: "Dilo así",
-};
-
-/** Lo que se ve encima de Meet: lo urgente arriba, los botones siempre a mano. */
+/**
+ * Lo que se ve encima de Meet: el historial de ayudas (lo más nuevo arriba,
+ * nada se pisa), si tu voz está entrando, y los botones siempre a mano.
+ */
 function ClassPipContent() {
   const live = useLiveMeeting();
   const [, tick] = useState(0);
@@ -144,12 +142,6 @@ function ClassPipContent() {
     return () => clearInterval(t);
   }, []);
 
-  const visible = live.suggestions.filter((s) => !live.dismissed.has(s.id));
-  const corrections = visible.filter((s) => s.kind === "corregir").slice(-2).reverse();
-  const lastHelp: LiveSuggestion | undefined = [...visible]
-    .reverse()
-    .find((s) => s.kind === "andamio" || s.kind === "explicar" || s.kind === "decir");
-  const streaming = live.streamingSuggestion;
   const cls = live.coachMetrics?.class;
 
   return (
@@ -162,14 +154,17 @@ function ClassPipContent() {
             {live.startedAt ? fmtLiveClock(Date.now() - live.startedAt) : ""}
           </span>
         </span>
-        {cls && (
-          <span
-            className={`text-xs tabular-nums ${cls.selfShare < 0.4 ? "text-amber" : "text-green"}`}
-          >
-            hablas {Math.round(cls.selfShare * 100)} % · {cls.corrections} correcciones
-          </span>
-        )}
+        <LiveSourceMeters />
       </div>
+      {cls && (
+        <p
+          className={`-mt-1 shrink-0 text-xs tabular-nums ${cls.selfShare < 0.4 ? "text-amber" : "text-text-dim"}`}
+        >
+          hablas {Math.round(cls.selfShare * 100)} % · {cls.corrections} correcciones
+        </p>
+      )}
+
+      <MicWarningBanner compact />
 
       {!live.selfSpeaker && live.speakerOrder.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -190,44 +185,7 @@ function ClassPipContent() {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-        {streaming ? (
-          <div className="rounded-md border border-cyan/40 bg-cyan/5 px-2.5 py-2">
-            <p className="flex items-center gap-1.5 text-xs font-medium text-text-dim">
-                  <span aria-hidden className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
-              {HELP_LABEL[streaming.kind] ?? "Ayuda"}
-            </p>
-            <p className="mt-0.5 text-base leading-snug whitespace-pre-line">
-              {streaming.text || "pensando…"}
-              <span className="text-text-faint">▍</span>
-            </p>
-          </div>
-        ) : lastHelp ? (
-          <div className="rounded-md border border-line bg-panel px-2.5 py-2">
-            <p className="text-xs font-medium text-text-dim">{HELP_LABEL[lastHelp.kind] ?? "Ayuda"}</p>
-            <p className="mt-0.5 text-base leading-snug whitespace-pre-line">{lastHelp.text}</p>
-          </div>
-        ) : null}
-
-        {corrections.map((c) => {
-          const [said, better] = c.text.split(" → ");
-          return (
-            <div key={c.id} className="rounded-md border border-line bg-panel px-2.5 py-2">
-              <p className="text-xs leading-snug text-text-dim line-through">{said}</p>
-              <p className="text-sm leading-snug">{better ?? c.text}</p>
-              {c.why && <p className="mt-0.5 text-xs leading-snug text-text-faint">{c.why}</p>}
-            </div>
-          );
-        })}
-
-        {!streaming && !lastHelp && corrections.length === 0 && (
-          <p className="text-xs leading-snug text-text-faint">
-            {live.selfSpeaker
-              ? "Habla tranquilo: te ayudo cuando la profe pregunte y corrijo cuando termines."
-              : "Marca cuál voz es la tuya para recibir correcciones."}
-          </p>
-        )}
-      </div>
+      <ClassHelpFeed compact />
 
       <div className="flex shrink-0 justify-center">
         <AutoHelpToggle />
@@ -249,19 +207,10 @@ function ClassPipContent() {
   );
 }
 
-/** Un aporte de hace más de esto ya no es de "este momento": se atenúa. */
-const STALE_MS = 60_000;
-
-const MAIN_KINDS = new Set(["aportar", "preguntar", "decir", "entender"]);
-
-const MAIN_LABEL: Record<string, string> = {
-  aportar: "Aporta",
-  preguntar: "Pregunta",
-  decir: "Dilo así",
-  entender: "De qué hablan",
-};
-
-/** Reunión (equipo o entrevista): lo que dirías ahora, en grande; lo demás, chico. */
+/**
+ * Reunión (equipo o entrevista): el historial de sugerencias (lo más nuevo
+ * arriba, nada se pisa), si tu voz está entrando, y los pedidos a mano.
+ */
 function MeetingPipContent() {
   const live = useLiveMeeting();
   const [, tick] = useState(0);
@@ -271,21 +220,19 @@ function MeetingPipContent() {
   }, []);
 
   const nowMs = live.startedAt ? Date.now() - live.startedAt : 0;
-  const visible = live.suggestions.filter((s) => !live.dismissed.has(s.id));
-  // El principal: lo último que es para DECIR (los conceptos automáticos van abajo).
-  const main = [...visible]
-    .reverse()
-    .find((s) => MAIN_KINDS.has(s.kind) && !(s.kind === "entender" && !s.manual));
-  const concepts = visible
-    .filter((s) => s.kind === "entender" && !s.manual)
-    .slice(-2)
-    .reverse();
-  const streaming = live.streamingSuggestion;
   const windows = live.isTeam ? teamWindows(live.suggestions, live.segments, live.selfSpeaker) : [];
   const spoke = windows.filter((w) => w.spoke).length;
   const self = live.selfSpeaker ? live.coachMetrics?.bySpeaker[live.selfSpeaker] : undefined;
   const totalTalk = Object.values(live.coachMetrics?.bySpeaker ?? {}).reduce((a, b) => a + b.talkMs, 0);
   const share = self && totalTalk ? Math.round((self.talkMs / totalTalk) * 100) : null;
+  const stats = [
+    windows.length > 0
+      ? `${windows.length} ventana${windows.length === 1 ? "" : "s"}${live.selfSpeaker ? ` · hablaste en ${spoke}` : ""}`
+      : "",
+    share !== null ? `hablas ${share} %` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="flex h-screen flex-col gap-2 bg-bg p-2.5 text-text">
@@ -297,12 +244,11 @@ function MeetingPipContent() {
             {live.startedAt ? fmtLiveClock(nowMs) : ""}
           </span>
         </span>
-        <span className="text-xs text-text-dim tabular-nums">
-          {windows.length > 0 &&
-            `${windows.length} ventana${windows.length === 1 ? "" : "s"}${live.selfSpeaker ? ` · hablaste en ${spoke}` : ""}`}
-          {share !== null && `${windows.length ? " · " : ""}hablas ${share} %`}
-        </span>
+        <LiveSourceMeters />
       </div>
+      {stats && <p className="-mt-1 shrink-0 text-xs text-text-dim tabular-nums">{stats}</p>}
+
+      <MicWarningBanner compact />
 
       {!live.selfSpeaker && live.speakerOrder.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -323,59 +269,7 @@ function MeetingPipContent() {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-        {streaming ? (
-          (() => {
-            const { angle, body } = splitStreamingAngle(streaming.kind, streaming.text);
-            return (
-              <div className="rounded-md border border-cyan/40 bg-cyan/5 px-2.5 py-2">
-                <p className="flex items-center gap-1.5 text-xs font-medium text-text-dim">
-                  <span aria-hidden className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
-                  {MAIN_LABEL[streaming.kind] ?? "Ayuda"}
-                  {angle ? ` · ${angle}` : ""} · {streaming.trigger}
-                </p>
-                <p className="mt-0.5 text-base leading-snug whitespace-pre-line">
-                  {body || "pensando…"}
-                  <span className="text-text-faint">▍</span>
-                </p>
-              </div>
-            );
-          })()
-        ) : main ? (
-          <div
-            className={`rounded-md border border-line bg-panel px-2.5 py-2 ${
-              nowMs - main.atMs > STALE_MS ? "opacity-50" : ""
-            }`}
-          >
-            <p className="text-xs text-text-dim">
-              {MAIN_LABEL[main.kind] ?? "Ayuda"}
-              {main.angle ? ` · ${main.angle}` : ""} · {main.why} · hace{" "}
-              {Math.max(0, Math.round((nowMs - main.atMs) / 1000))} s
-            </p>
-            <p className="mt-0.5 text-base leading-snug whitespace-pre-line">{main.text}</p>
-          </div>
-        ) : null}
-
-        {concepts.map((c) => {
-          const [term, ...rest] = c.text.split(" — ");
-          return (
-            <div key={c.id} className="rounded-md border border-line bg-panel px-2.5 py-2">
-              <p className="text-xs leading-snug">
-                <span className="font-semibold">{term}</span>
-                {rest.length > 0 && <span className="text-text-dim"> — {rest.join(" — ")}</span>}
-              </p>
-            </div>
-          );
-        })}
-
-        {!streaming && !main && concepts.length === 0 && (
-          <p className="text-xs leading-snug text-text-faint">
-            {live.isTeam
-              ? "Escucho la reunión: te aviso cuando se abra una ventana para aportar y te explico lo nuevo."
-              : "Escucho la junta: te sopla la respuesta cuando te pregunten."}
-          </p>
-        )}
-      </div>
+      <MeetingHelpFeed compact />
 
       {live.isTeam ? (
         <div className="grid shrink-0 grid-cols-3 gap-1.5">
@@ -396,7 +290,7 @@ function MeetingPipContent() {
         <button
           type="button"
           onClick={() => live.suggestNow()}
-          disabled={!live.wsConnected || !!streaming}
+          disabled={!live.wsConnected}
           className="h-8 shrink-0 cursor-pointer rounded-sm border border-line bg-panel px-1.5 text-xs font-medium text-text transition-colors hover:border-line-2 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           Soplar ahora

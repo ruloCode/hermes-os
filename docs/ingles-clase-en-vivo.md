@@ -176,3 +176,23 @@ La lentitud no era el modelo: en la práctica real Haiku respondía en ~1 s. Ven
   - "¿Qué dijo?" ~1,2 s;
   - andamio ~1 s (el primero ~4 s, en frío).
 - **Ojo:** el formato del andamio necesitó un ejemplo literal en el prompt. Sin él, Haiku omitía las etiquetas `Clave:`/`Arranca:`.
+
+## Lo que cambió tras la clase real del 16-oct (2026-10-20)
+
+La sesión 21 (61 min, entrevista simulada) dejó tres fallas a la vista:
+
+- **Tu voz no entró.** El STT tiene a la profe completa y de ti solo exclamaciones fuertes ("Wow", "Did you hear me?", "Bye"). Además el único medidor era el de la MEZCLA: con la pestaña sonando se movía igual, así que nada lo delataba.
+  - Medidores separados **Tú** / **Profe** (energía de cada fuente antes de mezclar) en el header y en la ventanita.
+  - Selector de micrófono que cambia en caliente (`switchMic`, el STT ni se entera) y se recuerda (`localStorage hermes_live_mic`).
+  - Aviso "no te estoy oyendo" con el selector ahí mismo: pista del mic silenciada/cortada por el sistema (`onmute`/`onended`), o lo medido (`micHealth` en `shared/english-class.ts`: 90 s con ≥20 s de la profe y <1 s tuyo, o <4 % de las palabras de los últimos 3 min). Solo en clase; "Te oigo bien" lo pospone 5 min.
+  - Mic remoto sin supresión de ruido (recortaba la voz a volumen normal; el STT aguanta el ruido).
+- **Sugerencias que arrancaban y desaparecían.** La ayuda era interrumpible y la profe encadena preguntas ("Sound good? … Which one?"): cada una mataba la frase a medio escribir. Y el "—" del modelo pintaba una tarjeta que luego se borraba.
+  - La ayuda va en **cola** (`interrupt:false, maxQueue:1`): lo que empieza, termina. De lo que espera solo sigue lo último, y lo pedido a mano no lo desplaza una pregunta detectada.
+  - En modo cola el generador ahora espera a que cierre el turno anterior antes de entregar el siguiente: antes todo se le daba al CLI al instante, se respondía en serie y `maxQueue` no limitaba nada (verificado con el SDK real).
+  - `worthAnswering`: las preguntas de trámite ("Sound good?", "Can you hear me okay now?") no arrancan ayuda.
+  - Nada sin texto es tarjeta: lo que se está pensando es una línea de estado.
+- **Sin historial.** La ventanita mostraba la última ayuda y 2 correcciones; cada una pisaba la anterior.
+  - `ClassHelpFeed` (riel y ventanita): todo queda, lo nuevo arriba, con la pregunta que lo originó. Historial de 300.
+- **Articulación.** La FRASE usa Sonnet (`HERMES_COPILOT_CLASS_MODEL`) y reglas de inglés hablado aterrizadas a lo que la profe corrigió: el punto primero, preguntas de dos partes en dos frases, sujeto explícito, pasado de principio a fin, "I haven't been in that situation yet, but…", cierre sin "so yeah", registro de entrevista. Línea opcional **`Sube:`** con una expresión un escalón arriba (la UI la pinta aparte, también en "Practicar ahora").
+
+Pendiente: no se sabe en qué equipo corrió la clase del 16-oct (no pasó por el agente de la Mac mini), así que la causa exacta del mic no se pudo ver en logs; lo nuevo la hace visible y corregible en vivo.
