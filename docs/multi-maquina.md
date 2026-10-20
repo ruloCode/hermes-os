@@ -94,6 +94,10 @@ ejecute `wsl -d Ubuntu -- bash -lc 'cd ~/dev/hermes-os && ./hermes agent'`.
 
 ## Segunda Mac (p. ej. un MacBook)
 
+> **2026-10-16**: lo recomendado ahora es que el MacBook abra el dashboard DEL
+> CENTRO (por LAN o Tailscale) y su agente quede solo para runs en sus clones —
+> todo el estado en un lugar. Ver `docs/red-y-unificacion.md` §4.
+
 Igual que arriba, pero en macOS no hace falta WSL y puede servir su propio
 dashboard en `localhost:31415`. Del `.env` de la principal cambian:
 

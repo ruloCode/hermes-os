@@ -202,4 +202,7 @@ producción.
 4. `/dev/ui` (galería de QA) no se actualizó; su demo de LivePractice escribe en
    `/english/vocab` de verdad — debería simularlo.
 5. Páginas sueltas (`/oficina`, `/sala`, `/estacion`, `/ruloview`) conservan su
-   diseño propio; heredan los tokens nuevos. La app móvil no se tocó.
+   diseño propio; heredan los tokens nuevos. La app Expo (`mobile/`) no se tocó.
+   **Hermes Phone ya es Grafito** (2026-10-16): recibe la marca generada desde
+   `packages/shared/src/brand.ts` (`pnpm brand:sync`) y sigue estas mismas
+   reglas (ver `docs/red-y-unificacion.md`).

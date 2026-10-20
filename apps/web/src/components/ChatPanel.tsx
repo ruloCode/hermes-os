@@ -8,6 +8,7 @@ import {
   getChatSession,
   claudeOpenTerminal,
   claudeStartRun,
+  uuid,
   type ChatMessage,
   type ClaudeExecConfig,
 } from "@/lib/hermes";
@@ -49,7 +50,7 @@ interface TabsState {
 }
 
 const newTab = (): ChatTab => ({
-  key: crypto.randomUUID(),
+  key: uuid(),
   sdkSessionId: null,
   title: "",
   messages: [],
@@ -305,7 +306,7 @@ export function ChatPanel({
       return;
     }
     const t: ChatTab = {
-      key: crypto.randomUUID(),
+      key: uuid(),
       sdkSessionId: detail.id,
       title: detail.title.slice(0, 60),
       messages: detail.transcript,

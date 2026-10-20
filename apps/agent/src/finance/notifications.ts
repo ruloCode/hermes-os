@@ -1,4 +1,4 @@
-import type { Transaction, Wallet } from "@hermes/shared";
+import { TRANSFER_CATEGORY, type Transaction, type Wallet } from "@hermes/shared";
 import { createTransaction } from "./store.js";
 
 /**
@@ -21,6 +21,13 @@ export interface NotifMovement {
   account: (typeof NOTIF_ACCOUNTS)[number];
   note: string;
   occurred_on: string;
+  /**
+   * La plata vino de OTRA cuenta propia (p. ej. "ontop": convertir dólares y
+   * recibirlos en Nu). Se registra como `transferencia`: sube el saldo de la
+   * billetera pero no cuenta como ingreso del mes — ese ingreso ya es el que
+   * llegó en dólares (el del plan); contarlo aquí lo duplicaría.
+   */
+  transfer_from?: string;
 }
 
 export function validateNotifMovements(raw: unknown): { items: NotifMovement[]; rejected: string[] } {
@@ -38,7 +45,10 @@ export function validateNotifMovements(raw: unknown): { items: NotifMovement[]; 
     if (!Number.isFinite(amount) || amount <= 0 || amount > 1e10) { rejected.push(`#${i + 1}: monto inválido`); continue; }
     if (!(NOTIF_ACCOUNTS as readonly string[]).includes(account)) { rejected.push(`#${i + 1}: cuenta desconocida`); continue; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) { rejected.push(`#${i + 1}: fecha inválida`); continue; }
+    const from = typeof x.transfer_from === "string" ? x.transfer_from.trim().toLowerCase() : "";
+    if (from && !/^[a-z0-9_-]{2,30}$/.test(from)) { rejected.push(`#${i + 1}: cuenta de origen inválida`); continue; }
     items.push({
+      ...(from ? { transfer_from: from } : {}),
       key,
       kind: x.kind,
       amount,
@@ -66,7 +76,7 @@ export async function ingestNotifMovements(items: readonly NotifMovement[]): Pro
       kind: m.kind,
       amount: m.amount,
       currency: m.currency,
-      category: m.kind === "income" ? "otros_ingreso" : "otros",
+      category: m.transfer_from ? TRANSFER_CATEGORY : m.kind === "income" ? "otros_ingreso" : "otros",
       account: m.account,
       note: m.note,
       occurredOn: m.occurred_on,

@@ -88,6 +88,10 @@ export interface ChatSummary {
   ts: string;
   /** cantidad de mensajes. */
   messages: number;
+  /** La conversación EN CURSO (la que sigue abierta en la Mac), no una archivada. */
+  active?: boolean;
+  /** X-Hermes-Session-Id del último mensaje: con él otro cliente retoma ESA sesión. */
+  session?: string;
 }
 
 // ── Sesiones de la consola leídas DIRECTO de ~/.claude/projects ────────
@@ -746,8 +750,15 @@ export const FINANCE_CATEGORIES = [
   "freelance",
   "inversiones",
   "otros_ingreso",
+  // entre cuentas propias (convertir dólares de Ontop a Nu, pasar de Nu a
+  // Nequi): mueve saldos pero NO es ingreso ni gasto del mes.
+  "transferencia",
 ] as const;
 export type FinanceCategory = (typeof FINANCE_CATEGORIES)[number];
+
+/** Plata que se movió entre cuentas propias: ajusta saldos, no cuenta en ingresos/gastos ni en el plan. */
+export const TRANSFER_CATEGORY = "transferencia";
+export const isTransfer = (tx: { category?: string | null }): boolean => tx.category === TRANSFER_CATEGORY;
 
 export type TransactionKind = "expense" | "income";
 

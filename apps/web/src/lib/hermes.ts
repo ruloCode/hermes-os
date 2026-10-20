@@ -51,7 +51,25 @@ const DEFAULT_HERMES_URL = (
 
 const AGENT_URL_KEY = "hermes_agent_url";
 
-/** URL del agente activo: override del selector de máquina o el env local. */
+/**
+ * El agente por defecto. El env dice `localhost:8650`, pero si el dashboard se
+ * abrió desde OTRO equipo (el MacBook, el celular, por Tailscale), "localhost"
+ * es ESE equipo y el navegador le hablaba a su agente — no al de la máquina
+ * centro que sirve la página. Una sola fuente: el agente del host que sirve el
+ * dashboard (mismo puerto, mismo esquema).
+ */
+export function defaultHermesUrl(
+  loc: { protocol: string; hostname: string } | null = typeof window === "undefined" ? null : window.location,
+): string {
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(DEFAULT_HERMES_URL);
+  if (!loc || !isLocal || !loc.hostname || loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
+    return DEFAULT_HERMES_URL;
+  }
+  const port = new URL(DEFAULT_HERMES_URL).port || "8650";
+  return `${loc.protocol}//${loc.hostname}:${port}`;
+}
+
+/** URL del agente activo: override del selector de máquina, o el de la máquina que sirve el dashboard. */
 export function getHermesUrl(): string {
   try {
     const override = localStorage.getItem(AGENT_URL_KEY);
@@ -59,13 +77,13 @@ export function getHermesUrl(): string {
   } catch {
     /* SSR/prerender: sin localStorage */
   }
-  return DEFAULT_HERMES_URL;
+  return defaultHermesUrl();
 }
 
 /** Fija (o limpia con null) el agente activo. El selector recarga después. */
 export function setHermesUrl(url: string | null): void {
   try {
-    if (url && url.replace(/\/$/, "") !== DEFAULT_HERMES_URL) {
+    if (url && url.replace(/\/$/, "") !== defaultHermesUrl()) {
       localStorage.setItem(AGENT_URL_KEY, url.replace(/\/$/, ""));
     } else {
       localStorage.removeItem(AGENT_URL_KEY);
@@ -101,17 +119,32 @@ export function sseUrl(path: string): string {
   return `${getHermesUrl()}${path}${sep}key=${encodeURIComponent(key)}`;
 }
 
+/**
+ * UUID v4 que funciona en CUALQUIER contexto. `crypto.randomUUID` solo existe
+ * en contexto seguro (https o localhost): el dashboard abierto por
+ * `http://<ip-de-la-mac>:31415` desde otro equipo reventaba al cargar
+ * ("Application error"). `getRandomValues` sí está en todos.
+ */
+export function uuid(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 const SESSION_KEY = "hermes_os_session_id";
 
 export function getSessionId(): string {
   try {
     const existing = localStorage.getItem(SESSION_KEY);
     if (existing) return existing;
-    const created = crypto.randomUUID();
+    const created = uuid();
     localStorage.setItem(SESSION_KEY, created);
     return created;
   } catch {
-    return crypto.randomUUID();
+    return uuid();
   }
 }
 

@@ -11,6 +11,7 @@ import type {
   IncomeCategorySummary,
   Transaction,
 } from "@hermes/shared";
+import { isTransfer } from "@hermes/shared";
 import { currentMonthBogota, monthProgress } from "../dates.js";
 import { getUsdCopRate } from "./fx.js";
 import { listBudgets, listTransactions } from "./store.js";
@@ -73,6 +74,8 @@ export async function getFinanceSummary(
   const byCat = new Map<string, { spent: number; count: number }>();
   const incomeByCat = new Map<string, { amount: number; count: number }>();
   for (const tx of txs) {
+    // Entre cuentas propias: ni ingreso ni gasto (contarla inflaría los dos lados).
+    if (isTransfer(tx)) continue;
     if (tx.kind === "income") {
       income += tx.amount;
       const agg = incomeByCat.get(tx.category) ?? { amount: 0, count: 0 };

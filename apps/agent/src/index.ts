@@ -1,4 +1,5 @@
 import { serve, upgradeWebSocket } from "@hono/node-server";
+import { currentRoutes, publishRoutes } from "./net/routes.js";
 import { WebSocketServer } from "ws";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
@@ -58,6 +59,8 @@ import {
   archiveConversation,
   listChats,
   restoreChat,
+  listHistory,
+  readChat,
 } from "./conversations.js";
 import { listChatSessions, readChatSession, resolveChatCwd } from "./agent/chat-history.js";
 import {
@@ -392,6 +395,10 @@ app.get("/health", (c) =>
     // El selector de máquina sondea /health (sin auth) para saber a quién le
     // está hablando: sin el nombre, dos agentes de la LAN son indistinguibles.
     baseUrl: selfBaseUrl(),
+    // Todas las rutas a este agente: un cliente que entró por el túnel aprende
+    // aquí la LAN y Tailscale actuales (net/routes.ts) sin IPs grabadas.
+    hub: env.HUB,
+    routes: currentRoutes(),
     uptime: (Date.now() - startedAt) / 1000,
   }),
 );
@@ -539,6 +546,26 @@ app.get("/chat/sessions/:id", async (c) => {
 app.get("/conversations/:project/chats", async (c) =>
   c.json(await listChats(c.req.param("project") || "general")),
 );
+
+// El historial que comparten la web y el teléfono: en curso + archivados.
+app.get("/conversations/:project/history", async (c) =>
+  c.json(await listHistory(c.req.param("project") || "general")),
+);
+
+// Leer un chat SIN restaurarlo (el teléfono lo muestra antes de decidir
+// continuarlo). `resume` = la sesión SDK de su último turno: con ella el
+// teléfono sigue la conversación con todo su contexto.
+app.get("/conversations/:project/chats/:id", async (c) => {
+  const msgs = await readChat(c.req.param("project") || "general", c.req.param("id"));
+  if (!msgs) return c.json({ error: "chat no encontrado" }, 404);
+  const session = msgs[msgs.length - 1]?.sessionId ?? null;
+  return c.json({
+    id: c.req.param("id"),
+    messages: msgs.slice(-200),
+    session,
+    resume: session ? ((await getSdkSession(session)) ?? null) : null,
+  });
+});
 
 app.post("/conversations/:project/chats/new", async (c) => {
   await archiveConversation(c.req.param("project") || "general");
@@ -3695,6 +3722,10 @@ registerJob("finance-balance-snapshot", 6 * 60 * 60_000, async () => {
 }, (n) => (n ? `${n} días con foto del saldo` : null));
 registerJob("presence-heartbeat", 30_000, pushPresence, () =>
   hasSupabase() ? "latido enviado" : null,
+);
+// Solo el centro (HERMES_HUB=on) publica por dónde se le llega; escribe solo si cambió.
+registerJob("hub-routes", 60_000, publishRoutes, (r) =>
+  r ? `rutas publicadas: lan=${r.lan ?? "—"} tailnet=${r.tailnet ?? "—"}` : null,
 );
 // Índice semántico del vault: por hash — si nada cambió, 0 llamadas a OpenAI.
 registerJob("vault-knowledge-sync", 10 * 60_000, syncVaultKnowledge, (r) =>

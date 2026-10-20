@@ -1,3 +1,4 @@
+import { isTransfer } from "@hermes/shared";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -84,6 +85,8 @@ export function suggestPlan(txs: readonly Transaction[]): {
   const groups = new Map<string, Transaction[]>();
   for (const tx of txs) {
     if (tx.voided_at) continue;
+    // Pasar plata entre cuentas propias no es un ingreso ni un gasto que se repita.
+    if (isTransfer(tx)) continue;
     const note = (tx.note ?? "").trim() || tx.category;
     const key = `${tx.kind}|${tx.currency}|${conceptKey(note)}`;
     const g = groups.get(key);

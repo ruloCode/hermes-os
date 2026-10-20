@@ -52,3 +52,4 @@ export * from "./articulation.js";
 export * from "./articulation-gym.js";
 export * from "./speech.js";
 export * from "./growth.js";
+export * from "./brand.js";

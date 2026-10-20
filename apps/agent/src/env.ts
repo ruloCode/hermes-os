@@ -20,6 +20,13 @@ export const env = {
   // agente. Sin ella se deriva de la IP LAN real (presence.ts) — se pone a
   // mano solo si hay un nombre/puerto de por medio (Tailscale, reverse proxy).
   PUBLIC_URL: (process.env.HERMES_PUBLIC_URL || "").replace(/\/$/, ""),
+  // La máquina CENTRO (la siempre prendida): publica sus rutas (LAN + Tailscale)
+  // en remote_config para que el teléfono y el MacBook la encuentren aunque
+  // cambie de IP (net/routes.ts). UNA sola máquina con esto en "on".
+  HUB: process.env.HERMES_HUB === "on",
+  // Dirección de Tailscale con nombre (p. ej. https://mac-mini.tail1234.ts.net
+  // con `tailscale serve`). Sin ella se publica http://<ip-100.x>:<puerto>.
+  TAILNET_URL: (process.env.HERMES_TAILNET_URL || "").replace(/\/$/, ""),
   // Raíz de los clones de código EN ESTA máquina. El vault guarda ruta_local
   // con las rutas de la Mac; en otro PC el mismo proyecto vive en otra parte,
   // así que los runs lo buscan aquí por nombre de carpeta antes de rendirse.

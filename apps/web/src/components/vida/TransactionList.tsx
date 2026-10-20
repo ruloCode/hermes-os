@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   FINANCE_CATEGORIES,
+  isTransfer,
   type Currency,
   type Transaction,
   type TransactionKind,
@@ -159,6 +160,8 @@ export function TransactionList({
   const totals = useMemo(() => {
     let spentCop = 0, spentUsd = 0, inCop = 0, inUsd = 0;
     for (const t of filtered) {
+      // Entre cuentas propias: no es ingreso ni gasto (inflaría los dos totales).
+      if (isTransfer(t)) continue;
       if (t.kind === "expense") {
         if (t.currency === "USD") spentUsd += t.amount;
         else spentCop += t.amount;
@@ -186,7 +189,7 @@ export function TransactionList({
         out.push(g);
       }
       g.items.push(t);
-      if (t.kind === "expense") {
+      if (t.kind === "expense" && !isTransfer(t)) {
         if (t.currency === "USD") g.spentUsd += t.amount;
         else g.spentCop += t.amount;
       }
@@ -464,7 +467,7 @@ export function TransactionList({
                     )}
                     <span
                       className={`w-28 shrink-0 text-right text-sm tabular-nums ${
-                        t.kind === "income" ? "text-green" : "text-text"
+                        t.kind === "income" && !isTransfer(t) ? "text-green" : "text-text"
                       }`}
                     >
                       {t.kind === "income" ? "+" : "−"}

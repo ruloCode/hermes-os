@@ -110,6 +110,12 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M12 8v8M8 12h8" />
     </>
   ),
+  // Entre cuentas propias: dos flechas opuestas (no suma ni resta del mes).
+  transferencia: (
+    <>
+      <path d="M4 8h14l-3-3M20 16H6l3 3" />
+    </>
+  ),
 };
 
 // Fallback para categorías libres fuera del set canónico: etiqueta.

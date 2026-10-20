@@ -160,6 +160,69 @@ export function archiveConversation(project: string): Promise<void> {
   return writeChain as Promise<void>;
 }
 
+function summarize(id: string, msgs: StoredMessage[], active = false): ChatSummary {
+  const firstUser = msgs.find((m) => m.role === "user");
+  const last = msgs[msgs.length - 1];
+  return {
+    id,
+    title: (firstUser?.content ?? "(sin título)").slice(0, 80),
+    ts: last?.ts ?? "",
+    messages: msgs.length,
+    ...(active ? { active: true } : {}),
+    ...(last?.sessionId ? { session: last.sessionId } : {}),
+  };
+}
+
+/** Sesiones de QA (`qa-…`): datos de prueba, no conversaciones del dueño. */
+const isQaSession = (id: string | undefined) => !!id && id.startsWith("qa-");
+
+/**
+ * La conversación en curso de un proyecto mezcla TODOS los hilos (cada tab de
+ * la web y cada hilo del teléfono es una sesión distinta). Para el historial
+ * se separa por sesión: una entrada por hilo, con id `s:<sesión>`.
+ */
+export function splitBySession(msgs: StoredMessage[]): Map<string, StoredMessage[]> {
+  const out = new Map<string, StoredMessage[]>();
+  for (const m of msgs) {
+    if (!m.sessionId || isQaSession(m.sessionId)) continue;
+    const list = out.get(m.sessionId) ?? [];
+    list.push(m);
+    out.set(m.sessionId, list);
+  }
+  return out;
+}
+
+/**
+ * El historial COMPLETO, el mismo para la web y el teléfono: cada hilo de la
+ * conversación en curso (por sesión) y luego las archivadas, lo más reciente
+ * primero. Así lo que hablaste en la Mac se sigue en el teléfono y al revés.
+ */
+export async function listHistory(project: string): Promise<ChatSummary[]> {
+  const active = [...splitBySession(await getConversation(project))].map(([session, msgs]) =>
+    summarize(`s:${session}`, msgs, true),
+  );
+  const archived = await listChats(project);
+  return [...active, ...archived].sort((a, b) => (a.ts < b.ts ? 1 : -1)).slice(0, 60);
+}
+
+/**
+ * Los mensajes de un chat SIN tocar nada: `s:<sesión>` = ese hilo de la
+ * conversación en curso; si no, un archivado. null si no existe.
+ */
+export async function readChat(project: string, id: string): Promise<StoredMessage[] | null> {
+  if (id.startsWith("s:")) {
+    const msgs = splitBySession(await getConversation(project)).get(id.slice(2));
+    return msgs?.length ? msgs : null;
+  }
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  try {
+    const msgs = JSON.parse(await readFile(join(archiveDirFor(project), `${safeId}.json`), "utf8")) as StoredMessage[];
+    return Array.isArray(msgs) && msgs.length ? msgs : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Lista los chats archivados de un proyecto, del más reciente al más viejo. */
 export async function listChats(project: string): Promise<ChatSummary[]> {
   let files: string[] = [];
@@ -175,13 +238,7 @@ export async function listChats(project: string): Promise<ChatSummary[]> {
         await readFile(join(archiveDirFor(project), f), "utf8"),
       ) as StoredMessage[];
       if (!Array.isArray(msgs) || msgs.length === 0) continue;
-      const firstUser = msgs.find((m) => m.role === "user");
-      chats.push({
-        id: f.replace(/\.json$/, ""),
-        title: (firstUser?.content ?? "(sin título)").slice(0, 80),
-        ts: msgs[msgs.length - 1]?.ts ?? "",
-        messages: msgs.length,
-      });
+      chats.push(summarize(f.replace(/\.json$/, ""), msgs));
     } catch {
       /* archivo corrupto: lo salteamos */
     }

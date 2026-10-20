@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, type ChatMessage } from "@/lib/hermes";
+import { streamChat, uuid, type ChatMessage } from "@/lib/hermes";
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/Button";
 import { IconArrowUp } from "./kit";
@@ -53,7 +53,7 @@ export function AdvisorChat({
   const [failed, setFailed] = useState<string | null>(null);
   // Sesión: una clave estable por montaje; el SDK session id llega en el
   // primer turno y los siguientes resumen ESA conversación.
-  const sessionKey = useRef(crypto.randomUUID());
+  const sessionKey = useRef(uuid());
   const sdkSession = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 

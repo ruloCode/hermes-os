@@ -133,6 +133,27 @@ describe("movimientos desde avisos del banco · validación", () => {
   it("nunca acepta más de 200 de una vez", () => {
     assert.equal(validateNotifMovements(Array.from({ length: 300 }, (_, i) => ({ ...ok, key: `app:${String(i).padStart(12, "0")}` }))).items.length, 200);
   });
+  // 16-oct-2026: dólares convertidos en Ontop llegaron a Nu como "Recibiste…de Pexto Colombia".
+  // Es plata propia que cambia de cuenta: la cuenta de origen viaja y se valida.
+  it("una conversión desde otra cuenta propia trae su origen; un origen raro se rechaza", () => {
+    const conv = { ...ok, kind: "income", account: "nu", transfer_from: "Ontop" };
+    const { items, rejected } = validateNotifMovements([conv, { ...conv, transfer_from: "x; drop table" }, ok]);
+    assert.equal(items.length, 2);
+    assert.equal(items[0].transfer_from, "ontop");
+    assert.equal(items[1].transfer_from, undefined, "un movimiento normal no inventa origen");
+    assert.equal(rejected.length, 1);
+  });
+});
+
+import { isTransfer, FINANCE_CATEGORIES } from "@hermes/shared";
+
+describe("transferencias entre cuentas propias", () => {
+  it("existen como categoría y se reconocen (las excluyen el resumen y el plan)", () => {
+    assert.ok((FINANCE_CATEGORIES as readonly string[]).includes("transferencia"));
+    assert.equal(isTransfer({ category: "transferencia" }), true);
+    assert.equal(isTransfer({ category: "otros_ingreso" }), false);
+    assert.equal(isTransfer({ category: null }), false);
+  });
 });
 
 import { FINANCE_TOOLS, financeGate } from "./guard.js";
