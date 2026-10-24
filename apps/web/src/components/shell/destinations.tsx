@@ -118,6 +118,20 @@ const AGENTE: Dest[] = [
       </I>
     ),
   },
+  // Tu equipo: los agentes del dueño como personajes (lo mismo que la pestaña
+  // Equipo de Hermes Phone). Al final del grupo para no correr ⌘1..⌘7.
+  {
+    kind: "route",
+    href: "/equipo",
+    label: "Equipo",
+    icon: (
+      <I>
+        <rect x="4.5" y="8" width="15" height="12" rx="4.5" />
+        <path d="M12 8V5.2M9.6 13.6v.8M14.4 13.6v.8" />
+        <circle cx="12" cy="3.9" r="1.3" />
+      </I>
+    ),
+  },
 ];
 
 const VIDA: Dest[] = [

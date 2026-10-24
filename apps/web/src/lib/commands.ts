@@ -211,6 +211,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/composicion"),
   },
   {
+    id: "ver-equipo",
+    label: "Tu equipo",
+    slash: "/equipo",
+    hint: "Tus agentes como personajes: quién trabaja, quién te necesita, sus corridas y su chat",
+    run: (ctx) => ctx.navigate("/equipo"),
+  },
+  {
     id: "ver-oficina",
     label: "Oficina de agentes",
     slash: "/oficina",

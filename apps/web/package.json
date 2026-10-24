@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start -p ${NEXT_PUBLIC_WEB_PORT:-31415}",
     "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings --test 'src/**/*.test.ts'",
     "usage:token": "node scripts/hermes-usage-token.mjs"
   },
   "dependencies": {

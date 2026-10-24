@@ -115,7 +115,7 @@ import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
 import { phoneLink } from "./phone/link.js";
 import { evolutionReport } from "./phone/evolution.js";
 import { phoneHome } from "./phone/home.js";
-import { cloudChat, cloudNewChat, cloudSend, invalidateCloudCache, listCloudAgents } from "./cloud/managed.js";
+import { cloudChat, cloudNewChat, cloudSend, createCloudAgent, invalidateCloudCache, listCloudAgents } from "./cloud/managed.js";
 import { companion, wireCompanion } from "./growth/index.js";
 import { parseGrowthSettings } from "@hermes/shared";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
@@ -1156,6 +1156,18 @@ const cloudError = (e: unknown) => ({ error: e instanceof Error ? e.message : St
 
 app.get("/cloud/agents", async (c) => {
   try { return c.json({ agents: await listCloudAgents() }); } catch (e) { return c.json(cloudError(e), 502); }
+});
+
+// Crear uno desde el teléfono: nombre, lo que hace y los sitios que puede revisar.
+app.post("/cloud/agents", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; role?: unknown; hosts?: unknown };
+  const name = typeof body.name === "string" ? body.name : "";
+  const role = typeof body.role === "string" ? body.role : "";
+  const hosts = Array.isArray(body.hosts) ? body.hosts.filter((h): h is string => typeof h === "string") : [];
+  try {
+    const e = await createCloudAgent({ name, role, hosts });
+    return c.json({ ok: true, agent: { id: e.id, name: e.name } });
+  } catch (e) { return c.json(cloudError(e), 502); }
 });
 
 app.get("/cloud/agents/:id/chat", async (c) => {
