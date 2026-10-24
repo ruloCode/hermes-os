@@ -1,0 +1,110 @@
+/* Máquina "ventana" (Fig 6). Tokens y estilos acotados a .vt-wrap / .vt. */
+
+.vt-wrap {
+  container-type: inline-size;
+}
+
+.vt-wrap .iso-figure {
+  margin: 0;
+}
+
+/* Abajo van dos renglones: la pista y, debajo, el readout (que puede partirse). */
+.vt-wrap .iso-plate {
+  padding: 44px 16px 74px;
+}
+
+.vt-wrap .iso-plate-corner[data-corner="hint"] {
+  bottom: 34px;
+}
+
+.vt-wrap .iso-plate-corner[data-corner="readout"] {
+  left: 0;
+  white-space: normal;
+  text-align: right;
+  line-height: 1.35;
+}
+
+.vt {
+  position: relative;
+  cursor: pointer;
+  border-radius: 6px;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.vt:focus {
+  outline: none;
+}
+
+.vt:focus-visible {
+  outline: 1px solid var(--anatomy-muted);
+  outline-offset: 6px;
+}
+
+.vt .iso-svg {
+  overflow: visible;
+}
+
+.vt-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* El hueco de un zócalo vacío. */
+.vt-hole {
+  fill: var(--anatomy-shade-0);
+  stroke: none;
+}
+
+.iso[data-theme="light"] .vt-hole {
+  fill: #d2d2cf;
+}
+
+/* Lo encendido entra y sale con un fundido corto, no de golpe. */
+.vt-col .iso-shade,
+.vt-col .iso-top,
+.vt-col .iso-fill {
+  transition: fill 380ms var(--anatomy-ease);
+}
+
+.vt-col .iso-edge {
+  transition: stroke 380ms var(--anatomy-ease);
+}
+
+.vt-needle {
+  stroke-width: 1.1;
+}
+
+.vt-drag {
+  fill: var(--anatomy-hi);
+  stroke: var(--anatomy-hi);
+  stroke-width: 0.4;
+  stroke-linejoin: round;
+}
+
+.vt-hub {
+  fill: var(--anatomy-lit);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vt * {
+    transition: none !important;
+  }
+}
+
+/* A ancho de teléfono la máquina se agranda un poco y el sobrante se recorta. */
+@container (max-width: 420px) {
+  .vt-wrap .vt {
+    overflow: hidden;
+  }
+
+  .vt-wrap .vt .iso-svg {
+    width: 114%;
+    margin: -3% -7% -2%;
+  }
+}

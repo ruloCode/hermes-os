@@ -179,6 +179,17 @@ const APRENDER: Dest[] = [
       </I>
     ),
   },
+  // Dojo de algoritmos: problemas en Python escritos por ti. Corchetes de código.
+  {
+    kind: "route",
+    href: "/dojo",
+    label: "Dojo",
+    icon: (
+      <I>
+        <path d="m8.5 8-4 4 4 4M15.5 8l4 4-4 4M13.2 5.5l-2.4 13" />
+      </I>
+    ),
+  },
   // Entender: el tutor de proyecto (repos + actas, explica dibujando).
   {
     kind: "route",

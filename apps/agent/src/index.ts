@@ -115,6 +115,7 @@ import { pointerContext, teleportWindowUnderCursor } from "./input/windows.js";
 import { phoneLink } from "./phone/link.js";
 import { evolutionReport } from "./phone/evolution.js";
 import { phoneHome } from "./phone/home.js";
+import { cloudChat, cloudNewChat, cloudSend, invalidateCloudCache, listCloudAgents } from "./cloud/managed.js";
 import { companion, wireCompanion } from "./growth/index.js";
 import { parseGrowthSettings } from "@hermes/shared";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
@@ -140,7 +141,18 @@ import {
   BROWSER_COMMANDS,
   type BrowserCommand,
 } from "./browser.js";
-import { lightsCommand, LIGHT_ACTIONS, type LightAction } from "./lights.js";
+import { lightsCommand, lightsInfo, LIGHT_ACTIONS, type LightAction } from "./lights.js";
+import { playYouTube, tvCommand, tvHome, tvNow, tvScene, tvScenes, tvSleepIn, TV_ACTIONS, type TvAction } from "./tv/index.js";
+import { parseSleepMinutes, tvTokenAllows } from "./tv/plan.js";
+import { addDayTask, dayView, sampleDay, setDayTaskDone } from "./day/index.js";
+import { agendaDays } from "./agenda/index.js";
+import { parseDue } from "./agenda/plan.js";
+import { wakatimeToday } from "./wakatime.js";
+import { learnAi, markSeen } from "./learn/ai.js";
+import { nextAlarm, setNextAlarm, tickScenes } from "./tv/schedule.js";
+import { GREETING_MP3, prepareGreeting, readGreeting } from "./tv/greeting.js";
+import { confirmWake, setWakeCommit, wakeCandidates, wakeStatus } from "./wake/index.js";
+import { pickWakeTarget } from "./wake/plan.js";
 import { ruloviewStatus, ruviewToken, startServer, stopServer } from "./ruloview/server.js";
 import { subscribeRuloview } from "./ruloview/stream.js";
 import { deleteScan, readRoom, ROOM_PATH, SCAN_MAX_BYTES, SCAN_PATH, writeRoom, writeScan } from "./ruloview/room.js";
@@ -148,6 +160,8 @@ import { avatarProvider, terminatorAvatar } from "./avatar.js";
 import { officeState, officeViewerJoined, officeWatched, officeWorkerPrivate, startOffice, subscribeOffice } from "./office/state.js";
 import { approvalState, decideApproval, pendingApprovals, requestApproval, runForToken } from "./office/approvals.js";
 import { mountGymRoutes } from "./gym/routes.js";
+import { mountEnglishPlanRoutes } from "./english/plan-routes.js";
+import { mountDojoRoutes } from "./dojo/routes.js";
 import { transcribe } from "./meetings/stt.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
@@ -380,7 +394,8 @@ app.use("*", async (c, next) => {
     const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const queryKey = c.req.method === "GET" ? (c.req.query("key") ?? "") : "";
     const staticOk = bearer === env.HERMES_API_KEY || queryKey === env.HERMES_API_KEY;
-    if (!staticOk) {
+    const tvOk = !!env.HERMES_TV_TOKEN && bearer === env.HERMES_TV_TOKEN && tvTokenAllows(c.req.method, c.req.path);
+    if (!staticOk && !tvOk) {
       const userId = await verifySupabaseToken(bearer || queryKey);
       if (!userId) return c.json({ error: "unauthorized" }, 401);
     }
@@ -1134,6 +1149,34 @@ app.post("/phone/notify", async (c) => {
   return c.json({ ok: true, notice });
 });
 
+// ── Agentes en la nube (Claude Managed Agents) ─────────────────────────
+// El teléfono los lista y conversa con ellos a través de Hermes: la llave de
+// Anthropic vive solo en esta Mac (cloud/managed.ts). Errores en {error}.
+const cloudError = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
+
+app.get("/cloud/agents", async (c) => {
+  try { return c.json({ agents: await listCloudAgents() }); } catch (e) { return c.json(cloudError(e), 502); }
+});
+
+app.get("/cloud/agents/:id/chat", async (c) => {
+  try { return c.json(await cloudChat(c.req.param("id"))); } catch (e) { return c.json(cloudError(e), 502); }
+});
+
+app.post("/cloud/agents/:id/chat", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { text?: unknown };
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return c.json({ error: "Falta el mensaje." }, 400);
+  try {
+    const r = await cloudSend(c.req.param("id"), text.slice(0, 8000));
+    invalidateCloudCache();
+    return c.json({ ok: true, ...r });
+  } catch (e) { return c.json(cloudError(e), 502); }
+});
+
+app.post("/cloud/agents/:id/chat/new", async (c) => {
+  try { await cloudNewChat(c.req.param("id")); invalidateCloudCache(); return c.json({ ok: true }); } catch (e) { return c.json(cloudError(e), 400); }
+});
+
 // Pantalla de inicio del teléfono en UN poll: evolución + próximo evento + lo de hoy.
 app.get("/phone/home", async (c) => c.json(await phoneHome()));
 
@@ -1270,6 +1313,138 @@ app.post("/lights/command", async (c) => {
 });
 
 app.get("/lights/state", async (c) => c.json(await lightsCommand("status")));
+
+// La tira como dato (brillo y tono reales) para los controles del teléfono.
+app.get("/lights/info", async (c) => c.json({ info: await lightsInfo() }));
+
+// ── TV (control Bluetooth por la ESP32 + adb; tv/index.ts) ─────────────
+// Mismo contrato { ok, detail | error }. La app de la TV entra con su propio
+// token y solo llega a /tv/home, /tv/scene y /tv/sleep.
+
+app.get("/tv/home", async (c) => c.json(await tvHome()));
+
+app.post("/tv/command", async (c) => {
+  const body = await c.req.json<{ action?: string; value?: string }>().catch(() => ({}) as { action?: string; value?: string });
+  const action = body.action?.trim() as TvAction | undefined;
+  if (!action || !TV_ACTIONS.includes(action)) {
+    return c.json({ ok: false, error: `action inválida (${TV_ACTIONS.join("|")})` }, 400);
+  }
+  const res = await tvCommand(action, body.value ?? "");
+  if (res.ok && action !== "status") emit({ kind: "tv", detail: `tv · ${res.detail}` });
+  return c.json(res);
+});
+
+// ── Mi día (agenda de hoy + pendientes + hábitos + escritorio/TV; day/) ──
+app.get("/day", async (c) => c.json(await dayView()));
+
+app.post("/day/tasks", async (c) => {
+  const { title, due } = await c.req.json<{ title?: string; due?: string }>().catch(() => ({ title: undefined, due: undefined }));
+  const t = title?.trim().slice(0, 140);
+  if (!t) return c.json({ ok: false, error: "Falta el título." }, 400);
+  const d = due == null || due === "" ? null : parseDue(due);
+  if (due && !d) return c.json({ ok: false, error: "due debe ser AAAA-MM-DD." }, 400);
+  const task = await addDayTask(t, d);
+  if (!task) return c.json({ ok: false, error: "No pude guardarla (¿Supabase?)." }, 503);
+  emit({ kind: "tv", detail: `pendiente de hoy · ${t}` });
+  return c.json({ ok: true, task });
+});
+
+// La agenda combinada: calendario + pendientes del dueño + lo que corren sus agentes, por día.
+app.get("/agenda", async (c) => c.json({ days: await agendaDays(Number(c.req.query("days") ?? 7) || 7) }));
+
+// Tiempo programando hoy (WakaTime); null = sin llave o sin respuesta.
+app.get("/wakatime/today", async (c) => c.json({ today: await wakatimeToday() }));
+
+// Aprender IA: la curaduría verificada con miniaturas, y ponerla en la TV.
+app.get("/learn/ai", async (c) => c.json((await learnAi()) ?? { weeks: [], videos: [] }));
+app.post("/learn/ai/play", async (c) => {
+  const { id } = await c.req.json<{ id?: string }>().catch(() => ({ id: undefined }));
+  const all = (await learnAi())?.videos ?? [];
+  const v = id ? all.find((x) => x.id === id) : all.find((x) => !x.seen);
+  if (!v) return c.json({ ok: false, error: id ? "Ese video no está en la curaduría." : "Ya viste toda la curaduría." }, 404);
+  const r = await playYouTube(v.id, v.title, v.channel);
+  if (r.ok) await markSeen(v.id);
+  return c.json(r);
+});
+
+// El teléfono avisa su próxima alarma: el "amanecer" de las luces corre N min antes.
+app.post("/day/alarm", async (c) => {
+  const { at } = await c.req.json<{ at?: string | null }>().catch(() => ({ at: undefined }));
+  if (at !== null && (typeof at !== "string" || !Number.isFinite(Date.parse(at)))) {
+    return c.json({ ok: false, error: "at debe ser una fecha ISO o null" }, 400);
+  }
+  const a = await setNextAlarm(at);
+  return c.json({ ok: true, at: a.at });
+});
+
+app.get("/day/alarm", async (c) => c.json({ at: await nextAlarm() }));
+
+app.post("/day/tasks/:id/done", async (c) => {
+  const { done } = await c.req.json<{ done?: boolean }>().catch(() => ({ done: undefined }));
+  const ok = await setDayTaskDone(Number(c.req.param("id")), done !== false);
+  return c.json(ok ? { ok: true } : { ok: false, error: "No encontré esa tarea." }, ok ? 200 : 404);
+});
+
+app.get("/tv/scenes", async (c) => c.json(await tvScenes()));
+
+// Qué está pasando en la TV ahora: prendida, app al frente y lo que suena (título real si la app lo da).
+app.get("/tv/now", async (c) => c.json(await tvNow()));
+
+// Saludo del despertar (paso tv-greeting): lo pinta y lo reproduce Hermes TV (GreetingActivity).
+app.get("/tv/greeting", async (c) => {
+  const g = await readGreeting();
+  return g ? c.json(g) : c.json({ error: "todavía no hay saludo" }, 404);
+});
+app.get("/tv/greeting.mp3", async (c) => {
+  const buf = await readFile(GREETING_MP3).catch(() => null);
+  if (!buf) return c.json({ error: "sin audio" }, 404);
+  return new Response(new Uint8Array(buf), { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
+});
+// QA: arma el saludo de ahora sin abrir nada en la TV (lo que se diría a las 6:00).
+// wake:true = con el discurso y el llamado a ponerse de pie (hora objetivo de ahora).
+app.post("/tv/greeting/preview", async (c) => {
+  const { outro, wake } = await c.req.json<{ outro?: string; wake?: boolean }>().catch(() => ({}) as { outro?: string; wake?: boolean });
+  const target = wake ? pickWakeTarget(await wakeCandidates(), new Date()) : null;
+  return c.json(await prepareGreeting(outro, target));
+});
+
+// ── Despertar con puntos (wake/) ─────────────────────────────────────────
+// La escena `despertar` abre la sesión; la TV (WakeActivity, con su token) la
+// lee y la confirma con OK; el chat confirma con la tool wake_up.
+app.get("/wake", async (c) => c.json(await wakeStatus()));
+app.post("/wake/confirm", async (c) => {
+  const body = await c.req.json<{ by?: string }>().catch(() => ({}) as { by?: string });
+  const by = ["tv", "phone", "chat", "dashboard"].includes(body.by ?? "") ? body.by! : "dashboard";
+  const r = await confirmWake(by);
+  return r.ok ? c.json(r) : c.json(r, 409);
+});
+app.post("/wake/commit", async (c) => {
+  const { time } = await c.req.json<{ time?: string | null }>().catch(() => ({ time: undefined }));
+  if (time !== null && typeof time !== "string") return c.json({ ok: false, error: "time debe ser HH:MM o null" }, 400);
+  const r = await setWakeCommit(time);
+  return r.ok ? c.json(r) : c.json(r, 400);
+});
+
+app.post("/tv/scene", async (c) => {
+  const body = await c.req.json<{ scene?: string }>().catch(() => ({}) as { scene?: string });
+  const id = body.scene?.trim().toLowerCase() ?? "";
+  const res = id ? await tvScene(id) : null;
+  if (!res) {
+    const { scenes } = await tvScenes();
+    return c.json({ ok: false, error: `escena desconocida (${scenes.map((s) => s.id).join("|")})` }, 400);
+  }
+  emit({ kind: "tv", detail: `${res.name} · ${res.steps.join(" · ")}` });
+  return c.json(res);
+});
+
+app.post("/tv/sleep", async (c) => {
+  const body = await c.req.json<{ minutes?: unknown }>().catch(() => ({}) as { minutes?: unknown });
+  const minutes = parseSleepMinutes(body.minutes);
+  if (minutes === null) return c.json({ ok: false, error: "minutes debe ser 0-360 (0 cancela)" }, 400);
+  const res = tvSleepIn(minutes);
+  emit({ kind: "tv", detail: minutes ? `tv · se apaga en ${minutes} min` : "tv · temporizador cancelado" });
+  return c.json({ ok: true, ...res });
+});
 
 // ── Avatar Terminator (demo) ───────────────────────────────────────────
 // Foto de la cámara (multipart `photo`) → avatar T-800 de esa persona.
@@ -2219,6 +2394,8 @@ app.delete("/content/refs/:id", async (c) => {
 // en packages/shared/src/composicion.ts); HERMES_COMPOSICION=off las apaga.
 mountComposicionRoutes(app);
 mountGymRoutes(app);
+mountEnglishPlanRoutes(app);
+mountDojoRoutes(app);
 
 // ── Hábitos y metas (desarrollo personal) ──────────────────────────────
 
@@ -3720,6 +3897,10 @@ registerJob("finance-balance-snapshot", 6 * 60 * 60_000, async () => {
   const wallets = await listWallets();
   return wallets.length ? recordBalance(wallets, env.SCHEDULED_TZ) : null;
 }, (n) => (n ? `${n} días con foto del saldo` : null));
+// Mi día: escritorio (teclado/mouse de la Mac) y TV prendida, una muestra por minuto.
+registerJob("day-sample", 60_000, sampleDay, (r) => (r ? `escritorio ${r.desk ? "sí" : "no"} · TV ${r.tv ? "sí" : "no"}` : null));
+// El cuarto sigue tu reloj: escenas con cron / antes de la alarma (tv/schedule.ts).
+registerJob("room-scenes", 60_000, tickScenes, (ids) => (ids.length ? `disparé ${ids.join(", ")}` : "nada tocaba"));
 registerJob("presence-heartbeat", 30_000, pushPresence, () =>
   hasSupabase() ? "latido enviado" : null,
 );

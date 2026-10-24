@@ -36,6 +36,8 @@ import {
   parseStrategic,
   TEAM_COACH_MODE,
   teamReviewMarkdown,
+  LensStreamer,
+  toCue,
 } from "@hermes/shared";
 import type {
   AutoHelpMode,
@@ -169,6 +171,8 @@ interface LiveSession {
   selfSpeaker?: string;
   /** Capa rápida: ms de sesión en que se pidió cada sugerencia en curso (por id). */
   fastStartedAt: Map<string, number>;
+  /** Lente: tarjetas parciales mientras la capa rápida escribe. */
+  lensStreams: LensStreamer;
   mode: LiveAudioMode;
   languages: string[];
   suggestionLang: LiveSuggestionLang;
@@ -261,6 +265,7 @@ export async function startLiveMeeting(input: {
     segmentIndex: new Map(),
     speakerNames: {},
     fastStartedAt: new Map(),
+    lensStreams: new LensStreamer(),
     suggestions: [],
     stt: null,
     sttName: provider.name,
@@ -1041,6 +1046,7 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
     // al que responde), y no cambia al terminar: el historial no salta de orden.
     const atMs = Date.now() - s.startedAt;
     s.fastStartedAt.set(ev.id, atMs);
+    s.lensStreams.start(ev.id, ev.kind ?? "decir", ev.trigger, atMs);
     broadcast(s, {
       type: "suggestion_start",
       id: ev.id,
@@ -1050,12 +1056,16 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
     });
   } else if (ev.type === "delta") {
     broadcast(s, { type: "suggestion_delta", id: ev.id, text: ev.text });
+    const partial = s.lensStreams.delta(ev.id, ev.text, Date.now());
+    if (partial) broadcast(s, { type: "cue", cue: partial });
   } else if (ev.type === "aborted") {
     s.fastStartedAt.delete(ev.id);
+    s.lensStreams.end(ev.id);
     broadcast(s, { type: "suggestion_aborted", id: ev.id });
   } else if (ev.type === "done") {
     const startedAtMs = s.fastStartedAt.get(ev.id);
     s.fastStartedAt.delete(ev.id);
+    s.lensStreams.end(ev.id);
     const text = ev.text.trim();
     // "—" es la señal de silencio del modelo: este momento no ameritaba soplo.
     if (!text || text === "—") {
@@ -1725,5 +1735,11 @@ function broadcast(s: LiveSession, ev: LiveServerEvent): void {
     } catch {
       /* cliente roto: su close lo saca del set */
     }
+  }
+  // Lente: toda sugerencia terminada sale también en formato de mirar. Aquí y
+  // no en cada motor, para que ninguno nuevo se quede sin tarjeta.
+  if (ev.type === "suggestion" || ev.type === "suggestion_done") {
+    const cue = toCue(ev.suggestion);
+    if (cue) broadcast(s, { type: "cue", cue });
   }
 }

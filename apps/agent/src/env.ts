@@ -16,6 +16,9 @@ export const env = {
   // Usuarios de Supabase Auth (ids o emails, separados por coma) que pueden
   // entrar con su JWT (app móvil). Vacío = ningún JWT entra (auth.ts).
   HERMES_ALLOWED_USERS: process.env.HERMES_ALLOWED_USERS || "",
+  // Llave de la app de la TV (hermes-tv): SOLO abre /tv/home, /tv/scene y
+  // /tv/sleep (tv/plan.ts → tvTokenAllows). Vacía = la TV no entra.
+  HERMES_TV_TOKEN: process.env.HERMES_TV_TOKEN || "",
   // Multi-máquina: dirección con la que OTROS PCs de la red alcanzan a este
   // agente. Sin ella se deriva de la IP LAN real (presence.ts) — se pone a
   // mano solo si hay un nombre/puerto de por medio (Tailscale, reverse proxy).
@@ -81,6 +84,9 @@ export const env = {
   GYM_MODEL: process.env.HERMES_GYM_MODEL || "sonnet",
   // Tutor de proyecto (Entender): explica leyendo repos y actas y dibujando.
   TUTOR_MODEL: process.env.HERMES_TUTOR_MODEL || "sonnet",
+  // Dojo de algoritmos (dojo/coach.ts): revisa si entendiste, cuestiona tu plan
+  // y explica por qué falla un test, sin escribir nunca la solución.
+  DOJO_MODEL: process.env.HERMES_DOJO_MODEL || "sonnet",
   // Otras formas en que te llaman en las reuniones (coma): "te nombraron" las
   // reconoce además de HERMES_OWNER_NAME.
   OWNER_ALIASES: (process.env.HERMES_OWNER_ALIASES || "")

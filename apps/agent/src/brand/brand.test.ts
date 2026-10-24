@@ -18,7 +18,7 @@ import {
   toArgbHex,
   type BrandPalette,
 } from "@hermes/shared";
-import { kotlinName, renderPhoneBrand } from "./phone.js";
+import { kotlinName, renderPhoneBrand, renderTvBrand } from "./phone.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const css = readFileSync(join(ROOT, "apps/web/src/app/globals.css"), "utf8");
@@ -93,6 +93,18 @@ test("Hermes Phone tiene la marca al día (pnpm brand:sync)", { skip: !existsSyn
   for (const [rel, content] of Object.entries(renderPhoneBrand())) {
     const file = join(PHONE, rel);
     assert.ok(existsSync(file), `falta ${rel} en el teléfono: corre pnpm brand:sync`);
+    assert.equal(readFileSync(file, "utf8"), content, `${rel} desactualizado: corre pnpm brand:sync`);
+  }
+});
+
+// Lo mismo para Hermes TV (../hermes-tv): su Brand.kt cambia solo el paquete.
+const TV = process.env.HERMES_TV_PATH ?? join(ROOT, "../hermes-tv");
+test("Hermes TV tiene la marca al día (pnpm brand:sync)", { skip: !existsSync(TV) && "sin ../hermes-tv en esta máquina" }, () => {
+  const files = renderTvBrand();
+  assert.ok(files["app/src/main/java/os/hermes/tv/ui/Brand.kt"].includes("package os.hermes.tv.ui"));
+  for (const [rel, content] of Object.entries(files)) {
+    const file = join(TV, rel);
+    assert.ok(existsSync(file), `falta ${rel} en la TV: corre pnpm brand:sync`);
     assert.equal(readFileSync(file, "utf8"), content, `${rel} desactualizado: corre pnpm brand:sync`);
   }
 });

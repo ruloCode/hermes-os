@@ -38,6 +38,10 @@ import {
 } from "../linear.js";
 import { createPiece, listPieces } from "../content/store.js";
 import { lightsCommand, LIGHT_ACTIONS } from "../lights.js";
+import { tvCommand, tvScene, tvScenes, tvSleepIn, TV_ACTIONS } from "../tv/index.js";
+import { addDayTask, findOwnerTask, setDayTaskDone, tasksOn } from "../day/index.js";
+import { confirmWake, setWakeCommit, wakeStatus } from "../wake/index.js";
+import { parseDue } from "../agenda/plan.js";
 import { STAGES, daysInStage, isStuck, stageGates } from "@hermes/shared";
 import { OWNER } from "../owner.js";
 import { addProfileEntry, profileEntries, removeProfileEntry, replaceProfileEntry, PROFILE_MAX_CHARS } from "../profile.js";
@@ -706,6 +710,124 @@ const controlLightsTool = tool(
   },
 );
 
+const controlTvTool = tool(
+  "control_tv",
+  `Controla la TV de ${OWNER} (Google TV) con su control Bluetooth (una ESP32 conectada a la Mac) y adb. ` +
+    "action=key manda una tecla (home, back, up/down/left/right, ok, vol+, vol-, mute, play, next, prev, menu, search); " +
+    "text escribe en el campo que tenga el foco; power_on/power_off prende o apaga (revisa el estado antes: el botón es un interruptor); " +
+    "open_app abre una app por nombre (Netflix, YouTube, Disney+, Prime Video, HBO Max, Spotify); " +
+    "youtube busca en YouTube lo que pidió (value = la búsqueda, ej. 'rutina de estiramiento 10 minutos') y pone el primer video de verdad en la TV; " +
+    "learn_next pone el siguiente video sin ver de su plan para aprender IA ('pon el siguiente de mi plan'); status dice cómo está. " +
+    "Para 'modo película' / 'buenas noches' usa tv_scene, que también mueve las luces.",
+  {
+    action: z.enum(TV_ACTIONS).describe("key · text · power_on · power_off · open_app · youtube · status"),
+    value: z.string().optional().describe("key: nombre de la tecla · text: lo que se escribe · open_app: nombre de la app · youtube: qué buscar"),
+  },
+  async (args) => {
+    const res = await tvCommand(args.action, args.value ?? "");
+    return text(res.ok ? `Listo: ${res.detail}.` : `No pude: ${res.error}`);
+  },
+);
+
+const tvSceneTool = tool(
+  "tv_scene",
+  `Escenas del cuarto de ${OWNER} (luces + TV, configurables en ~/.hermes-os/escenas.json): ` +
+    "'cine' = Modo película, 'noches' = Buenas noches, más las que él haya creado (sin scene ni minutes devuelve la lista). " +
+    "Con minutes (y sin scene) programa el apagado de la TV en N minutos ('apaga la tele en 40 minutos'); minutes=0 lo cancela.",
+  {
+    scene: z.string().optional().describe("id de la escena: cine · noches · las del dueño"),
+    minutes: z.number().int().min(0).max(360).optional().describe("Temporizador de apagado en minutos (0 cancela)"),
+  },
+  async (args) => {
+    if (args.minutes !== undefined) {
+      const { sleep_at } = tvSleepIn(args.minutes);
+      return text(sleep_at ? `La TV se apaga a las ${new Date(sleep_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}.` : "Temporizador cancelado.");
+    }
+    if (!args.scene) {
+      const { scenes } = await tvScenes();
+      return text(`Escenas: ${scenes.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
+    }
+    const res = await tvScene(args.scene.trim().toLowerCase());
+    if (!res) return text(`No existe la escena '${args.scene}'.`);
+    return text(`${res.ok ? "Listo" : "A medias"} — ${res.name}: ${res.steps.join("; ")}.`);
+  },
+);
+
+const dayTaskTool = tool(
+  "day_task",
+  `Pendientes PERSONALES de ${OWNER} (los de "Mi día": se ven en la TV, en el inicio del teléfono y en la Agenda junto a sus eventos). ` +
+    "add = crea uno ('recuérdame comprar café', 'para el jueves llamar al banco'): pasa la fecha como date AAAA-MM-DD resuelta desde la fecha actual (sin fecha = hoy). " +
+    "list = los de un día (date; sin date = hoy). done = lo marca hecho por id o por un trozo del título ('ya compré el café'). " +
+    "NO es para tareas de proyectos de código (eso es Linear).",
+  {
+    action: z.enum(["add", "list", "done"]).describe("add · list · done"),
+    title: z.string().max(140).optional().describe("add: el pendiente tal como lo dijo · done: id o trozo del título"),
+    date: z.string().optional().describe("AAAA-MM-DD (add: para cuándo · list: qué día)"),
+  },
+  async (args) => {
+    const date = args.date ? parseDue(args.date) : null;
+    if (args.date && !date) return text(`La fecha debe ser AAAA-MM-DD (recibí '${args.date}').`);
+    if (args.action === "add") {
+      if (!args.title?.trim()) return text("¿Qué pendiente anoto?");
+      const t = await addDayTask(args.title.trim(), date, "voice");
+      return text(t ? `Anotado${date ? ` para el ${date}` : " para hoy"}: ${t.title}.` : "No pude guardarlo (¿Supabase?).");
+    }
+    if (args.action === "list") {
+      const list = await tasksOn(date ?? undefined);
+      if (!list.length) return text(`No hay pendientes${date ? ` el ${date}` : " hoy"}.`);
+      return text(list.map((t) => `${t.done ? "✓" : "○"} [${t.id}] ${t.title}`).join("\n"));
+    }
+    if (!args.title?.trim()) return text("¿Cuál pendiente marco como hecho?");
+    const t = await findOwnerTask(args.title);
+    if (!t) return text(`No encontré un pendiente abierto que diga '${args.title}'.`);
+    return text((await setDayTaskDone(t.id, true)) ? `Hecho: ${t.title}.` : "No pude marcarlo.");
+  },
+);
+
+const wakeTool = tool(
+  "wake_up",
+  `Despertar con puntos de ${OWNER}: cada mañana la TV espera a que confirme que está de pie y le da puntos según la diferencia con su hora (menos minutos, más puntos; racha por mañanas a tiempo). ` +
+    "confirm = 'ya me levanté' / 'ya estoy de pie' (solo si lo dice él: es su palabra lo que cuenta). " +
+    "commit = 'mañana me levanto a las 5:20' (time HH:MM, 24 h; manda sobre la alarma del teléfono y mueve el amanecer y el despertar del cuarto); time vacío con commit borra el compromiso. " +
+    "status = puntos de hoy, de la semana, racha y próxima hora.",
+  {
+    action: z.enum(["confirm", "commit", "status"]).describe("confirm · commit · status"),
+    time: z.string().optional().describe("commit: HH:MM en 24 h ('05:20')"),
+  },
+  async (args) => {
+    if (args.action === "confirm") {
+      const r = await confirmWake("chat");
+      if (!r.ok) return text(r.error);
+      const x = r.record;
+      return text(
+        `${r.already ? "Ya habías confirmado hoy" : "Confirmado"}: ${x.delta_min! <= 0 ? "a tu hora" : `${x.delta_min} min después de tu hora`}, ${x.points} puntos (${x.base} + ${x.bonus} de racha). Racha ${x.streak}; semana ${r.stats.week_points} puntos.`,
+      );
+    }
+    if (args.action === "commit") {
+      const r = await setWakeCommit(args.time?.trim() ? args.time.trim() : null);
+      if (!r.ok) return text(r.error);
+      return text(
+        r.commit
+          ? `Anotado: te levantas el ${new Date(r.commit.at).toLocaleString("es-CO", { weekday: "long", hour: "numeric", minute: "2-digit", timeZone: env.SCHEDULED_TZ })}. El cuarto se ajusta a esa hora.`
+          : "Compromiso borrado: manda la alarma del teléfono.",
+      );
+    }
+    const st = await wakeStatus();
+    const parts = [
+      st.today
+        ? st.today.confirmed_at
+          ? `Hoy: ${st.today.points} puntos (${st.today.delta_min} min de diferencia).`
+          : "Hoy: no confirmó, 0 puntos."
+        : st.session
+          ? `Hoy: esperando que te levantes (van ${st.session.minutes_late} min, valdría ${st.session.points_now}).`
+          : "Hoy: sin despertar registrado.",
+      `Semana: ${st.stats.week_points} puntos en ${st.stats.week_days} días. Total: ${st.stats.total_points}. Racha: ${st.stats.streak} (mejor ${st.stats.best_streak}).`,
+      st.next ? `Próxima hora: ${new Date(st.next.at).toLocaleString("es-CO", { weekday: "long", hour: "numeric", minute: "2-digit", timeZone: env.SCHEDULED_TZ })} (${st.next.source}).` : "No hay próxima hora conocida.",
+    ];
+    return text(parts.join(" "));
+  },
+);
+
 // ── Perfil del dueño (USER.md) ─────────────────────────────────────────
 
 const updateProfileTool = tool(
@@ -890,6 +1012,10 @@ const HERMES_TOOLS = [
   createContentIdeaTool,
   listContentPiecesTool,
   controlLightsTool,
+  controlTvTool,
+  tvSceneTool,
+  dayTaskTool,
+  wakeTool,
   updateProfileTool,
   manageSkillTool,
   getDailyBriefTool,

@@ -1,0 +1,98 @@
+/* Fig 2 · clasificadora de fichas. Tokens propios bajo .cp; todo color sale de
+   las variables del kit, así que los dos temas funcionan sin más. */
+.cp {
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  container-type: inline-size;
+}
+
+.cp:focus-visible {
+  outline: 1px solid var(--anatomy-muted);
+  outline-offset: 6px;
+}
+
+/* La cara de la ficha es la tapa clara del sólido; los puntos del canto la hacen girar. */
+.cp-coin-dot {
+  fill: var(--anatomy-mid);
+  stroke: none;
+}
+
+.cp-coin-value {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Las fichas que esperan en el tubo van un tono abajo: la que importa es la que rueda. */
+.cp-coin[data-dim] .iso-edge {
+  stroke: var(--anatomy-mid);
+}
+
+.cp-coin[data-dim] .cp-coin-value {
+  fill: var(--anatomy-mid);
+}
+
+.cp-plate,
+.cp-card {
+  letter-spacing: 0;
+}
+
+/* Lámpara de cada compuerta: apagada · mirando · no · sí (la única pieza encendida). */
+.cp-lamp .cp-glow {
+  fill: var(--anatomy-lit);
+  stroke: none;
+  opacity: 0;
+  filter: blur(2.2px);
+  transition: opacity 220ms var(--anatomy-ease);
+}
+
+.cp-lamp[data-state="ask"] .iso-top {
+  fill: var(--anatomy-lit-shade);
+}
+
+.cp-lamp[data-state="ask"] .iso-edge {
+  stroke: var(--anatomy-hi);
+}
+
+.cp-lamp[data-state="no"] .iso-top {
+  fill: var(--anatomy-shade-0);
+}
+
+.cp-lamp[data-state="no"] .iso-edge {
+  stroke: var(--anatomy-mid);
+}
+
+.cp-lamp[data-state="yes"] .iso-top,
+.cp-lamp[data-state="yes"] .iso-shade,
+.cp-lamp[data-state="yes"] .iso-fill {
+  fill: var(--anatomy-lit);
+}
+
+.cp-lamp[data-state="yes"] .iso-edge {
+  stroke: var(--anatomy-lit);
+}
+
+.cp-lamp[data-state="yes"] .cp-glow {
+  opacity: 0.55;
+}
+
+.cp-soft {
+  opacity: 0.5;
+}
+
+/* A ancho de teléfono la máquina se agranda un poco dentro de la tarjeta. */
+@container (max-width: 400px) {
+  .cp .iso-svg {
+    width: 108%;
+    margin: -2% -4% -1%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp * {
+    transition: none !important;
+  }
+}

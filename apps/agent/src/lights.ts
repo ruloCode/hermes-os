@@ -224,6 +224,22 @@ async function setWhite(kelvin: number): Promise<Result> {
  * (brillo/color/blanco/efecto) se manda `on` antes: "ponla en azul" con la
  * tira apagada debe encenderla — dos comandos siguen siendo ~1 s.
  */
+/** Estado de la tira como dato (para la UI): sin tira o sin respuesta → null, nunca un valor inventado. */
+export async function lightsInfo(): Promise<{ on: boolean; brightness: number | null; kelvin: number | null; color: string | null; effect: string | null } | null> {
+  if (!LIGHTS_HOST) return null;
+  const info = await readLightInfo();
+  if (!info) return null;
+  const ls = info.light_state;
+  const kelvin = (ls.color_temp ?? 0) > 0 ? ls.color_temp! : null;
+  return {
+    on: !!ls.on_off,
+    brightness: ls.brightness ?? null,
+    kelvin,
+    color: kelvin == null && (ls.saturation ?? 0) > 0 ? hueName(ls.hue ?? 0) : null,
+    effect: info.effect?.enable && info.effect.name ? info.effect.name : null,
+  };
+}
+
 export async function lightsCommand(action: LightAction, value?: string): Promise<Result> {
   if (!LIGHTS_HOST) return { ok: false, error: "Luces no configuradas: define HERMES_LIGHTS_HOST (IP de la tira Kasa en la LAN)." };
   const val = value?.trim() ?? "";
@@ -305,12 +321,17 @@ async function lightsStatus(): Promise<Result> {
   const ls = info.light_state;
   if (!ls.on_off) return { ok: true, detail: "la tira está apagada" };
 
+  // En el protocolo de TP-Link color_temp > 0 = modo blanco: el hue/saturación
+  // que quedó guardado de un color anterior se IGNORA. Mirar la saturación
+  // primero hacía decir "rojo" a una tira en blanco cálido (2026-10-20).
   const look =
     info.effect?.enable && info.effect.name
       ? `efecto ${info.effect.name}`
-      : (ls.saturation ?? 0) > 0
-        ? `color ${hueName(ls.hue ?? 0)}`
-        : `blanco (${ls.color_temp ?? "?"}K)`;
+      : (ls.color_temp ?? 0) > 0
+        ? `blanco (${ls.color_temp}K)`
+        : (ls.saturation ?? 0) > 0
+          ? `color ${hueName(ls.hue ?? 0)}`
+          : "blanco";
   const watts = info.powerMw != null ? ` · ${(info.powerMw / 1000).toFixed(1)} W` : "";
   return { ok: true, detail: `encendida al ${ls.brightness ?? "?"}%, ${look}${watts}` };
 }

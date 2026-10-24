@@ -53,3 +53,7 @@ export * from "./articulation-gym.js";
 export * from "./speech.js";
 export * from "./growth.js";
 export * from "./brand.js";
+export * from "./english-plan.js";
+export * from "./lens.js";
+export * from "./dojo.js";
+export * from "./dojo-catalog.js";

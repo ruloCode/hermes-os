@@ -16,6 +16,12 @@
 // la cabecera — antes eran dos botones con borde rojo y verde perdidos al
 // final de la tira de métricas. Las tres columnas (sesiones · reporte · riel)
 // se separan con hairlines y ninguna lleva caja: se elige, se lee, se actúa.
+//
+// Plan de estudios (2026-10-20, docs/plan-ingles.md): la vista abre en PLAN,
+// una ruta estilo Duolingo de 8 unidades que salió de analizar todas las
+// clases registradas; "Sesiones" es lo de antes (historial + reportes). Una
+// lección abierta toma el lienzo entero; la de voz abre a la tutora en modo
+// lección y, mientras dura la llamada, el riel muestra qué se está entrenando.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ViewHeader } from "@/components/ui/ViewHeader";
@@ -40,11 +46,43 @@ import { useClassPip } from "@/components/live/ClassPip";
 import { useLiveMeeting } from "@/state/LiveMeetingProvider";
 import { usePracticeCompanion } from "@/hooks/usePracticeCompanion";
 import { PracticeSessionRail } from "@/components/ingles/PracticeSessionRail";
+import { Segmented } from "@/components/ui/Segmented";
+import { useConversationControls } from "@elevenlabs/react";
+import { planLesson, planUnit } from "@hermes/shared";
+import { useEnglishPlan } from "@/hooks/useEnglishPlan";
+import { takeLessonOpening } from "@/lib/english-lesson";
+import { PlanTab } from "@/components/ingles/plan/PlanTab";
+import { LessonPlayer } from "@/components/ingles/plan/LessonPlayer";
+
+type InglesTab = "plan" | "sesiones";
+const TAB_KEY = "hermes-ingles-tab";
+
+function readTab(): InglesTab {
+  try {
+    return localStorage.getItem(TAB_KEY) === "sesiones" ? "sesiones" : "plan";
+  } catch {
+    return "plan";
+  }
+}
 
 const PRACTICE_HABIT = "práctica de inglés";
 
-export function InglesView() {
+export function InglesView({ active = true }: { active?: boolean }) {
   const { sessions, vocab, refresh } = useEnglish();
+  const planData = useEnglishPlan();
+  const [tab, setTabState] = useState<InglesTab>("plan");
+  useEffect(() => setTabState(readTab()), []);
+  const setTab = (t: InglesTab) => {
+    setTabState(t);
+    try {
+      localStorage.setItem(TAB_KEY, t);
+    } catch {
+      /* sin storage: la pestaña dura la sesión */
+    }
+  };
+  const [openLesson, setOpenLesson] = useState<string | null>(null);
+  const closeLesson = useCallback(() => setOpenLesson(null), []);
+  const { sendUserMessage } = useConversationControls();
   const voice = useVoiceConnect();
   const vida = useVidaContext();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -108,6 +146,52 @@ export function InglesView() {
     prevLiveRef.current = tutorLive;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tutorLive]);
+  // Lección del plan con la tutora: su saludo es fijo, así que el primer turno
+  // lo mandamos por ti apenas conecta (si la práctica no es una lección, no
+  // hay nada pendiente y esto no hace nada).
+  useEffect(() => {
+    if (!(voice.mode === "tutor" && voice.connected)) return;
+    const opening = takeLessonOpening();
+    if (!opening) return;
+    const t = setTimeout(() => {
+      try {
+        sendUserMessage(opening);
+      } catch {
+        /* sin canal: la tutora igual tiene el contexto de la lección */
+      }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [voice.mode, voice.connected, sendUserMessage]);
+
+  // Al colgar, la práctica se guarda y la lección se cierra en el agente: el
+  // plan se refresca un par de veces mientras eso llega.
+  useEffect(() => {
+    if (tutorLive || !planData.plan?.pendingTutor) return;
+    const a = setTimeout(() => void planData.refresh(), 3_000);
+    const b = setTimeout(() => void planData.refresh(), 9_000);
+    return () => {
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tutorLive]);
+
+  const callTutorLesson = useCallback(
+    (lessonId: string) => {
+      setClassError(null);
+      if (live.active) return;
+      void voice.switchToTutor({ lessonId });
+    },
+    [live.active, voice],
+  );
+  const tutorBlocked = !voice.tutorConfigured
+    ? "Falta NEXT_PUBLIC_ELEVENLABS_TUTOR_AGENT_ID (pnpm setup:elevenlabs)."
+    : live.active
+      ? "Hay una junta o una clase en vivo: termínala antes de llamar a la tutora."
+      : voice.error || null;
+  const pendingLesson = planData.plan?.pendingTutor ? planLesson(planData.plan.pendingTutor.lessonId) : null;
+  const pendingUnit = pendingLesson ? planUnit(pendingLesson.unit) : null;
+
   const addSessionWord = useCallback((w: SessionWord) => {
     setSessionWords((prev) => (prev.some((x) => x.term === w.term) ? prev : [w, ...prev]));
   }, []);
@@ -138,12 +222,31 @@ export function InglesView() {
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ViewHeader
         title="Inglés"
+        onBack={openLesson && !tutorLive && !classLive ? closeLesson : undefined}
+        backLabel="Plan"
+        tabs={
+          tutorLive || classLive || openLesson ? undefined : (
+            <Segmented
+              value={tab}
+              onChange={setTab}
+              ariaLabel="Secciones de inglés"
+              options={[
+                { value: "plan", label: "Plan" },
+                { value: "sesiones", label: "Sesiones", count: sessions.length || undefined },
+              ]}
+            />
+          )
+        }
         meta={
           classLive
             ? "En clase"
             : tutorLive
-              ? "Practicando"
-              : sessions.length > 0
+              ? pendingUnit
+                ? `Lección · ${pendingUnit.title}`
+                : "Practicando"
+              : tab === "plan" && planData.plan
+                ? `${planData.plan.xp.total} XP · ${planData.plan.units.filter((u) => u.mastered).length} de ${planData.plan.units.length} unidades`
+                : sessions.length > 0
                 ? `${sessions.length} ${sessions.length === 1 ? "sesión" : "sesiones"}`
                 : undefined
         }
@@ -178,7 +281,7 @@ export function InglesView() {
       />
 
       {/* En vivo (práctica o clase) la conversación manda: las stats esperan. */}
-      <div className={`shrink-0 pb-3 ${tutorLive || classLive ? "hidden" : ""}`}>
+      <div className={`shrink-0 pb-3 ${tutorLive || classLive || tab === "plan" ? "hidden" : ""}`}>
         <EnglishStats sessions={sessions} vocab={vocab} streak={streak} />
         {classError && (
           <p className="mt-3 flex items-center gap-2 text-sm text-text-dim">
@@ -220,9 +323,31 @@ export function InglesView() {
         </div>
       )}
 
-      {/* lg: la única fila mide exactamente el alto disponible (minmax(0,1fr));
+      {/* Plan: ruta + riel, o la lección abierta a todo el lienzo. */}
+      {!tutorLive && !classLive && tab === "plan" ? (
+        openLesson && planData.plan ? (
+          <LessonPlayer
+            lessonId={openLesson}
+            plan={planData.plan}
+            active={active}
+            submitQuiz={planData.submitQuiz}
+            submitDrill={planData.submitDrill}
+            onExit={closeLesson}
+            onOpen={setOpenLesson}
+            tutor={{
+              canCall: voice.tutorConfigured && !live.active,
+              blocked: tutorBlocked,
+              call: callTutorLesson,
+              cancel: () => void planData.cancelTutor(),
+            }}
+          />
+        ) : (
+          <PlanTab plan={planData.plan} error={planData.error} onStart={setOpenLesson} />
+        )
+      ) : (
+      /* lg: la única fila mide exactamente el alto disponible (minmax(0,1fr));
           sin esto la fila es `auto`, crece con el reporte y su scroll interno
-          nunca se activa (el contenido se corta). */}
+          nunca se activa (el contenido se corta). */
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)] lg:gap-0">
         {classLive ? (
           /* Takeover de clase: transcript + compañera + coach, todo el ancho */
@@ -282,6 +407,18 @@ export function InglesView() {
             en reposo = qué hacer con lo aprendido */}
         {classLive ? null : tutorLive ? (
           <div className="col-span-12 flex min-h-[260px] flex-col gap-6 md:col-span-4 lg:col-span-4 lg:ml-6 lg:min-h-0 lg:border-l lg:border-line lg:pl-4">
+            {pendingUnit && (
+              <RailSection label="Lección del plan">
+                <p className="text-sm font-medium text-text">{pendingUnit.title}</p>
+                <ul className="flex flex-col gap-1.5 pt-1">
+                  {pendingUnit.rule.slice(0, 3).map((r) => (
+                    <li key={r} className="text-sm leading-relaxed text-text-dim">
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              </RailSection>
+            )}
             <RailSection label="Esta práctica">
               <PracticeSessionRail companion={companion} fromLine={practiceFrom} />
             </RailSection>
@@ -312,6 +449,7 @@ export function InglesView() {
           </aside>
         )}
       </div>
+      )}
     </div>
   );
 }

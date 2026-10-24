@@ -9,6 +9,7 @@ import type { EnglishError, EnglishSession, VocabEntry } from "@hermes/shared";
 import { emit } from "../events.js";
 import { checkinHabit, createHabit, resolveHabit } from "../habits/store.js";
 import { supabase } from "../supabase.js";
+import { notePracticeSaved } from "./plan-store.js";
 
 const HABIT_NAME = "Práctica de inglés";
 /** Vocab sin repasar hace más de esto vuelve a la cola (repaso espaciado simple). */
@@ -64,6 +65,12 @@ export async function saveEnglishSession(input: SaveSessionInput): Promise<Engli
     console.error("[english] check-in hábito:", String(err).slice(0, 120));
   }
   const session = rowToSession(data as Record<string, unknown>);
+  // ¿Era la lección de voz del plan de estudios? La cierra con esta sesión.
+  try {
+    await notePracticeSaved(session);
+  } catch (err) {
+    console.error("[english] plan:", String(err).slice(0, 120));
+  }
   emit({
     kind: "task_done",
     taskId: `english-${session.id}`,

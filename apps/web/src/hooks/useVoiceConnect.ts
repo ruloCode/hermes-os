@@ -3,7 +3,8 @@
 import { useCallback, useState } from "react";
 import { useConversationControls, useConversationStatus } from "@elevenlabs/react";
 import { salaAgentKey, useVoice, type VoiceMode } from "@/components/VoiceBusyContext";
-import { hermesGet } from "@/lib/hermes";
+import { hermesGet, hermesPost } from "@/lib/hermes";
+import { setLessonOpening } from "@/lib/english-lesson";
 import { useLiveMeeting } from "@/state/LiveMeetingProvider";
 
 /**
@@ -43,6 +44,8 @@ export function useVoiceConnect() {
       mode?: VoiceMode;
       /** Texto libre para {{session_scope}} (la Sala lo usa para decir a quién señalas). */
       scopePrompt?: string;
+      /** Tutora en modo LECCIÓN del plan de estudios (id de la lección de voz). */
+      lessonId?: string;
     }) => {
       const targetMode: VoiceMode = opts?.mode ?? "hermes";
       const salaKey = salaAgentKey(targetMode);
@@ -84,9 +87,21 @@ export function useVoiceConnect() {
           // Progreso real de práctica (última sesión, errores recurrentes,
           // vocabulario por repasar). Best-effort: sin agente local o sin
           // historial, el placeholder del agente cubre el arranque.
-          const practiceContext = await hermesGet<{ context: string }>("/english/context")
-            .then((r) => r.context)
-            .catch(() => "First session — no history yet.");
+          // En modo lección el agente abre la lección (la cierra la práctica al
+          // guardarse) y devuelve el contexto que la manda + el primer turno.
+          const lesson = opts?.lessonId
+            ? await hermesPost<{ ok: boolean; context?: string; opening?: string; error?: string }>(
+                "/english/plan/tutor",
+                { lessonId: opts.lessonId },
+              )
+            : null;
+          if (lesson && !lesson.ok) throw new Error(lesson.error ?? "No pude abrir la lección");
+          setLessonOpening(lesson?.opening ?? null);
+          const practiceContext = lesson?.context
+            ? lesson.context
+            : await hermesGet<{ context: string }>("/english/context")
+                .then((r) => r.context)
+                .catch(() => "First session — no history yet.");
           dynamicVariables = { practice_context: practiceContext, today };
         } else {
           // Se pasa SIEMPRE (default cuando no hay proyecto) → nunca queda sin valor.
@@ -125,13 +140,13 @@ export function useVoiceConnect() {
 
   /** Corta la sesión actual (si la hay) y conecta con otro agente. */
   const switchTo = useCallback(
-    async (m: VoiceMode, opts?: { scopePrompt?: string }) => {
+    async (m: VoiceMode, opts?: { scopePrompt?: string; lessonId?: string }) => {
       if (status === "connected" || status === "connecting") {
         await endSession();
         // Respiro corto: deja que el SDK suelte el room WebRTC anterior.
         await new Promise((r) => setTimeout(r, 400));
       }
-      await connect({ mode: m, scopePrompt: opts?.scopePrompt });
+      await connect({ mode: m, scopePrompt: opts?.scopePrompt, lessonId: opts?.lessonId });
     },
     [status, endSession, connect],
   );
@@ -140,7 +155,8 @@ export function useVoiceConnect() {
     connect,
     disconnect: endSession,
     switchTo,
-    switchToTutor: () => switchTo("tutor"),
+    /** Sin lección = práctica libre; con lessonId = lección de voz del plan. */
+    switchToTutor: (opts?: { lessonId?: string }) => switchTo("tutor", opts),
     switchToHermes: () => switchTo("hermes"),
     status,
     error,

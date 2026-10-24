@@ -174,10 +174,22 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/ingles"),
   },
   {
+    id: "plan-ingles",
+    label: "Plan de inglés",
+    hint: "Tu ruta de lecciones: regla, gimnasio, tutora y prueba por cada error que se repite",
+    run: (ctx) => ctx.navigate("/ingles"),
+  },
+  {
     id: "ver-gimnasio",
     label: "Gimnasio de articulación",
     hint: "9 minutos al día: decir tus ideas con el punto primero, en español e inglés",
     run: (ctx) => ctx.navigate("/gimnasio"),
+  },
+  {
+    id: "ver-dojo",
+    label: "Dojo de algoritmos",
+    hint: "Problemas de programación en Python, desde cero, escritos por ti",
+    run: (ctx) => ctx.navigate("/dojo"),
   },
   {
     id: "ver-entender",
@@ -211,6 +223,16 @@ export const COMMANDS: HermesCommand[] = [
     slash: "/ruloview",
     hint: "Tu cuarto en 3D: presencia con la señal WiFi de 3 nodos ESP32 + esqueleto por cámara",
     run: (ctx) => ctx.navigate("/ruloview"),
+  },
+  {
+    id: "ver-lente",
+    label: "Lente",
+    slash: "/lente",
+    hint: "Las sugerencias de la junta en vivo en tarjetas cortas, en una ventana pequeña o en el teléfono",
+    // Ventana aparte y pequeña, para dejarla encima de Meet/Teams.
+    run: () => {
+      window.open("/lente", "hermes-lente", "popup=yes,width=560,height=360,noopener");
+    },
   },
   {
     id: "ver-sala",

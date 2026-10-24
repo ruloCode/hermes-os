@@ -38,6 +38,7 @@ import { EstudioView } from "@/components/views/EstudioView";
 import { ComposicionView } from "@/components/views/ComposicionView";
 import { EntenderView } from "@/components/views/EntenderView";
 import { GymView } from "@/components/views/GymView";
+import { DojoView } from "@/components/views/DojoView";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -67,6 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/composicion": "composicion",
     "/entender": "entender",
     "/gimnasio": "gimnasio",
+    "/dojo": "dojo",
   };
   const view = WORKSPACE_VIEWS[pathname];
   if (!view) return <>{children}</>;
@@ -119,7 +121,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <HabitosView />
             </div>
             <div className={`min-h-0 flex-1 ${view === "ingles" ? "flex flex-col" : "hidden"}`}>
-              <InglesView />
+              <InglesView active={view === "ingles"} />
             </div>
             <div className={`min-h-0 flex-1 ${view === "agenda" ? "flex flex-col" : "hidden"}`}>
               <AgendaView />
@@ -135,6 +137,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className={`min-h-0 flex-1 ${view === "gimnasio" ? "flex flex-col" : "hidden"}`}>
               <GymView active={view === "gimnasio"} />
+            </div>
+            <div className={`min-h-0 flex-1 ${view === "dojo" ? "flex flex-col" : "hidden"}`}>
+              <DojoView active={view === "dojo"} />
             </div>
           </div>
         </main>

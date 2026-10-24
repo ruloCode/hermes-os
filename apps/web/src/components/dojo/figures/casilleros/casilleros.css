@@ -1,0 +1,44 @@
+/* Casilleros (Fig 7): estilos propios, acotados a .cas. */
+.cas {
+  container-type: inline-size;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.cas:focus-visible {
+  outline: 1px solid var(--anatomy-muted);
+  outline-offset: 6px;
+}
+
+.cas .iso-svg {
+  overflow: visible;
+}
+
+.cas-needle {
+  stroke-width: 1.1px;
+}
+
+.cas-shackle {
+  stroke-width: 1.4px;
+}
+
+.cas-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* En una columna angosta (teléfono) la máquina se agranda y recorta el aire de los lados. */
+@container (max-width: 400px) {
+  .cas .iso-stage {
+    margin: -2% -9% -1%;
+  }
+}

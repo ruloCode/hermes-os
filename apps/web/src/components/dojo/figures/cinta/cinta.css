@@ -1,0 +1,98 @@
+/* La cinta: estilos propios, todos bajo .cinta (nada en :root). */
+.cinta {
+  container-type: inline-size;
+  --cinta-card: #ece9df;
+  --cinta-card-line: #8a8a8f;
+}
+.iso[data-theme="dark"] .cinta,
+.iso:not([data-theme]) .cinta {
+  --cinta-card: #24231f;
+}
+
+.cinta .iso-figure {
+  margin: 0;
+}
+
+/* Pista y readout en dos renglones: el readout de Python es largo. */
+.cinta .iso-plate {
+  padding-bottom: 60px;
+}
+.cinta .iso-plate-corner[data-corner="hint"] {
+  bottom: 16px;
+}
+
+.cinta-live {
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.cinta-live[data-mode="live"] {
+  cursor: default;
+}
+.cinta-live:focus {
+  outline: none;
+}
+.cinta-live:focus-visible {
+  outline: 1px solid var(--anatomy-muted);
+  outline-offset: 6px;
+}
+
+.cinta-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Huecos: la boca del contador, la de la tolva, las rejillas de la tapa. */
+.cinta .cinta-void {
+  fill: var(--anatomy-shade-0);
+}
+
+/* Tambores: papel un poco más claro que la cara, como cilindros pintados. */
+.cinta .cinta-drum {
+  fill: var(--anatomy-top);
+}
+.cinta .cinta-digit {
+  font-weight: 600;
+}
+
+.cinta .cinta-token-text {
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* La tarjeta del pedido en la tapa. */
+.cinta .cinta-card {
+  fill: var(--cinta-card);
+  stroke: none;
+}
+
+@container (max-width: 440px) {
+  .cinta .iso-plate {
+    padding: 44px 10px 62px;
+  }
+  .cinta .iso-plate-corners {
+    inset: 14px 12px;
+  }
+  .cinta .iso-plate-corner[data-corner="readout"] {
+    left: 0;
+    white-space: normal;
+    text-align: right;
+    font-size: 10px;
+  }
+  .cinta .iso-plate-corner[data-corner="hint"] {
+    bottom: 28px;
+  }
+  .cinta .iso-svg {
+    width: 106%;
+    margin: -1% -3% 0;
+  }
+  .cinta .cinta-live {
+    overflow: hidden;
+  }
+}

@@ -1,5 +1,7 @@
 // Tipos compartidos entre el agent server (apps/agent) y el dashboard (apps/web).
 
+import type { LensCue } from "./lens.js";
+
 export type MemoryType =
   | "user"
   | "feedback"
@@ -273,6 +275,7 @@ export interface AgentActivityEvent {
     | "gestures"
     | "browser"
     | "lights"
+    | "tv"
     | "metro"
     | "ruloview"
     | "scheduled"
@@ -718,7 +721,10 @@ export type LiveServerEvent =
   | { type: "ping"; ts: number }
   // Cambió el dueño del audio o el número de viewers (los clientes que no lo
   // conocen lo ignoran: el switch del dashboard no tiene default que falle).
-  | { type: "clients"; audioClient?: LiveClientKind; viewers: number };
+  | { type: "clients"; audioClient?: LiveClientKind; viewers: number }
+  // Lente (docs/lente-gafas.md): la misma sugerencia en formato de mirar.
+  // Acompaña a cada `suggestion`/`suggestion_done`; quien no la pinta la ignora.
+  | { type: "cue"; cue: LensCue };
 
 // ── Finanzas personales ────────────────────────────────────────────────
 // Registro de gastos/ingresos dictados por voz/chat, categorizados por el LLM.

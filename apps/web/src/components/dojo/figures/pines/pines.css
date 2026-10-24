@@ -1,0 +1,24 @@
+/* Máquina "pines" (Fig 5): solo lo que el kit no trae. Colores por tokens del kit. */
+.pines-live{cursor:pointer;outline:none;border-radius:2px;touch-action:pan-y}
+.pines-live:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:6px}
+.pines-drum{fill:var(--anatomy-face);stroke:none}
+.pines-drum-shade{fill:var(--anatomy-shade-0);stroke:none;opacity:.85}
+.pines-digit{fill:var(--anatomy-hi);font-family:var(--anatomy-mono);font-size:4.3px;font-variant-numeric:tabular-nums}
+[data-wheel][data-lead=""] .pines-digit{fill:var(--anatomy-lo)}
+.pines-hand{stroke-width:1.1}
+.pines-pointer{stroke-width:1.1}
+.pines-hub{fill:var(--anatomy-paper);stroke:var(--anatomy-hi);stroke-width:var(--anatomy-weight);vector-effect:non-scaling-stroke}
+.pines-live[data-paused] .iso-plate-corner{opacity:.6}
+/* La escalera volteada: a media altura y con la tapa en sombra, para no confundirla con la original. */
+:is(.pines-live,.pines-trace) [data-copy]>.iso-top{fill:var(--anatomy-shade-0)}
+:is(.pines-live,.pines-trace) [data-copy]>.iso-edge{stroke:var(--anatomy-hi)}
+/* En una columna angosta (teléfono) la pista sube y deja la línea de abajo al readout. */
+.iso-figure:has(:is(.pines-live,.pines-trace)){container-type:inline-size}
+@container (max-width:460px){
+  .iso-plate:has(:is(.pines-live,.pines-trace)){padding-bottom:70px}
+  .iso-plate:has(:is(.pines-live,.pines-trace)) .iso-plate-corner[data-corner="hint"]{bottom:18px}
+}
+@container (max-width:460px){
+  .iso-plate:has(:is(.pines-live,.pines-trace)){overflow:hidden}
+  :is(.pines-live,.pines-trace) .iso-svg{width:118%;margin-left:-9%}
+}

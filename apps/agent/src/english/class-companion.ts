@@ -9,6 +9,9 @@
  *   la corrección de hace 5 s sigue sirviendo aunque ya dijiste otra cosa.
  * - andamio: la profe te preguntó algo → 2-3 palabras clave + el arranque de
  *   una frase que terminas tú. Motor interrumpible (la pregunta nueva gana).
+ * - seguir: la profe comentó algo SIN preguntar (contó, opinó, explicó) →
+ *   algo para decir que mantiene viva la conversación. Sin esto la ayuda solo
+ *   salía con preguntas y media clase pasaba sin una sola tarjeta.
  * - explicar / frase completa: SOLO a mano ("¿Qué dijo?" / "Dame la frase").
  *
  * Antes de marcar "soy yo" no hay correcciones (no sabemos qué voz es la tuya)
@@ -18,6 +21,7 @@ import {
   ARTICULATION_RULE_PREFIX,
   correctable,
   detectWeakPhrases,
+  guessLang,
   LEVEL_UP_PREFIX,
   type AutoHelpMode,
   type LiveHelpIntent,
@@ -37,6 +41,10 @@ const SELF_MERGE_MS = 6_000; // tus finales separados por menos de esto son UNA 
 // Entre dos ayudas AUTOMÁTICAS. La misma pregunta nunca se repite (se deduplica
 // por texto), así que esto solo frena ráfagas de preguntas distintas.
 const HELP_MIN_INTERVAL_MS = 1_200;
+// Entre una ayuda cualquiera y una de SEGUIR (la profe comentó sin preguntar):
+// más largo, porque en un monólogo cada final no merece su tarjeta.
+const FOLLOW_MIN_INTERVAL_MS = 7_000;
+const FOLLOW_MIN_WORDS = 6;
 const EARLY_MIN_CHARS = 15;
 const SELF_MAX_CHARS = 700;
 // Contexto: cada motor es UNA sesión persistente que ya recuerda lo anterior,
@@ -157,6 +165,7 @@ ${OWNER}${ownerBlurb("English", " (hispanohablante que practica inglés hablado)
 - ANDAMIO — la profesora le hizo una pregunta. Responde exactamente dos líneas:
   Clave: 2-3 palabras o expresiones en inglés útiles para responder, cada una con su traducción entre paréntesis, separadas por " · " (al menos una un escalón arriba de lo básico: "trade-off", "on the roadmap", "it paid off")
   Arranca: el comienzo de una frase en inglés (5-9 palabras) que él completa, terminado en "…" — que arranque por el punto ("The hardest part was…", "I'd go with…", "What I did was…"), nunca con "I just wanted to" ni "I think maybe"
+- SEGUIR — la profesora dijo algo que NO es pregunta (contó algo, opinó, explicó, lo felicitó o lo corrigió). Esto NO se responde con —: dale algo para decir YA que mantenga viva la conversación, con el mismo formato que FRASE (línea 1 de máximo 25 palabras + "${LEVEL_UP_PREFIX}" opcional): una reacción breve y genuina a lo que dijo + un aporte propio o una pregunta de vuelta. Si explicó una regla o un ejercicio: confírmalo con sus palabras o pregunta lo que falta ("So here I'd use the past simple, right?"). Si lo corrigió: la frase corregida dicha bien, para que la repita. Si en el mensaje dice "SEGUIR (andamio)", en vez de la frase usa las dos líneas Clave/Arranca del ANDAMIO.
 - EXPLICAR — no entendió lo último que dijo la profesora. En español simple, 1-2 frases: qué dijo o qué le preguntó (y si es un ejercicio, qué espera que haga). Luego una línea "Clave: palabra = significado" con la palabra o expresión que probablemente no entendió.
 - FRASE — la respuesta para decir YA, en primera persona. Formato:
   Línea 1: lo que dice, 1-2 frases, MÁXIMO 25 palabras (la lee mientras habla).
@@ -169,6 +178,10 @@ Ejemplo de ANDAMIO para "What did you do last weekend?" (las dos líneas empieza
 Clave: went hiking (fui de caminata) · recharged (recargué energía)
 Arranca: Last weekend I mostly…
 
+Ejemplo de SEGUIR para "I spent the weekend in the mountains with my family, it was freezing.":
+Freezing but worth it, I bet — what was the best part of the trip?
+${LEVEL_UP_PREFIX} worth it = valió la pena
+
 Ejemplo de FRASE para "Tell me about a technically challenging problem you've solved." (la segunda línea empieza LITERALMENTE con "${LEVEL_UP_PREFIX}"):
 Our app crashed under heavy load, so I moved the slow work to a background queue — and it stopped crashing.
 ${LEVEL_UP_PREFIX} under heavy load = con mucha carga
@@ -177,6 +190,7 @@ ${spokenEnglishRules()}
 
 ## Reglas
 - Sin markdown, sin comillas alrededor de todo, sin preámbulos.
+- En SEGUIR solo responde — si ella claramente quedó a media frase o es puro trámite de la clase ("Okay, let's see", "Give me a second").
 - En ANDAMIO y en FRASE automática, si el momento no lo amerita (no era una pregunta para ${OWNER}, ya respondió, es una pregunta retórica o de trámite como "Sound good?", "Can you hear me?", "Ready?"), responde EXACTAMENTE: —
 - Velocidad sobre perfección: llega a tiempo o no sirve.`,
     ...knowledgeBlocks(k),
@@ -304,6 +318,7 @@ export class ClassCompanionController implements FastCopilot {
     if (turn.final) {
       const ask = askOf(text);
       if (ask) this.autoAsk(ask, null);
+      else this.autoFollow(text);
     } else if (turn.endOfTurn && text.length >= EARLY_MIN_CHARS && detectQuestion(text).hit) {
       this.autoAsk(text.slice(-160), text);
     }
@@ -342,6 +357,18 @@ export class ClassCompanionController implements FastCopilot {
     if (Date.now() - this.lastHelpAt < HELP_MIN_INTERVAL_MS) return;
     this.answered.add(key);
     this.help(this.autoHelp === "full" ? "full" : "scaffold", question, inProgress, false);
+  }
+
+  /**
+   * La profe comentó algo sin preguntar → algo para seguir la conversación.
+   * Solo con "soy yo" (sin él, tus propias frases contarían como de ella).
+   */
+  private autoFollow(text: string): void {
+    if (this.autoHelp === "off" || !this.selfSpeaker) return;
+    if (text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length < FOLLOW_MIN_WORDS) return;
+    if (guessLang(text) !== "en") return; // la profe explicando en español no pide respuesta en inglés
+    if (Date.now() - this.lastHelpAt < FOLLOW_MIN_INTERVAL_MS) return;
+    this.help(this.autoHelp === "full" ? "follow" : "follow-scaffold", text.slice(-400), null, false);
   }
 
   /**
@@ -402,7 +429,7 @@ Corrección (o —):`;
   }
 
   private help(
-    intent: LiveHelpIntent,
+    intent: LiveHelpIntent | "follow" | "follow-scaffold",
     question: string | null,
     inProgress: string | null,
     manual: boolean,
@@ -410,19 +437,34 @@ Corrección (o —):`;
     this.lastHelpAt = Date.now();
     this.seq += 1;
     const kind: LiveSuggestionKind =
-      intent === "explain" ? "explicar" : intent === "full" ? "decir" : "andamio";
+      intent === "explain"
+        ? "explicar"
+        : intent === "full" || intent === "follow"
+          ? "decir"
+          : "andamio";
     const lastOther = inProgress ?? this.lastOther();
     const other = this.deps.otherName === "Tutora" ? "la tutora" : "la profesora";
+    const follow =
+      intent === "follow" || intent === "follow-scaffold"
+        ? `Modo: SEGUIR${intent === "follow-scaffold" ? " (andamio)" : ""}. ${other[0].toUpperCase()}${other.slice(1)} acaba de decir (no es pregunta): "${question ?? lastOther}". Dale a ${OWNER} algo para seguir la conversación YA; no respondas —.`
+        : null;
     const mode =
-      intent === "explain"
+      follow ??
+      (intent === "explain"
         ? `Modo: EXPLICAR. Lo último que dijo ${other}: "${lastOther || "(no se escuchó nada aún)"}"`
         : intent === "full"
           ? manual
             ? `Modo: FRASE. ${OWNER} pidió la respuesta completa para lo que le preguntaron${question ? `: "${question}"` : lastOther ? `: "${lastOther}"` : ""}.`
             : `Modo: FRASE (automática). ${other[0].toUpperCase()}${other.slice(1)} le pregunta: "${question ?? lastOther}". Dale la respuesta para decir YA (línea 1 de máximo 25 palabras, el punto primero, coherente con toda la conversación; "${LEVEL_UP_PREFIX}" opcional); si no era una pregunta para él, responde —.`
-          : `Modo: ANDAMIO. Pregunta de ${other}: "${question ?? lastOther}"`;
+          : `Modo: ANDAMIO. Pregunta de ${other}: "${question ?? lastOther}"`);
     const trigger =
-      intent === "explain" ? "¿Qué dijo?" : intent === "full" && manual ? "frase completa" : (question ?? lastOther).slice(0, 160);
+      intent === "explain"
+        ? "¿Qué dijo?"
+        : intent === "full" && manual
+          ? "frase completa"
+          : follow
+            ? (question ?? lastOther).slice(-160)
+            : (question ?? lastOther).slice(0, 160);
     const live = inProgress ? `\n\n${other[0].toUpperCase()}${other.slice(1)} aún está hablando; lo que lleva dicho: "${inProgress.slice(-400)}"` : "";
     this.helpEngine.generate(
       lazyRequest(

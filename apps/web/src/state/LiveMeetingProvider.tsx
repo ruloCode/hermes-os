@@ -993,6 +993,9 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   // Reanudación tras ⌘R: si sessionStorage apunta a una sesión que el agente
   // aún tiene, se reengancha sola (mismo id → mismo transcript vía hello).
   useEffect(() => {
+    // La lente es solo espectadora: abierta desde el dashboard hereda su
+    // sessionStorage y, sin esto, reabriría el mic y desplazaría al dueño.
+    if (window.location.pathname.startsWith("/lente")) return;
     const id = readStorage();
     if (!id) return;
     let cancelled = false;

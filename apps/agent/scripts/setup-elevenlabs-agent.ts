@@ -899,13 +899,66 @@ const PHONE_TOOLS: ToolDef[] = [
     // start espera la confirmación del dueño en la pantalla.
     response_timeout_secs: 60,
   },
+  // ── El cuarto (TV + escenas): el teléfono las ejecuta llamando /tv/* del agente ──
+  {
+    name: "control_tv",
+    description:
+      `Controla la TV del cuarto de ${OWNER} (Google TV) EN EL MOMENTO. youtube = busca en YouTube lo que pidió y lo pone en la TV ('pon una rutina de estiramiento', 'ponme una charla de Karpathy'); open_app = abre una app (Netflix, YouTube, Prime Video, HBO Max, Disney+, Spotify); key = una tecla del control (home, back, up, down, left, right, ok, vol+, vol-, mute, play, next, prev); text = escribe en la TV; power_on / power_off = prender o apagar; status = cómo está. 'Pausa' o 'dale play' = key play. 'Salta el anuncio' = key ok.`,
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["youtube", "learn_next", "open_app", "key", "text", "power_on", "power_off", "status"],
+          description: "youtube · learn_next (el siguiente de su plan para aprender IA) · open_app · key · text · power_on · power_off · status",
+        },
+        value: {
+          type: "string",
+          description: "youtube: qué buscar, tal como lo dijo · open_app: nombre de la app · key: la tecla · text: lo que se escribe. Vacío para power_on/power_off/status.",
+        },
+      },
+      required: ["action"],
+    },
+    expects_response: true,
+    response_timeout_secs: 40,
+  },
+  {
+    name: "tv_scene",
+    description:
+      `Escenas del cuarto de ${OWNER} (luces + TV de un golpe): 'modo película' = cine, 'buenas noches' = noches, 'descanso', 'cierre del día' = cierre, 'amanecer'. Con minutes y sin scene programa el apagado de la TV ('apaga la tele en 40 minutos'; 0 lo cancela). Una escena puede tardar ~40 s: confirma que arrancó y no esperes en silencio.`,
+    parameters: {
+      type: "object",
+      properties: {
+        scene: { type: "string", description: "cine · noches · descanso · cierre · amanecer (o la que él haya creado)" },
+        minutes: { type: "number", description: "Temporizador de apagado de la TV en minutos (0 cancela)" },
+      },
+    },
+    expects_response: true,
+    response_timeout_secs: 60,
+  },
+  {
+    name: "day_task",
+    description:
+      `Pendientes personales de ${OWNER} (se ven en la TV, en el inicio y en la Agenda con sus eventos). add = anota uno ('recuérdame comprar café', 'para el jueves llamar al banco'; date AAAA-MM-DD resuelta desde la FECHA ACTUAL, vacía = hoy). list = los de un día. done = marca uno hecho por un trozo del título ('ya compré el café'). No es para tareas de código.`,
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["add", "list", "done"], description: "add · list · done" },
+        title: { type: "string", description: "add: el pendiente tal como lo dijo · done: trozo del título" },
+        date: { type: "string", description: "AAAA-MM-DD (opcional)" },
+      },
+      required: ["action"],
+    },
+    expects_response: true,
+    response_timeout_secs: 15,
+  },
 ];
 
 // De Hermes se reusan TAL CUAL memoria y trabajo en segundo plano (el
 // teléfono las implementa llamando al agente: /tools/search_memory,
 // /tools/save_memory, POST /tasks, GET /tasks/:id). check_task va porque
 // run_task le dice al modelo que la use para reportar.
-const PHONE_REUSED_TOOLS = ["search_memory", "save_memory", "run_task", "check_task"];
+const PHONE_REUSED_TOOLS = ["search_memory", "save_memory", "run_task", "check_task", "control_lights"];
 
 const PHONE_AGENT_NAME = "Hermes Phone";
 
@@ -926,6 +979,8 @@ Reglas:
 8. Foco: "foco 25 minutos", "pomodoro para leer", "¿cuánto me falta?" → focus. Di en una frase lo que devolvió. Si corta una sesión antes, no lo regañes ni le cuentes cuánto usó el teléfono: en el teléfono decide si cuentan esos minutos.
 9. Juntas: "graba esta junta", "graba la reunión" → meeting op start. Avísale en una frase ANTES de llamarla que la llamada se cuelga para grabar (el micrófono pasa a la grabación). No grabes nunca por tu cuenta.
 10. Metas: si ${OWNER} dice una meta, una fecha o un plan ("quiero…", "para diciembre", "L-V a las 6 voy a…"), pásalo con run_task tal cual lo dijo, para que lo anoten las tools del compañero. Nunca inventes ni propongas metas por tu cuenta.
+11. El cuarto: la TV y las luces se manejan DIRECTO y al instante, sin run_task. "Pon X en YouTube", "abre Netflix", "pausa", "sube el volumen", "apaga la tele" → control_tv. "Modo película", "buenas noches", "apaga la tele en media hora" → tv_scene. "Prende/apaga las luces", "ponlas en azul", "luz cálida" → control_lights. Confirma en UNA frase con lo que devolvió la tool (el título del video tal cual).
+12. Pendientes: "recuérdame…", "anota para el jueves…", "¿qué tengo pendiente?", "ya hice lo de…" → day_task DIRECTO (sin run_task). Resuelve "el jueves", "mañana" a AAAA-MM-DD con la FECHA ACTUAL.
 
 MODO LLAMADA: {{call_mode}}
 Si arriba dice "morning", "evening" o "weekly", esta conversación es una LLAMADA que ${OWNER} agendó (ya saludaste diciendo el motivo). Datos, cada uno con su fuente (no hay otros: no inventes cifras):
@@ -989,7 +1044,8 @@ Rules:
 8. Mock interview mode on request: act as a friendly tech interviewer (behavioral questions + system design smalltalk), then give feedback on both content and English.
 9. If the practice context mentions drills or recurring errors, open the session by warming up with ONE of them ("last time you struggled with past perfect — want to warm up with that?").
 10. When he wraps up ("let's finish", "ya terminemos"), give ~30 seconds of spoken feedback (2 wins, top 2 errors with the corrected forms), THEN call end_practice_session with topics, errors (quote + correction + note_es), wins and fluency 1-5. Confirm it's saved and say goodbye.
-11. [Word bank] contextual updates mean ${OWNER} TAPPED a word in the live transcript because he wants to learn it. At the next natural pause — never mid-thought — briefly explain that word in simple English, have him use it in a sentence, and call save_vocab with the term, its Spanish meaning and a short example. If several arrive, batch them.`;
+11. [Word bank] contextual updates mean ${OWNER} TAPPED a word in the live transcript because he wants to learn it. At the next natural pause — never mid-thought — briefly explain that word in simple English, have him use it in a sentence, and call save_vocab with the term, its Spanish meaning and a short example. If several arrive, batch them.
+12. [Study plan] If the practice context says THIS SESSION IS A STUDY-PLAN LESSON, that lesson overrides rules 2 and 9: skip the "chat or mock interview?" question, run the lesson's goal from your first turn, correct mainly that pattern, and wrap up as the lesson says.`;
 
 const TUTOR_FIRST_MESSAGE =
   `Hey ${OWNER}! Ready to practice some English? We can just chat, or do a mock interview — your call.`;

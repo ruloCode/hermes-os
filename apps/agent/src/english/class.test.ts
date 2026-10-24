@@ -240,6 +240,47 @@ describe("ClassCompanionController", () => {
     ctl.destroy();
   });
 
+  it("la profe comenta sin preguntar → algo para seguir la conversación (no solo preguntas)", () => {
+    const { help, ctl } = setup();
+    ctl.onTurn(turn("A", "I spent the weekend in the mountains with my family, it was freezing."), "B");
+    assert.equal(help.reqs.length, 1);
+    assert.equal(help.reqs[0].kind, "decir");
+    assert.equal(help.reqs[0].manual, false);
+    assert.match(help.reqs[0].prompt, /Modo: SEGUIR\. [\s\S]*mountains/);
+    // En un monólogo no sale una tarjeta por cada final.
+    ctl.onTurn(turn("A", "We stayed in a small cabin near the lake for two nights."), "B");
+    assert.equal(help.reqs.length, 1);
+    ctl.destroy();
+  });
+
+  it("seguir: con andamio pide Clave/Arranca; corto, en español, sin 'soy yo' u off no sale", () => {
+    const { help, ctl } = setup();
+    ctl.onTurn(turn("A", "That sounds lovely."), "B"); // corto
+    ctl.onTurn(turn("A", "bueno, aquí tienes que usar el pasado simple siempre"), "B"); // español
+    ctl.onTurn(turn("A", "I really love that kind of music, especially the old stuff."), undefined); // sin soy yo
+    assert.equal(help.reqs.length, 0);
+    ctl.setAutoHelp("scaffold");
+    ctl.onTurn(turn("A", "I really love that kind of music, especially the old stuff."), "B");
+    assert.equal(help.reqs[0]?.kind, "andamio");
+    assert.match(help.reqs[0].prompt, /SEGUIR \(andamio\)/);
+    const off = setup();
+    off.ctl.setAutoHelp("off");
+    off.ctl.onTurn(turn("A", "I really love that kind of music, especially the old stuff."), "B");
+    assert.equal(off.help.reqs.length, 0);
+    ctl.destroy();
+    off.ctl.destroy();
+  });
+
+  it("una pregunta justo después de un comentario sí sale (las preguntas no esperan los 7 s)", async () => {
+    const { help, ctl } = setup();
+    ctl.onTurn(turn("A", "I spent the weekend in the mountains with my family, it was freezing."), "B");
+    await wait(1_300);
+    ctl.onTurn(turn("A", "And what did you do last weekend?"), "B");
+    assert.equal(help.reqs.length, 2);
+    assert.match(help.reqs[1].prompt, /FRASE \(automática\)/);
+    ctl.destroy();
+  });
+
   it("tu intervención se junta y se corrige cuando la profe responde", () => {
     const { correct, ctl } = setup();
     ctl.onTurn(turn("B", "Yesterday I go to the park"), "B");

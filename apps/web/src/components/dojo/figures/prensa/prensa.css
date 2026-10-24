@@ -1,0 +1,62 @@
+/* Prensa del Dojo: foco, cursor y el visor de print. Los tonos salen de los
+   tokens del kit (.iso), así sigue el tema claro y el oscuro sin colores sueltos. */
+.prensa-wrap {
+  container-type: inline-size;
+}
+
+.prensa-wrap .iso-figure {
+  margin: 0;
+}
+
+.prensa {
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  outline: none;
+}
+
+.prensa:focus-visible {
+  outline: 1px solid var(--anatomy-muted);
+  outline-offset: 6px;
+}
+
+.prensa-glass {
+  fill: var(--anatomy-shade-0);
+  stroke: none;
+}
+
+.prensa-screen {
+  fill: var(--anatomy-lit);
+  font-weight: 600;
+}
+
+/* Columnas angostas (la del problema y la del teléfono): la pista sube para no
+   chocar con el readout, que con area_rectangulo(10, 2) ya es largo, y en el
+   teléfono la máquina gana un poco de ancho. */
+@container (max-width: 560px) {
+  .prensa-wrap .iso-plate {
+    padding: 44px 8px 66px;
+  }
+  .prensa-wrap .iso-plate-corner[data-corner="hint"] {
+    bottom: 20px;
+  }
+  .prensa-wrap .prensa {
+    overflow: hidden;
+  }
+  .prensa-wrap .prensa .iso-svg {
+    width: 104%;
+    margin: -2% -2% -1%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prensa * {
+    transition: none !important;
+  }
+}
+
+.prensa-pointer {
+  stroke-width: 1.1;
+}

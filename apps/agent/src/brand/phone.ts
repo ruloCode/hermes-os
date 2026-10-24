@@ -34,11 +34,11 @@ function palette(name: string, p: BrandPalette): string {
   return `    val ${name} = BrandPalette(\n${args}\n    )`;
 }
 
-function brandKt(): string {
+function brandKt(pkg = "os.hermes.phone.ui"): string {
   const fields = BRAND_COLOR_KEYS.map((k) => `    val ${kotlinName(k)}: Color,`).join("\n");
   const s = BRAND_TYPE.scale;
   return `// ${HEADER}
-package os.hermes.phone.ui
+package ${pkg}
 
 import androidx.compose.ui.graphics.Color
 
@@ -187,5 +187,46 @@ export function renderPhoneBrand(): Record<string, string> {
     [`${res}/drawable/ic_hermes_mark.xml`]: markDrawable(),
     [`${res}/drawable/ic_stat_hermes.xml`]: notificationIcon(),
     [`${res}/mipmap-anydpi-v26/ic_launcher.xml`]: adaptiveIcon(),
+  };
+}
+
+/**
+ * Banner de Android TV (320×180 dp): la fila de apps y el selector de inicio
+ * lo usan en vez del icono. Cromo de la marca con la hoja + "H" al centro.
+ */
+function tvBanner(): string {
+  const v = BRAND_MARK.viewBox;
+  const r = BRAND_MARK.cornerRadius;
+  const size = 96;
+  const k = size / v;
+  const x = (320 - size) / 2;
+  const y = (180 - size) / 2;
+  const rect = `M${r},0h${v - 2 * r}a${r},${r} 0 0 1 ${r},${r}v${v - 2 * r}a${r},${r} 0 0 1 -${r},${r}h-${v - 2 * r}a${r},${r} 0 0 1 -${r},-${r}v-${v - 2 * r}a${r},${r} 0 0 1 ${r},-${r}z`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<!-- ${HEADER} -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="${color("chrome")}" android:pathData="M0,0h320v180h-320z" />
+    <group android:translateX="${x}" android:translateY="${y}" android:scaleX="${k}" android:scaleY="${k}">
+        <path android:fillColor="${color("accent-solid")}" android:pathData="${rect}" />
+        <path
+            android:pathData="${BRAND_MARK.path}"
+            android:strokeColor="${color("on-accent")}"
+            android:strokeWidth="${BRAND_MARK.strokeWidth}"
+            android:strokeLineCap="round" />
+    </group>
+</vector>
+`;
+}
+
+/** Todos los archivos que la marca escribe en el repo de Hermes TV (../hermes-tv). */
+export function renderTvBrand(): Record<string, string> {
+  const res = "app/src/main/res";
+  return {
+    "app/src/main/java/os/hermes/tv/ui/Brand.kt": brandKt("os.hermes.tv.ui"),
+    [`${res}/values/brand.xml`]: colorsXml(),
+    [`${res}/drawable/ic_hermes_mark.xml`]: markDrawable(),
+    [`${res}/drawable/tv_banner.xml`]: tvBanner(),
   };
 }

@@ -62,6 +62,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
+import { LENS_MAX_CHARS, toCue } from "@hermes/shared";
 import type { LiveMeetingSnapshot, LiveServerEvent } from "@hermes/shared";
 import { env } from "../src/env.js";
 import { OWNER } from "../src/owner.js";
@@ -96,7 +97,36 @@ function record(name: string, ok: boolean, detail?: string): void {
   console.log(`${ok ? "✅" : "❌"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
+/**
+ * Lente (docs/lente-gafas.md), en TODOS los modos: cada sugerencia terminada
+ * con algo que mirar llega también como `cue` con su misma id, y ninguna
+ * tarjeta pasa del tope de caracteres.
+ */
+function checkLens(): void {
+  const done = events.flatMap((ev) =>
+    ev.type === "suggestion" || ev.type === "suggestion_done" ? [ev.suggestion] : [],
+  );
+  const expected = done.filter((s) => toCue(s) !== null);
+  if (!expected.length) return;
+  const cues = events.flatMap((ev) => (ev.type === "cue" ? [ev.cue] : []));
+  const partials = cues.filter((c) => c.pending).length;
+  const ids = new Set(cues.filter((c) => !c.pending).map((c) => c.id));
+  const missing = expected.filter((s) => !ids.has(s.id));
+  record(
+    "lente: cada sugerencia sale también como cue",
+    missing.length === 0,
+    `${expected.length - missing.length}/${expected.length} finales · ${partials} parciales en streaming${missing.length ? ` · faltan ${missing.map((s) => s.id).join(", ")}` : ""}`,
+  );
+  const long = cues.filter((c) => c.text.length > LENS_MAX_CHARS);
+  record(
+    `lente: tarjetas ≤ ${LENS_MAX_CHARS} caracteres`,
+    long.length === 0,
+    long.length ? long.map((c) => `${c.text.length}: ${c.text}`).join(" | ") : `${cues.length} tarjetas`,
+  );
+}
+
 function report(): never {
+  checkLens();
   const failed = results.filter((r) => !r.ok);
   console.log("\n── Reporte ─────────────────────────────────────────────");
   for (const r of results) {

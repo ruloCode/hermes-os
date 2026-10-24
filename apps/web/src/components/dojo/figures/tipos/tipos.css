@@ -1,0 +1,14 @@
+/* Máquina "tipos": solo lo propio de esta figura, acotado a .tp-*. */
+.tp-fig{container-type:inline-size}
+.tp-live{outline:none;cursor:pointer;touch-action:pan-y;-webkit-tap-highlight-color:transparent;user-select:none}
+.tp-live:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:6px}
+.tp-glass{fill:var(--anatomy-shade-1);stroke:none}
+.tp-letter{font-weight:600}
+.tp-window{font-weight:600;letter-spacing:.02em}
+.tp-live .iso-face-text{transition:fill 260ms var(--anatomy-ease)}
+/* A ancho de teléfono la pista baja una línea, como en el kit a <560 px. */
+@container (max-width:440px){
+  .tp-fig .iso-plate{padding:46px 10px 66px}
+  .tp-fig .iso-plate-corner[data-corner="hint"]{bottom:20px}
+}
+@media (prefers-reduced-motion:reduce){.tp-live .iso-face-text{transition:none}}
