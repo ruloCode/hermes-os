@@ -29,6 +29,7 @@ import {
   conceptText,
   conceptMentioned,
   correctionText,
+  detectWeakPhrases,
   foldText,
   parseConcepts,
   parseContribution,
@@ -40,6 +41,7 @@ import {
 import type {
   AutoHelpMode,
   LiveAudioMode,
+  LiveAudioReport,
   LiveClientKind,
   LiveClientMessage,
   LiveHelpIntent,
@@ -93,6 +95,7 @@ import {
   CORRECTION_ID_PREFIX,
 } from "../english/class-companion.js";
 import { ingestClass } from "../english/class-ingest.js";
+import { hasReadableText, SuggestionStreamGate, type GateOut } from "./stream-gate.js";
 import {
   ArticulationCoach,
   buildPolishSystemPrompt,
@@ -182,6 +185,8 @@ interface LiveSession {
   englishSessionId?: number;
   /** Clase: qué ayuda sale sola cuando te preguntan (la elige el browser). */
   autoHelp: AutoHelpMode;
+  /** Último diagnóstico del audio que mandó el browser (qué mic, cuánta voz entró). */
+  audioReport?: LiveAudioReport;
   /** Equipo: conceptos ya explicados (clave plegada) — ninguno sale dos veces. */
   explained: Set<string>;
   /** Nota + tareas + actas anteriores del proyecto (local; se carga una vez al arrancar). */
@@ -547,6 +552,26 @@ export function handleClientMessage(id: string, raw: string): void {
   else if (msg.type === "suggest_now") requestSuggestions(id, parseHelpIntent(msg.intent));
   else if (msg.type === "mark_self" && typeof msg.speaker === "string") markSelf(id, msg.speaker);
   else if (msg.type === "auto_help" && isAutoHelp(msg.mode)) setAutoHelp(id, msg.mode);
+  else if (msg.type === "audio_report") setAudioReport(id, msg.report);
+}
+
+/** Diagnóstico del audio del browser: se loguea y va a la cabecera del transcript de la clase. */
+function setAudioReport(id: string, r: unknown): void {
+  const s = sessions.get(id);
+  if (!s || !r || typeof r !== "object") return;
+  const o = r as Record<string, unknown>;
+  const frac = (x: unknown) => (typeof x === "number" && x >= 0 && x <= 1 ? x : 0);
+  const report: LiveAudioReport = {
+    mic: typeof o.mic === "string" ? o.mic.slice(0, 120) : "?",
+    micVoice: frac(o.micVoice),
+    tabVoice: frac(o.tabVoice),
+    silentWarned: o.silentWarned === true,
+  };
+  s.audioReport = report;
+  // Una línea por minuto: con esto la próxima clase se diagnostica con datos, no con suposiciones.
+  console.log(
+      `[audio] mic="${report.mic}" voz mic ${Math.round(report.micVoice * 100)}% · llamada ${Math.round(report.tabVoice * 100)}%${report.silentWarned ? " · AVISO mic mudo" : ""}`,
+    );
 }
 
 /** Clase: cambia en caliente qué ayuda sale sola cuando te preguntan. */
@@ -1002,6 +1027,21 @@ function buildRecentWindow(s: LiveSession): string {
   return parts.join("\n");
 }
 
+const streamGates = new WeakMap<LiveSession, SuggestionStreamGate<LiveServerEvent>>();
+function streamGateOf(s: LiveSession): SuggestionStreamGate<LiveServerEvent> {
+  let g = streamGates.get(s);
+  if (!g) streamGates.set(s, (g = new SuggestionStreamGate<LiveServerEvent>()));
+  return g;
+}
+
+function emitGated(s: LiveSession, id: string, out: GateOut<LiveServerEvent>[]): void {
+  for (const o of out) {
+    if (o.type === "start") broadcast(s, o.start);
+    else if (o.type === "delta") broadcast(s, { type: "suggestion_delta", id, text: o.text });
+    else broadcast(s, { type: "suggestion_aborted", id });
+  }
+}
+
 function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
   // Guard contra callbacks tardíos (stream que termina después del stop).
   if (s.status !== "live") return;
@@ -1023,8 +1063,11 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
     if (ev.type === "done") handleConcepts(s, ev.id, ev.text, ev.elapsedMs);
     return;
   }
+  // La tarjeta no se abre hasta que hay texto legible (stream-gate.ts): un
+  // "—" ya no pinta "cargando…" para desaparecer a los 2 s.
+  const gate = streamGateOf(s);
   if (ev.type === "start") {
-    broadcast(s, {
+    gate.start(ev.id, {
       type: "suggestion_start",
       id: ev.id,
       kind: ev.kind ?? "decir",
@@ -1032,15 +1075,16 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
       atMs: Date.now() - s.startedAt,
     });
   } else if (ev.type === "delta") {
-    broadcast(s, { type: "suggestion_delta", id: ev.id, text: ev.text });
+    emitGated(s, ev.id, gate.delta(ev.id, ev.text));
   } else if (ev.type === "aborted") {
-    broadcast(s, { type: "suggestion_aborted", id: ev.id });
+    emitGated(s, ev.id, gate.aborted(ev.id));
   } else if (ev.type === "done") {
     const text = ev.text.trim();
+    const shown = gate.done(ev.id);
     // "—" es la señal de silencio del modelo: este momento no ameritaba soplo.
-    if (!text || text === "—") {
+    if (!hasReadableText(text)) {
       console.log(`[copilot] silencio del modelo en ${ev.elapsedMs}ms (${ev.trigger.slice(0, 80)})`);
-      broadcast(s, { type: "suggestion_aborted", id: ev.id });
+      if (shown) broadcast(s, { type: "suggestion_aborted", id: ev.id });
       return;
     }
     // Aporte de equipo: «ángulo ⏎ frase». Sin frase legible = silencio.
@@ -1064,6 +1108,12 @@ function handleFastEvent(s: LiveSession, ev: FastCopilotEvent): void {
     s.suggestions.push(suggestion);
     broadcast(s, { type: "suggestion_done", suggestion });
     console.log(`[copilot] sugerencia en ${ev.elapsedMs}ms (${ev.trigger.slice(0, 80)})`);
+    // La frase de la clase nace articulada (articulationRules en el prompt): si aun así
+    // trae una señal débil, queda en el log para medir si el prompt se cumple.
+    if (isClass(s) && (ev.kind === "decir" || ev.kind === "andamio")) {
+      const weak = detectWeakPhrases(text, "en");
+      if (weak.length) console.log(`[clase] sugerencia con señal débil (${weak.map((w) => w.match).join(", ")}): ${text.slice(0, 100)}`);
+    }
     emit({ kind: "meeting_live", taskId: s.id, detail: `⚡ soplo rápido: ${text.slice(0, 100)}` });
   } else if (ev.type === "error") {
     console.error("[copilot]", ev.message);
@@ -1399,6 +1449,7 @@ async function ingestClassSession(s: LiveSession): Promise<void> {
       segments: s.segments,
       selfSpeaker: s.selfSpeaker,
       suggestions: s.suggestions,
+      audio: s.audioReport,
     });
     s.status = "done";
     s.englishSessionId = session.id;

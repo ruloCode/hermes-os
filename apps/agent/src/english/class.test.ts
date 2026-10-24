@@ -17,7 +17,13 @@ import {
   type LiveSegment,
   type LiveSuggestion,
 } from "@hermes/shared";
-import { askOf, ClassCompanionController, CORRECTION_ID_PREFIX } from "./class-companion.js";
+import {
+  askOf,
+  buildHelpSystemPrompt,
+  ClassCompanionController,
+  CORRECTION_ID_PREFIX,
+  isTagQuestion,
+} from "./class-companion.js";
 import type { FastEngine, FastGenRequest } from "../meetings/live-copilot.js";
 import type { NormalizedTurn } from "../meetings/live-stt.js";
 import { countFillers } from "../meetings/live-coach.js";
@@ -346,6 +352,33 @@ describe("ClassCompanionController", () => {
     ctl.onTurn(turn("A", "That's great. So tell me, what do you do for work? I'm curious."), "B");
     assert.equal(help.reqs.length, 1);
     ctl.destroy();
+  });
+
+  // Clase del 2026-10-16: un tercio de los silencios del modelo eran coletillas
+  // ("…, right?") que pintaban "cargando…" para nada.
+  it("una coletilla de confirmación no es una pregunta que pida hablar", () => {
+    assert.equal(isTagQuestion("Oh, she can't hear me, right?"), true);
+    assert.equal(isTagQuestion("Okay, so feedback for corrections, right?"), true);
+    assert.equal(isTagQuestion("high-level engineer, right?"), true);
+    assert.equal(isTagQuestion("How would you handle a teammate falling behind, right?"), false);
+    assert.equal(isTagQuestion("Do you know it already or no?"), false);
+    assert.equal(isTagQuestion("How much?"), false);
+  });
+
+  it("la ayuda automática no dispara con coletillas y sí con la pregunta corta real", () => {
+    const { help, ctl } = setup();
+    ctl.onTurn(turn("A", "That is what makes it grammatically correct, right?"), "B");
+    assert.equal(help.reqs.length, 0);
+    ctl.onTurn(turn("A", "Why does it cost so much money?"), "B");
+    assert.equal(help.reqs.length, 1);
+    ctl.destroy();
+  });
+
+  it("el prompt de la ayuda lleva las reglas de articulación y su ejemplo las cumple", () => {
+    const prompt = buildHelpSystemPrompt([]);
+    assert.match(prompt, /Cómo suena lo que sugieres \(articulación\)/);
+    assert.match(prompt, /seguimiento/); // las preguntas cortas también se responden
+    assert.doesNotMatch(prompt, /, but good/); // el ejemplo de FRASE ya no lleva un «but» que borra
   });
 
   it("una orden sin '?' también pide respuesta", () => {

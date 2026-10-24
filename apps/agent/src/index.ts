@@ -298,6 +298,16 @@ import { Readable } from "node:stream";
 import { OWNER } from "./owner.js";
 import { mountComposicionRoutes } from "./composicion/routes.js";
 import { reconcileComposicion } from "./composicion/pipeline.js";
+import {
+  disableLocalMode,
+  enableLocalMode,
+  isLocalMode,
+  localStatus,
+  restoreLocalMode,
+  setLocalModel,
+} from "./local-llm/server.js";
+import { runLocalTurn } from "./local-llm/chat.js";
+import { loadProjects } from "./local-llm/tools.js";
 
 const app = new Hono();
 const startedAt = Date.now();
@@ -456,6 +466,37 @@ app.post("/v1/chat/completions", async (c) => {
       return queue;
     };
 
+    // Modo avión: el turno lo responde el modelo local con el historial que
+    // trae el cliente. Sin sesión SDK que guardar ni revisión de aprendizaje
+    // (las dos necesitan a Claude, que en el avión no está).
+    if (isLocalMode()) {
+      let localText = "";
+      try {
+        const local = await runLocalTurn({
+          messages,
+          project: focusProject,
+          onTool: (step) => void send({ hermes: { tool: step } }),
+          onDelta: (t) => {
+            localText += t;
+            void send(chunk(t));
+          },
+          signal: c.req.raw.signal,
+        });
+        localText = local.text;
+      } catch (err) {
+        if (!c.req.raw.signal.aborted) {
+          const msg = `⚠ Modo avión: ${err instanceof Error ? err.message : String(err)}. ¿Está listo el modelo local?`;
+          localText += msg;
+          await send(chunk(msg));
+        }
+      }
+      void appendTurn(focusProject || "general", lastUser, localText, clientSession);
+      await send(chunk(null, "stop"));
+      await send("[DONE]");
+      await queue;
+      return;
+    }
+
     let assistantText = "";
     const toolsUsed: string[] = [];
     const result = await runAgentTurn({
@@ -505,6 +546,31 @@ app.post("/v1/chat/completions", async (c) => {
     await send("[DONE]");
     await queue;
   });
+});
+
+// ── Modo avión (modelo local con llama.cpp) ───────────────────────────
+// Prender guarda antes una copia de los proyectos (con red, para tenerla en
+// el vuelo) y arranca el servidor sin esperar a que cargue: la web sondea
+// /status hasta ver "ready".
+app.get("/local-llm/status", async (c) => c.json(await localStatus()));
+
+app.post("/local-llm/on", async (c) => {
+  await loadProjects().catch(() => undefined);
+  enableLocalMode();
+  return c.json(await localStatus());
+});
+
+app.post("/local-llm/off", async (c) => {
+  await disableLocalMode();
+  return c.json(await localStatus());
+});
+
+// Rápido (2B) o Mejor (4B). Con el modo prendido recarga el servidor.
+app.post("/local-llm/model", async (c) => {
+  const { model } = await c.req.json<{ model?: string }>().catch(() => ({ model: undefined }));
+  const error = await setLocalModel(String(model ?? ""));
+  if (error) return c.json({ error }, 400);
+  return c.json(await localStatus());
 });
 
 // ── Historial de conversaciones por proyecto ──────────────────────────
@@ -3761,4 +3827,11 @@ serve({ fetch: app.fetch, port: env.PORT, hostname, websocket: { server: wss } }
   );
   console.log(`   vault: ${env.VAULT_PATH || "(sin configurar)"}`);
   console.log(`   supabase: ${hasSupabase() ? "conectado" : "no configurado"}`);
+  // Si el modo avión quedó prendido (reinicio en pleno vuelo), vuelve solo.
+  restoreLocalMode();
+  if (isLocalMode()) console.log("   modo avión: prendido (modelo local)");
+  // La copia de proyectos para el avión se refresca sola mientras hay red:
+  // así está al día aunque el modo se prenda ya sin conexión.
+  void loadProjects().catch(() => undefined);
+  setInterval(() => void loadProjects().catch(() => undefined), 6 * 3600_000).unref();
 });

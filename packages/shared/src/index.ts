@@ -46,6 +46,7 @@ export * from "./office-redact.js";
 export * from "./office-inventory.js";
 export * from "./ruloview.js";
 export * from "./english-class.js";
+export * from "./live-audio.js";
 export * from "./evolution.js";
 export * from "./team-copilot.js";
 export * from "./articulation.js";

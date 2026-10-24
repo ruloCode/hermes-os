@@ -30,6 +30,7 @@ import {
   CORRECTION_ID_PREFIX,
 } from "./class-companion.js";
 import { loadCompanionKnowledge } from "./companion-knowledge.js";
+import { hasReadableText, SuggestionStreamGate, type GateOut } from "../meetings/stream-gate.js";
 
 const SELF = "yo";
 const TUTOR = "tutora";
@@ -40,6 +41,7 @@ export class PracticeCompanion {
   private seq = 0;
   private closed = false;
   private autoHelp: AutoHelpMode = "full";
+  private readonly gate = new SuggestionStreamGate<PracticeCompanionEvent>();
 
   constructor(private readonly send: (ev: PracticeCompanionEvent) => void) {}
 
@@ -106,6 +108,14 @@ export class PracticeCompanion {
     this.controller?.triggerNow(undefined, intent);
   }
 
+  private emitGated(id: string, out: GateOut<PracticeCompanionEvent>[]): void {
+    for (const o of out) {
+      if (o.type === "start") this.send(o.start);
+      else if (o.type === "delta") this.send({ type: "suggestion_delta", id, text: o.text });
+      else this.send({ type: "suggestion_aborted", id });
+    }
+  }
+
   private handleEvent(ev: FastCopilotEvent): void {
     if (this.closed) return;
     const atMs = Date.now() - this.startedAt;
@@ -129,8 +139,9 @@ export class PracticeCompanion {
       this.send({ type: "suggestion", suggestion });
       return;
     }
+    // Igual que en la clase: la tarjeta se abre con el primer texto legible (stream-gate.ts).
     if (ev.type === "start") {
-      this.send({
+      this.gate.start(ev.id, {
         type: "suggestion_start",
         id: ev.id,
         kind: ev.kind ?? "decir",
@@ -138,13 +149,14 @@ export class PracticeCompanion {
         atMs,
       });
     } else if (ev.type === "delta") {
-      this.send({ type: "suggestion_delta", id: ev.id, text: ev.text });
+      this.emitGated(ev.id, this.gate.delta(ev.id, ev.text));
     } else if (ev.type === "aborted") {
-      this.send({ type: "suggestion_aborted", id: ev.id });
+      this.emitGated(ev.id, this.gate.aborted(ev.id));
     } else if (ev.type === "done") {
       const text = ev.text.trim();
-      if (!text || text === "—") {
-        this.send({ type: "suggestion_aborted", id: ev.id });
+      const shown = this.gate.done(ev.id);
+      if (!hasReadableText(text)) {
+        if (shown) this.send({ type: "suggestion_aborted", id: ev.id });
         return;
       }
       this.send({

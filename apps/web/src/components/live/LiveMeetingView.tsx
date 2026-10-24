@@ -11,6 +11,7 @@ import { LiveCoachStrip } from "./LiveCoachStrip";
 import { LiveTranscript } from "./LiveTranscript";
 import { LiveSuggestionsRail } from "./LiveSuggestionsRail";
 import { LiveVuMeter } from "./LiveVuMeter";
+import { MicPicker } from "./MicPicker";
 import { useClassPip } from "./ClassPip";
 
 /**
@@ -142,9 +143,15 @@ export function LiveMeetingView({ asView = false }: { asView?: boolean } = {}) {
 
   const liveControls = (
     <>
-      <span className="hidden md:block">
-        <LiveVuMeter levelRef={live.micLevelRef} />
+      {/* Cada fuente con su medidor (antes de mezclar): si "Tú" no se mueve cuando
+          hablas, tu voz no está entrando aunque la llamada se oiga. */}
+      <span className="hidden items-center gap-3 md:inline-flex">
+        <LiveVuMeter levelRef={live.micLevelRef} label={live.mode === "remoto" ? "Tú" : undefined} />
+        {live.mode === "remoto" && live.systemAudio && (
+          <LiveVuMeter levelRef={live.callLevelRef} label={live.isClass ? "Profe" : "Llamada"} />
+        )}
       </span>
+      <MicPicker />
       {/* Fuente de audio: solo en remoto (presencial siempre es MIC). */}
       {live.mode === "remoto" && (
         <StatusPill
@@ -245,6 +252,18 @@ export function LiveMeetingView({ asView = false }: { asView?: boolean } = {}) {
         <LiveCoachStrip />
 
         {/* ── Banners (estado real, nunca decorativos) ─────────────── */}
+        {live.micSilent && live.phase === "live" && (
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-sm border border-red/30 bg-red/5 px-3 py-2 text-xs leading-snug text-text">
+            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-red" />
+            <span className="min-w-0 flex-1">
+              Tu micrófono «{live.micLabel}» no registra voz hace 45 s
+              {live.systemAudio ? (live.isClass ? " y la profe sí se oye" : " y la llamada sí se oye") : ""}
+              {live.isClass ? ": sin tu voz no hay correcciones." : "."} Elige el micrófono que
+              estás usando (con audífonos Bluetooth, el de ellos).
+            </span>
+            <MicPicker />
+          </div>
+        )}
         {live.mode === "remoto" && live.systemAudio === false && live.phase === "live" && (
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-sm border border-amber/30 bg-amber/5 px-3 py-2 text-xs leading-snug text-text">
             <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />

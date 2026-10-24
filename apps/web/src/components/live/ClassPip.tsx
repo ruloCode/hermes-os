@@ -27,6 +27,7 @@ import { teamWindows, type LiveHelpIntent, type LiveSuggestion } from "@hermes/s
 import { fmtLiveClock, useLiveMeeting } from "@/state/LiveMeetingProvider";
 import { AutoHelpToggle } from "@/components/ingles/AutoHelpToggle";
 import { splitStreamingAngle, TEAM_HELP } from "./LiveSuggestionsRail";
+import { MicPicker } from "./MicPicker";
 
 // window.documentPictureInPicture ya está tipado en GestureControlProvider.
 
@@ -171,6 +172,17 @@ function ClassPipContent() {
         )}
       </div>
 
+      {/* Tu mic mudo: lo urgente va aquí, donde miras durante la llamada. */}
+      {live.micSilent && (
+        <div className="flex shrink-0 flex-col gap-1.5 rounded-sm border border-red/30 bg-red/5 px-2 py-1.5 text-xs leading-snug">
+          <span className="flex items-center gap-1.5 font-medium text-text">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-red" />
+            No se oye tu micrófono — elige el que usas:
+          </span>
+          <MicPicker className="max-w-full" />
+        </div>
+      )}
+
       {!live.selfSpeaker && live.speakerOrder.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           <span className="flex items-center gap-1.5 text-xs font-medium text-text">
@@ -303,6 +315,17 @@ function MeetingPipContent() {
           {share !== null && `${windows.length ? " · " : ""}hablas ${share} %`}
         </span>
       </div>
+
+      {/* Tu mic mudo: lo urgente va aquí, donde miras durante la llamada. */}
+      {live.micSilent && (
+        <div className="flex shrink-0 flex-col gap-1.5 rounded-sm border border-red/30 bg-red/5 px-2 py-1.5 text-xs leading-snug">
+          <span className="flex items-center gap-1.5 font-medium text-text">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-red" />
+            No se oye tu micrófono — elige el que usas:
+          </span>
+          <MicPicker className="max-w-full" />
+        </div>
+      )}
 
       {!live.selfSpeaker && live.speakerOrder.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">

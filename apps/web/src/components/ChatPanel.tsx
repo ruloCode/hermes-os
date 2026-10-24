@@ -18,6 +18,7 @@ import { ClaudeExecBar, claudeModelLabel } from "./ClaudeExecBar";
 import { HermesMark } from "./shell/HermesMark";
 import { AgentSteps } from "./AgentSteps";
 import { PanelState } from "@/components/ui/PanelState";
+import { useLocalLlm } from "@/lib/local-llm";
 
 /**
  * Consola con TABS: cada tab es una conversación (una sesión del Agent SDK).
@@ -127,6 +128,10 @@ export function ChatPanel({
   // composer). El orbe del header queda como indicador de estado.
   const voice = useVoiceConnect();
   const ws = useWorkspace();
+  // Modo avión: el chat lo responde el modelo local (el agente decide la ruta;
+  // aquí solo se muestra y se apaga lo que sin internet no funciona).
+  const local = useLocalLlm();
+  const offline = !!local.status?.enabled;
 
   // Tabs por proyecto: al cambiar el foco se guardan y restauran (en memoria).
   const byProject = useRef(new Map<string, TabsState>());
@@ -661,6 +666,54 @@ export function ChatPanel({
 
       {claudeNote && <p className="mt-2 text-xs text-text-dim">{claudeNote}</p>}
 
+      {/* Modo avión: qué modelo responde y si ya cargó */}
+      {offline && local.status && (
+        <div className="mt-2 flex items-center gap-2 self-start rounded-full border border-line bg-panel px-2.5 py-1 text-xs text-text-dim">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              local.status.phase === "ready"
+                ? "bg-green"
+                : local.status.phase === "error"
+                  ? "bg-red"
+                  : "animate-pulse bg-amber"
+            }`}
+          />
+          <span>
+            Modo avión · <b className="font-medium text-text">{local.status.model.label}</b> ·{" "}
+            {local.status.phase === "ready"
+              ? "listo"
+              : local.status.phase === "error"
+                ? (local.status.error ?? "error")
+                : "cargando el modelo…"}
+          </span>
+          {/* Rápido (2B) o Mejor (4B): cambiar recarga el modelo en ~10 s. */}
+          {local.status.models.filter((m) => m.available).length > 1 && (
+            <span className="ml-1 flex items-center rounded-full border border-line p-0.5">
+              {local.status.models
+                .filter((m) => m.available)
+                .map((m) => {
+                  const on = m.id === local.status?.model.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      title={`${m.label}${m.sizeGb ? ` · ${m.sizeGb} GB` : ""}`}
+                      aria-pressed={on}
+                      disabled={local.busy || active.busy}
+                      onClick={() => void local.setModel(m.id)}
+                      className={`cursor-pointer rounded-full px-2 py-px transition-colors disabled:cursor-default ${
+                        on ? "bg-selected text-text" : "text-text-dim hover:text-text"
+                      }`}
+                    >
+                      {m.hint}
+                    </button>
+                  );
+                })}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Input: textarea auto-crecible · Enter envía · mic · enviar */}
       {/* Composer como CAJA, no como línea con borde superior: es el objeto
           más importante de la vista, así que se lee como objeto. El anillo de
@@ -695,7 +748,9 @@ export function ChatPanel({
               ? "Hermes está trabajando… (podés escribir en otro tab)"
               : listening
                 ? "Escuchando… habla ahora"
-                : selectedProject
+                : offline
+                  ? "Modo avión: pregúntale al modelo local…"
+                  : selectedProject
                   ? `Pregunta sobre ${projectName ?? selectedProject}…`
                   : "Pídele algo a Hermes…"
           }
@@ -705,16 +760,47 @@ export function ChatPanel({
 
         <div className="flex items-center gap-1">
           {/* Selector de ejecución de Claude Code (modelo · esfuerzo · permisos) */}
-          <ClaudeExecBar
-            config={claudeConfig}
-            onChange={onClaudeConfigChange}
-            onRun={(mode) => void runClaude(mode)}
-            disabled={active.busy || claudeBusy}
-          />
+          {/* Sin internet Claude Code no corre: la barra se esconde en modo avión. */}
+          {!offline && (
+            <ClaudeExecBar
+              config={claudeConfig}
+              onChange={onClaudeConfigChange}
+              onRun={(mode) => void runClaude(mode)}
+              disabled={active.busy || claudeBusy}
+            />
+          )}
           <span className="flex-1" />
 
+        {/* Modo avión (modelo local). Sin la ruta en el agente no se muestra. */}
+        {local.status && (
+          <button
+            type="button"
+            title={
+              offline
+                ? "Apagar modo avión (volver a Claude)"
+                : `Modo avión: responder con ${local.status.model.label} en esta Mac, sin internet`
+            }
+            aria-label={offline ? "Apagar modo avión" : "Prender modo avión"}
+            aria-pressed={offline}
+            onClick={() => void local.toggle()}
+            disabled={local.busy || active.busy}
+            className={`grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:opacity-40 ${
+              offline ? "bg-accent/10 text-accent" : "text-text-dim hover:bg-hover hover:text-text"
+            }`}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M10.5 4.5c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5V9l7 4v2l-7-2v4.5l2.5 2V21L12 20l-4 1v-1.5l2.5-2V13l-7 2v-2l7-4V4.5Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
+
         {/* Llamada de voz con Hermes (entrada canónica; conectada = ir a Voz) */}
-        {voice.configured && (
+        {voice.configured && !offline && (
           <button
             type="button"
             title={

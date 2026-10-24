@@ -5,11 +5,18 @@ import { useEffect, useRef, type RefObject } from "react";
 const BARS = 12;
 
 /**
- * VU meter REAL del mic de la junta: lee `levelRef` (RMS que escribe el
- * worklet) con rAF y prende barras con peak-hold. Solo este componente
- * repinta — nada de estado React por frame de audio.
+ * VU meter REAL de una fuente de la junta: lee `levelRef` (RMS antes de
+ * mezclar) con rAF y prende barras con peak-hold. Solo este componente
+ * repinta — nada de estado React por frame de audio. Con `label` lleva su
+ * nombre al lado ("Tú", "Profe"): con dos fuentes, cada una se ve sola.
  */
-export function LiveVuMeter({ levelRef }: { levelRef: RefObject<number> }) {
+export function LiveVuMeter({
+  levelRef,
+  label,
+}: {
+  levelRef: RefObject<number>;
+  label?: string;
+}) {
   const boxRef = useRef<HTMLDivElement>(null);
   const peakRef = useRef(0);
 
@@ -35,11 +42,11 @@ export function LiveVuMeter({ levelRef }: { levelRef: RefObject<number> }) {
     return () => cancelAnimationFrame(raf);
   }, [levelRef]);
 
-  return (
+  const meter = (
     <div
       ref={boxRef}
       role="img"
-      aria-label="Nivel del micrófono"
+      aria-label={label ? `Nivel: ${label}` : "Nivel del micrófono"}
       className="flex h-3.5 items-end gap-[2px]"
     >
       {Array.from({ length: BARS }, (_, i) => (
@@ -52,5 +59,12 @@ export function LiveVuMeter({ levelRef }: { levelRef: RefObject<number> }) {
         />
       ))}
     </div>
+  );
+  if (!label) return meter;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-xs text-text-dim">{label}</span>
+      {meter}
+    </span>
   );
 }

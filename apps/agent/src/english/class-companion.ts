@@ -16,6 +16,7 @@
  */
 import {
   ARTICULATION_RULE_PREFIX,
+  articulationRules,
   correctable,
   detectWeakPhrases,
   type AutoHelpMode,
@@ -136,10 +137,10 @@ ${OWNER}${ownerBlurb("English", " (hispanohablante que practica inglés hablado)
   Arranca: el comienzo de una frase en inglés (5-9 palabras) que él completa, terminado en "…" — que arranque por el punto ("The main reason is…", "I'd go with…"), nunca con "I just wanted to" ni "I think maybe"
 - EXPLICAR — no entendió lo último que dijo la profesora. En español simple, 1-2 frases: qué dijo o qué le preguntó. Luego una línea "Clave: palabra = significado" con la palabra o expresión que probablemente no entendió.
 - FRASE — la respuesta para decir YA: inglés sencillo y natural, primera persona, MÁXIMO 20 palabras (la lee mientras habla).
-  · Charla general (cómo estás, cómo te fue, qué opinas): respuesta natural y genérica, SIN huecos — "It's been good, thanks! A bit busy with work, but good."
+  · Charla general (cómo estás, cómo te fue, qué opinas): respuesta natural y genérica, SIN huecos — "It's been good, thanks! Busy week at work, and a productive one."
   · Datos concretos de su vida o su trabajo: úsalos si están en la conversación o en "Sobre ${OWNER}" (abajo) — son reales. Solo si no están en ninguno de los dos, hueco entre corchetes en español, máximo 2 — "Yes, I built [qué cosa] last year."
   · Coherente con lo que ya dijo en esta conversación: no lo contradigas ni repitas lo que ya contó. Nunca inventes datos.
-  · Articulada: lo importante en la primera frase, verbo firme. Nada de "I just wanted to…", "sorry to…", "I think maybe…" ni "obviously" — es el inglés que él va a repetir, que suene seguro.
+  · Articulada (reglas de abajo, sin excepción): lo importante en la primera frase, verbo firme, sin "but" que borre lo anterior. Nada de "I just wanted to…", "sorry to…", "I think maybe…", "I guess" ni "obviously" — es el inglés que él va a repetir, que suene seguro.
 
 Ejemplo de ANDAMIO para "What did you do last weekend?" (las dos líneas empiezan LITERALMENTE con "Clave:" y "Arranca:"):
 Clave: went hiking (fui de caminata) · relaxed at home (descansé en casa)
@@ -147,8 +148,10 @@ Arranca: Last weekend I mostly…
 
 ## Reglas
 - Sin markdown, sin comillas alrededor de todo, sin preámbulos.
-- En ANDAMIO, si el momento no lo amerita (no era una pregunta para ${OWNER}, ya respondió, charla trivial), responde EXACTAMENTE: —
+- Es una conversación 1 a 1: casi toda pregunta es para ${OWNER}, también las cortas de seguimiento ("Which one?", "How much?", "Anything else?", "Why?"). Respóndelas con el contexto de la conversación — callar ahí lo deja solo justo cuando lo necesita.
+- Responde EXACTAMENTE — solo si la pregunta no le pide hablar: retórica, ella misma se contesta, o es una coletilla de confirmación ("…, right?", "…, okay?").
 - Velocidad sobre perfección: llega a tiempo o no sirve.`,
+    articulationRules(OWNER),
     ...knowledgeBlocks(k),
   ]
     .filter(Boolean)
@@ -205,6 +208,27 @@ export function askOf(text: string): string | null {
   if (q) return q;
   const s = lastCompleteSentence(text);
   return s && detectQuestion(s.replace(/[.!]+$/, "")).hit ? s : null;
+}
+
+// Coletilla de confirmación al final: "…, right?", "…, okay?". No pide hablar.
+const TAG_TAIL =
+  /,\s*(?:right|okay|ok|yeah|yes|no|you know|correct|huh|eh|isn't it|is it|got it|makes? sense)\s*\?+$/i;
+const FILLER_LEAD = /^(?:(?:okay|ok|so|oh|um|uh|and|well|yeah|alright|all right)[,\s]+)+/i;
+const ASK_LEAD =
+  /^(?:what|why|how|when|where|who|which|whose|do|does|did|are|is|was|were|can|could|would|will|have|has|should|tell|describe|explain)\b/i;
+
+/**
+ * ¿Es una pregunta-coletilla ("she can't hear me, right?")? Una afirmación
+ * con "right?" al final no le pide a nadie que hable: en la clase del
+ * 2026-10-16 fueron un tercio de los silencios del modelo — cada uno pintaba
+ * "cargando…" para nada. Con pregunta real adelante ("How would you…, right?")
+ * sí cuenta.
+ */
+export function isTagQuestion(question: string): boolean {
+  const t = question.trim();
+  if (!TAG_TAIL.test(t)) return false;
+  const body = t.replace(TAG_TAIL, "").replace(FILLER_LEAD, "").trim();
+  return !ASK_LEAD.test(body);
 }
 
 export class ClassCompanionController implements FastCopilot {
@@ -292,6 +316,7 @@ export class ClassCompanionController implements FastCopilot {
 
   private autoAsk(question: string, inProgress: string | null): void {
     if (this.autoHelp === "off") return;
+    if (isTagQuestion(lastQuestion(question) ?? question)) return;
     const key = normQ(question);
     if (!key || this.answered.has(key)) return;
     if (Date.now() - this.lastHelpAt < HELP_MIN_INTERVAL_MS) return;
@@ -369,7 +394,7 @@ Corrección (o —):`;
         : intent === "full"
           ? manual
             ? `Modo: FRASE. ${OWNER} pidió la respuesta completa para lo que le preguntaron${question ? `: "${question}"` : lastOther ? `: "${lastOther}"` : ""}.`
-            : `Modo: FRASE (automática). ${other[0].toUpperCase()}${other.slice(1)} le pregunta: "${question ?? lastOther}". Dale la respuesta para decir YA (máximo 20 palabras, coherente con toda la conversación); si no era una pregunta para él, responde —.`
+            : `Modo: FRASE (automática). ${other[0].toUpperCase()}${other.slice(1)} le pregunta: "${question ?? lastOther}". Dale la respuesta para decir YA (máximo 20 palabras, coherente con toda la conversación, articulada); — solo si no le pide hablar.`
           : `Modo: ANDAMIO. Pregunta de ${other}: "${question ?? lastOther}"`;
     const trigger =
       intent === "explain" ? "¿Qué dijo?" : intent === "full" && manual ? "frase completa" : (question ?? lastOther).slice(0, 160);

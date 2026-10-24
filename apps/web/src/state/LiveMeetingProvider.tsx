@@ -20,9 +20,13 @@ import { useConversationStatus } from "@elevenlabs/react";
 import {
   CLASS_COACH_MODE,
   CLASS_PROJECT_SLUG,
+  audioHealth,
   classSpeakerNames,
   inferSelfSpeaker,
   TEAM_COACH_MODE,
+  VOICE_LEVEL,
+  type LiveAudioReport,
+  type MicDeviceInfo,
   type SourceEnergy,
 } from "@hermes/shared";
 import type {
@@ -47,6 +51,7 @@ import {
   systemAudioWsUrl,
 } from "@/lib/hermes";
 import {
+  listMicDevices,
   useLiveMeetingAudio,
   type CallAudioSource,
   type SourceLevels,
@@ -147,6 +152,16 @@ export interface LiveMeetingValue {
   markSelf(speaker: string): void;
   /** Remoto: reintentar el audio de la llamada (la pestaña requiere click). */
   retrySystemAudio(): Promise<void>;
+  /** Nivel de la llamada (pestaña/app) ANTES de mezclar — el medidor de la profe. */
+  callLevelRef: RefObject<number>;
+  /** Nombre del micrófono abierto (null = sin audio propio: viewer o sin junta). */
+  micLabel: string | null;
+  /** 45 s sin voz en tu mic con la llamada sonando: hay que cambiar de micrófono. */
+  micSilent: boolean;
+  /** Micrófonos disponibles (los nombres salen tras el permiso). */
+  listMics(): Promise<MicDeviceInfo[]>;
+  /** Cambia el micrófono en caliente y lo recuerda para la próxima. */
+  switchMic(deviceId: string): Promise<void>;
   dismissSuggestion(id: string): void;
   /** En clase, `intent` elige la ayuda (andamio por defecto). */
   suggestNow(intent?: LiveHelpIntent): void;
@@ -216,6 +231,26 @@ function saveSource(source: CallAudioSource): void {
     /* sin sessionStorage */
   }
 }
+// El micrófono elegido vale para todas las juntas (localStorage, no sesión).
+const MIC_KEY = "hermes_live_mic";
+function saveMicPref(deviceId: string): void {
+  try {
+    localStorage.setItem(MIC_KEY, deviceId);
+  } catch {
+    /* sin localStorage */
+  }
+}
+function readMicPref(): string | null {
+  try {
+    return localStorage.getItem(MIC_KEY);
+  } catch {
+    return null;
+  }
+}
+// Cada cuánto se revisa si tu mic se oye y cada cuánto va el diagnóstico al agente.
+const HEALTH_EVERY_MS = 5_000;
+const REPORT_EVERY_MS = 60_000;
+
 function readSource(): CallAudioSource {
   try {
     return sessionStorage.getItem(SOURCE_KEY) === "app" ? "app" : "tab";
@@ -284,6 +319,15 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const sentMsRef = useRef(0);
   /** El "soy yo" automático ya decidió (o el humano marcó): no se repite. */
   const selfDecidedRef = useRef(false);
+  const [micLabel, setMicLabel] = useState<string | null>(null);
+  const [micSilent, setMicSilent] = useState(false);
+  /** Frames de toda la sesión con voz por fuente (el diagnóstico que va al agente). */
+  const voiceTotalsRef = useRef({ frames: 0, mic: 0, tab: 0 });
+  /** Desde qué ms del audio enviado se juzga el mic actual (al cambiarlo, de cero). */
+  const micSinceMsRef = useRef(0);
+  const silentWarnedRef = useRef(false);
+  const micLabelRef = useRef<string | null>(null);
+  micLabelRef.current = micLabel;
 
   function setPhase(p: LivePhase): void {
     phaseRef.current = p;
@@ -630,6 +674,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         const energy = energyRef.current;
         energy.push({ ms: sentMsRef.current, mic: levels.mic, tab: levels.tab });
         if (energy.length > MAX_ENERGY_FRAMES) energy.splice(0, energy.length - MAX_ENERGY_FRAMES);
+        const totals = voiceTotalsRef.current;
+        totals.frames += 1;
+        if (levels.mic >= VOICE_LEVEL) totals.mic += 1;
+        if (levels.tab >= VOICE_LEVEL) totals.tab += 1;
       }
       sentMsRef.current += FRAME_MS;
     }
@@ -685,6 +733,11 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     energyRef.current = [];
     sentMsRef.current = 0;
     selfDecidedRef.current = false;
+    voiceTotalsRef.current = { frames: 0, mic: 0, tab: 0 };
+    micSinceMsRef.current = 0;
+    silentWarnedRef.current = false;
+    setMicLabel(null);
+    setMicSilent(false);
     liveIdRef.current = null;
     projectRef.current = null;
     setLiveIdState(null);
@@ -756,7 +809,9 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         source,
         appAudioUrl: systemAudioWsUrl(),
         onSystemAudioEnded: onCallAudioEnded,
+        micDeviceId: readMicPref(),
       });
+      setMicLabel(res.mic.label);
       setSystemAudio(mode === "remoto" ? res.systemAudio : null);
       setCallSource(mode === "remoto" ? source : null);
       setSystemAudioError(mode === "remoto" ? audio.systemAudioErrorRef.current : null);
@@ -810,6 +865,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     // un WS extra durante "processing": mátalo (y al watchdog) desde ya.
     clearReconnect();
     clearWatchdog();
+    sendAudioReport(); // la foto final del audio: el ingest de la clase corre después del stop
     setPhase("stopping");
     try {
       await stopLiveMeeting(id);
@@ -842,6 +898,35 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     const ok = await audio.enableSystemAudio();
     setSystemAudio(ok);
     setSystemAudioError(ok ? null : audio.systemAudioErrorRef.current);
+  }
+
+  /** Diagnóstico del audio al agente: queda en el log y en el transcript de la clase. */
+  function sendAudioReport(): void {
+    const ws = wsRef.current;
+    const t = voiceTotalsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || viewerRef.current || t.frames === 0) return;
+    const report: LiveAudioReport = {
+      mic: micLabelRef.current ?? "?",
+      micVoice: t.mic / t.frames,
+      tabVoice: t.tab / t.frames,
+      silentWarned: silentWarnedRef.current,
+    };
+    ws.send(JSON.stringify({ type: "audio_report", report }));
+  }
+
+  async function switchMic(deviceId: string): Promise<void> {
+    try {
+      const info = await audio.switchMic(deviceId);
+      saveMicPref(deviceId);
+      setMicLabel(info.label);
+      micLabelRef.current = info.label;
+      // El mic nuevo se juzga desde ahora: su ventana de 45 s empieza de cero.
+      micSinceMsRef.current = sentMsRef.current;
+      setMicSilent(false);
+      sendAudioReport();
+    } catch {
+      setError("No pude abrir ese micrófono. Prueba con otro o revisa que esté conectado.");
+    }
   }
 
   function onCallAudioEnded(): void {
@@ -914,7 +999,9 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
             source,
             appAudioUrl: systemAudioWsUrl(),
             onSystemAudioEnded: onCallAudioEnded,
+            micDeviceId: readMicPref(),
           });
+          setMicLabel(res.mic.label);
           setSystemAudio(remote ? res.systemAudio : null);
           setCallSource(remote ? source : null);
           setSystemAudioError(remote ? audio.systemAudioErrorRef.current : null);
@@ -975,6 +1062,30 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finalCount, coachMode, mode, systemAudio, selfSpeaker, phase]);
 
+  // ¿Se oye tu mic? Cada 5 s sobre los últimos 45 s del audio ENVIADO (por
+  // fuente, antes de mezclar), y el diagnóstico al agente cada minuto.
+  useEffect(() => {
+    if (phase !== "live" || viewerRef.current) return;
+    let sinceReport = 0;
+    const timer = setInterval(() => {
+      const since = micSinceMsRef.current;
+      const frames = since > 0 ? energyRef.current.filter((f) => f.ms >= since) : energyRef.current;
+      const silent = audioHealth(frames).micSilent;
+      setMicSilent(silent);
+      if (silent && !silentWarnedRef.current) {
+        silentWarnedRef.current = true;
+        sendAudioReport();
+      }
+      sinceReport += HEALTH_EVERY_MS;
+      if (sinceReport >= REPORT_EVERY_MS) {
+        sinceReport = 0;
+        sendAudioReport();
+      }
+    }, HEALTH_EVERY_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   // Aviso nativo del browser antes de cerrar la pestaña con junta en curso.
   useEffect(() => {
     if (!active) return;
@@ -1030,7 +1141,12 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       sttState,
       wsConnected,
       error,
-      micLevelRef: audio.levelRef,
+      micLevelRef: audio.micLevelRef,
+      callLevelRef: audio.callLevelRef,
+      micLabel,
+      micSilent,
+      listMics: listMicDevices,
+      switchMic,
       result,
       coachMode,
       isClass,
@@ -1087,6 +1203,8 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       isClass,
       isTeam,
       stopConfirmNonce,
+      micLabel,
+      micSilent,
     ],
   );
 
