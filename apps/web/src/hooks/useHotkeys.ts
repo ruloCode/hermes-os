@@ -60,6 +60,12 @@ export function useHotkeys() {
         }
         return;
       }
+      // ⌥⌘B = riel derecho. Va por `code`: con ⌥ en macOS `key` llega como "∫".
+      if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === "KeyB") {
+        e.preventDefault();
+        ws.toggleRail();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         ws.toggleSidebar();

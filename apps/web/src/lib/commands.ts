@@ -54,6 +54,7 @@ export interface CommandContext {
   themeLabel: string;
   /** Sistema → claro → oscuro → sistema. */
   cycleTheme: () => void;
+  toggleRail: () => void;
 }
 
 export interface HermesCommand {
@@ -262,6 +263,12 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.cycleTheme(),
   },
   {
+    id: "panel-derecho",
+    label: "Mostrar/ocultar panel derecho",
+    hint: "El riel de contexto de la vista (⌥⌘B, también en el header)",
+    run: (ctx) => ctx.toggleRail(),
+  },
+  {
     id: "modo-grabacion",
     label: "Modo grabación",
     slash: "/grabar",
@@ -381,6 +388,7 @@ export function useCommandContext(): CommandContext {
     navigate: (path) => router.push(path),
     themeLabel: theme.pref,
     cycleTheme: theme.cycle,
+    toggleRail: ws.toggleRail,
     startRecording: () => {
       // La etapa `grabacion` significa "esto es lo que toca grabar": esa pieza
       // manda sobre la seleccionada. Sin ninguna, solo navega al Estudio.

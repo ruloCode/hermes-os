@@ -285,7 +285,7 @@ export function OrquestadorView() {
         {showRail && (
           <aside
             aria-label="Contexto"
-            className="-mr-6 -mb-5 hidden w-[280px] shrink-0 border-l border-line lg:flex lg:flex-col"
+            className={`-mr-6 -mb-5 hidden w-[280px] shrink-0 border-l border-line ${ws.railOpen ? "lg:flex lg:flex-col" : ""}`}
           >
             <ContextRail />
           </aside>

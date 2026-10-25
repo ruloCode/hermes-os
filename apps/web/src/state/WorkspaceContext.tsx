@@ -75,6 +75,11 @@ interface Workspace {
   sidebarOpen: boolean;
   toggleSidebar: () => void;
 
+  // Riel derecho de contexto (home, finanzas, hábitos, inglés, gimnasio):
+  // ocultable con el botón de la cabecera (RailToggle) o ⌥⌘B, persistido en localStorage.
+  railOpen: boolean;
+  toggleRail: () => void;
+
   // Command palette (⌘K).
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
@@ -114,6 +119,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSidebarOpen((v) => {
       try {
         localStorage.setItem("hermes_sidebar", v ? "0" : "1");
+      } catch {
+        /* noop */
+      }
+      return !v;
+    });
+
+  // Riel derecho: misma mecánica que el sidebar (leer tras montar).
+  const [railOpen, setRailOpen] = useState(true);
+  useEffect(() => {
+    try {
+      setRailOpen(localStorage.getItem("hermes_rail") !== "0");
+    } catch {
+      /* sin localStorage */
+    }
+  }, []);
+  const toggleRail = () =>
+    setRailOpen((v) => {
+      try {
+        localStorage.setItem("hermes_rail", v ? "0" : "1");
       } catch {
         /* noop */
       }
@@ -249,6 +273,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTaskDetail: () => setTaskDetail(null),
       sidebarOpen,
       toggleSidebar,
+      railOpen,
+      toggleRail,
       paletteOpen,
       setPaletteOpen,
       consoleDraft,
@@ -265,6 +291,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       claudeTaskId,
       taskDetail,
       sidebarOpen,
+      railOpen,
       paletteOpen,
       consoleDraft,
       pathname,

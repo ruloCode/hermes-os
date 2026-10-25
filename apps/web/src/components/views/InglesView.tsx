@@ -29,6 +29,7 @@ import { ScrollArea } from "@/components/ui/ScrollArea";
 import { PanelState } from "@/components/ui/PanelState";
 import { RailSection } from "@/components/ui/Rail";
 import { Button } from "@/components/ui/Button";
+import { useWorkspace } from "@/state/WorkspaceContext";
 import { useEnglish } from "@/hooks/useEnglish";
 import { useVoiceConnect } from "@/hooks/useVoiceConnect";
 import { useVoice } from "@/components/VoiceBusyContext";
@@ -68,6 +69,8 @@ function readTab(): InglesTab {
 const PRACTICE_HABIT = "práctica de inglés";
 
 export function InglesView({ active = true }: { active?: boolean }) {
+  // Riel ocultable (⌥⌘B / botón de la cabecera): sin él, el centro toma todo el ancho.
+  const { railOpen } = useWorkspace();
   const { sessions, vocab, refresh } = useEnglish();
   const planData = useEnglishPlan();
   const [tab, setTabState] = useState<InglesTab>("plan");
@@ -224,6 +227,8 @@ export function InglesView({ active = true }: { active?: boolean }) {
         title="Inglés"
         onBack={openLesson && !tutorLive && !classLive ? closeLesson : undefined}
         backLabel="Plan"
+        // El riel que se esconde es el de Sesiones (el Plan trae el suyo y en vivo manda la sesión).
+        railToggle={!tutorLive && !classLive && tab === "sesiones"}
         tabs={
           tutorLive || classLive || openLesson ? undefined : (
             <Segmented
@@ -386,7 +391,9 @@ export function InglesView({ active = true }: { active?: boolean }) {
 
             {/* El reporte del coach es el protagonista del centro. La PIEZA: se
                 lee largo, así que va sin marco. */}
-            <div className="col-span-12 flex min-h-[360px] flex-col md:col-span-8 lg:col-span-5 lg:min-h-0 lg:pl-8">
+            <div
+              className={`col-span-12 flex min-h-[360px] flex-col md:col-span-8 lg:min-h-0 lg:pl-8 ${railOpen ? "lg:col-span-5" : "lg:col-span-9"}`}
+            >
               {sessions.length === 0 ? (
                 <PanelState
                   kind="empty"
@@ -429,7 +436,7 @@ export function InglesView({ active = true }: { active?: boolean }) {
         ) : (
           <aside
             aria-label="Contexto"
-            className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:ml-6 lg:border-l lg:pl-4"
+            className={`col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:ml-6 lg:border-l lg:pl-4${railOpen ? "" : " lg:hidden"}`}
           >
             {/* -mt-3 pt-3: el fade superior del ScrollArea cae sobre el aire y
                 no sobre la primera etiqueta, que queda alineada con "Sesiones". */}

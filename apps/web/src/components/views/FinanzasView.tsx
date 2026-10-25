@@ -31,6 +31,7 @@ import { useVidaContext } from "@/state/VidaProvider";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ScrollArea } from "@/components/ui/ScrollArea";
 import { RailSection } from "@/components/ui/Rail";
+import { useWorkspace } from "@/state/WorkspaceContext";
 import {
   CurrencyToggle,
   FinanceSummaryPanel,
@@ -43,6 +44,8 @@ import { TransactionList } from "@/components/vida/TransactionList";
 import { AdvisorChat } from "@/components/vida/AdvisorChat";
 
 export function FinanzasView() {
+  // Riel ocultable (⌥⌘B / botón de la cabecera): sin él, el centro toma todo el ancho.
+  const { railOpen } = useWorkspace();
   const vida = useVidaContext();
 
   return (
@@ -51,13 +54,14 @@ export function FinanzasView() {
         title="Finanzas"
         meta={vida.summary ? monthLabel(vida.summary.month) : undefined}
         actions={<CurrencyToggle currency={vida.currency} onCurrency={vida.setCurrency} />}
+        railToggle
       />
 
       {/* lg: la fila mide el alto disponible, así las columnas scrollean
           adentro en vez de crecer con los movimientos. */}
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-x-8 gap-y-6 overflow-hidden max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
         {/* ── Centro: el mes, su ritmo, y la lista ───────────────────── */}
-        <div className="col-span-12 flex min-h-0 flex-col lg:col-span-7 xl:col-span-8">
+        <div className={`col-span-12 flex min-h-0 flex-col ${railOpen ? "lg:col-span-7 xl:col-span-8" : "lg:col-span-12"}`}>
           <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
             <div className="flex flex-col gap-10 pt-1 pb-2">
               {/* Sin caja: esto ES el encabezado del mes, no un objeto más. */}
@@ -100,7 +104,7 @@ export function FinanzasView() {
         {/* ── Riel: saldo, presupuestos y asesor ─────────────────────── */}
         <aside
           aria-label="Contexto"
-          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-5 lg:border-l lg:pl-6 xl:col-span-4"
+          className={`col-span-12 flex min-h-0 flex-col border-line lg:col-span-5 lg:border-l lg:pl-6 xl:col-span-4${railOpen ? "" : " lg:hidden"}`}
         >
           <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
             <div className="flex min-h-full flex-col gap-8 pt-1">

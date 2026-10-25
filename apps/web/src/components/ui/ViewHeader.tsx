@@ -16,8 +16,11 @@
 // hay dato, no se pasa y la línea no aparece. `tabs` es para las secciones de
 // la vista (un <Segmented/>), pegadas al título porque cambian QUÉ ves.
 // `actions` es para los controles que mandan sobre toda la vista.
+// `railToggle` pone al final el botón que muestra/oculta el riel derecho
+// (solo en las vistas que tienen uno).
 
 import type { ReactNode } from "react";
+import { RailToggle } from "./RailToggle";
 
 export function ViewHeader({
   title,
@@ -26,6 +29,7 @@ export function ViewHeader({
   actions,
   onBack,
   backLabel = "Volver",
+  railToggle = false,
 }: {
   title: string;
   meta?: ReactNode;
@@ -35,6 +39,8 @@ export function ViewHeader({
    *  vista (algunas ya lo usan para salir de un takeover): aquí solo el botón. */
   onBack?: () => void;
   backLabel?: string;
+  /** La vista tiene riel derecho de contexto: el botón para esconderlo va al final. */
+  railToggle?: boolean;
 }) {
   return (
     <header className="-mx-6 mb-5 flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-6 py-2.5">
@@ -65,7 +71,12 @@ export function ViewHeader({
         {meta != null && <span className="shrink-0 text-xs text-text-faint">{meta}</span>}
         {tabs != null && <div className="ml-2 flex min-w-0 items-center">{tabs}</div>}
       </div>
-      {actions != null && <div className="flex items-center gap-2">{actions}</div>}
+      {(actions != null || railToggle) && (
+        <div className="flex items-center gap-2">
+          {actions}
+          {railToggle && <RailToggle />}
+        </div>
+      )}
     </header>
   );
 }

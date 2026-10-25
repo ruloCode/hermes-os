@@ -19,12 +19,15 @@ import { useVidaContext } from "@/state/VidaProvider";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ScrollArea } from "@/components/ui/ScrollArea";
 import { RailSection } from "@/components/ui/Rail";
+import { useWorkspace } from "@/state/WorkspaceContext";
 import { Sparkline } from "@/components/ui/Sparkline";
 import { HabitTracker, streakLabel } from "@/components/vida/HabitTracker";
 import { GoalsPanel } from "@/components/vida/GoalsPanel";
 import { Progress, Stat, StatStrip } from "@/components/vida/kit";
 
 export function HabitosView() {
+  // Riel ocultable (⌥⌘B / botón de la cabecera): sin él, el centro toma todo el ancho.
+  const { railOpen } = useWorkspace();
   const vida = useVidaContext();
   const habits = vida.habits;
 
@@ -56,11 +59,11 @@ export function HabitosView() {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sin contador aquí a propósito: la cifra "Hechos hoy" de abajo dice
           lo mismo con su barra. Dos veces el mismo número es ruido, no énfasis. */}
-      <ViewHeader title="Hábitos" meta={completo ? "Día completo" : undefined} />
+      <ViewHeader title="Hábitos" meta={completo ? "Día completo" : undefined} railToggle />
 
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-x-8 gap-y-6 overflow-hidden max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
         {/* ── Centro: el día en cifras + LA lista ────────────────────── */}
-        <div className="col-span-12 flex min-h-0 flex-col gap-8 pt-1 lg:col-span-7">
+        <div className={`col-span-12 flex min-h-0 flex-col gap-8 pt-1 ${railOpen ? "lg:col-span-7" : "lg:col-span-12"}`}>
           {stats.total > 0 && (
             <div className="shrink-0">
               <StatStrip cols={3}>
@@ -125,7 +128,7 @@ export function HabitosView() {
         {/* ── Riel: las metas (contexto, no operación diaria) ────────── */}
         <aside
           aria-label="Contexto"
-          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-5 lg:border-l lg:pl-6"
+          className={`col-span-12 flex min-h-0 flex-col border-line lg:col-span-5 lg:border-l lg:pl-6${railOpen ? "" : " lg:hidden"}`}
         >
           <ScrollArea rail fade="y" className="min-h-0 flex-1 pr-1">
             <div className="pt-1">

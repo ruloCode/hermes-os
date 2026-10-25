@@ -25,6 +25,7 @@ import {
 } from "@hermes/shared";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { RailRow, RailSection } from "@/components/ui/Rail";
+import { useWorkspace } from "@/state/WorkspaceContext";
 import { ScrollArea } from "@/components/ui/ScrollArea";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -83,6 +84,8 @@ function readShowReference(): boolean {
 }
 
 export function GymView({ active }: { active: boolean }) {
+  // Riel ocultable (⌥⌘B / botón de la cabecera): sin él, el centro toma todo el ancho.
+  const { railOpen } = useWorkspace();
   const { today, error: loadError, submit, newRound } = useGym(active);
   const rec = useMediaRecorder({ meter: true });
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -301,6 +304,7 @@ export function GymView({ active }: { active: boolean }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ViewHeader
         title="Gimnasio"
+        railToggle
         meta={
           today
             ? `${doneToday} ${doneToday === 1 ? "hecha" : "hechas"} hoy${today.streak ? ` · racha de ${today.streak} ${today.streak === 1 ? "día" : "días"}` : ""}`
@@ -351,7 +355,10 @@ export function GymView({ active }: { active: boolean }) {
       />
 
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-rows-[minmax(0,1fr)]">
-        <ScrollArea fade="y" className="col-span-12 min-h-0 lg:col-span-8">
+        <ScrollArea
+          fade="y"
+          className={`col-span-12 min-h-0 ${railOpen ? "lg:col-span-8" : "lg:col-span-12"}`}
+        >
           <div className="mx-auto flex max-w-3xl flex-col gap-7 px-1 pt-1 pb-8">
             {loadError && !today && (
               <p className="flex items-center gap-2 text-sm text-text-dim">
@@ -612,7 +619,7 @@ export function GymView({ active }: { active: boolean }) {
 
         <aside
           aria-label="Progreso"
-          className="col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:border-l lg:pl-4"
+          className={`col-span-12 flex min-h-0 flex-col border-line lg:col-span-4 lg:border-l lg:pl-4${railOpen ? "" : " lg:hidden"}`}
         >
           {/* -mt-3 pt-3: el fade superior del ScrollArea cae sobre el aire, no
               sobre la primera etiqueta. */}
