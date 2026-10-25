@@ -675,6 +675,11 @@ export function practiceCompanionWsUrl(): string {
   return sseUrl(`/english/practice/ws`).replace(/^http/, "ws");
 }
 
+/** WS de la visión en vivo (cuadros JPEG ↑ · lo que Hermes dice ↓, shared/vision.ts). */
+export function visionWsUrl(): string {
+  return sseUrl(`/vision/ws`).replace(/^http/, "ws");
+}
+
 // ── Control por gestos (mano → cursor) ─────────────────────────────────
 
 export interface GestureAgentStatus {

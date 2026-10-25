@@ -42,6 +42,7 @@ import { tvCommand, tvScene, tvScenes, tvSleepIn, TV_ACTIONS } from "../tv/index
 import { addDayTask, findOwnerTask, setDayTaskDone, tasksOn } from "../day/index.js";
 import { confirmWake, setWakeCommit, wakeStatus } from "../wake/index.js";
 import { parseDue } from "../agenda/plan.js";
+import { macMedia, openOnMac, MAC_MEDIA_ACTIONS, MAC_OPEN_KINDS } from "../mac.js";
 import { STAGES, daysInStage, isStuck, stageGates } from "@hermes/shared";
 import { OWNER } from "../owner.js";
 import { addProfileEntry, profileEntries, removeProfileEntry, replaceProfileEntry, PROFILE_MAX_CHARS } from "../profile.js";
@@ -730,6 +731,24 @@ const controlTvTool = tool(
   },
 );
 
+// ── La Mac (desde el teléfono / las gafas; mac.ts) ─────────────────────
+
+const macOpenTool = tool(
+  "mac_open",
+  `Abre algo en la Mac de ${OWNER} (la pantalla grande, no el teléfono): una app instalada ("spotify", ` +
+    "\"chrome\", \"la calculadora\", \"whatsapp\") o un sitio en Chrome (\"linkedin\", \"youtube\", un dominio). " +
+    "Pasa el nombre TAL CUAL lo dijo. En auto gana la app instalada; kind=web fuerza el navegador (y busca en " +
+    "Google si no es un sitio conocido). Úsala para 'abre X en la Mac / en el computador / en el PC'.",
+  {
+    target: z.string().describe("Lo que hay que abrir, tal cual se dijo"),
+    kind: z.enum(MAC_OPEN_KINDS).optional().describe("auto (default) · app · web"),
+  },
+  async (args) => {
+    const res = await openOnMac(args.target, args.kind);
+    return text(res.ok ? `Listo: ${res.detail}.` : `No pude: ${res.error}`);
+  },
+);
+
 const tvSceneTool = tool(
   "tv_scene",
   `Escenas del cuarto de ${OWNER} (luces + TV, configurables en ~/.hermes-os/escenas.json): ` +
@@ -826,6 +845,22 @@ const wakeTool = tool(
       st.next ? `Próxima hora: ${new Date(st.next.at).toLocaleString("es-CO", { weekday: "long", hour: "numeric", minute: "2-digit", timeZone: env.SCHEDULED_TZ })} (${st.next.source}).` : "No hay próxima hora conocida.",
     ];
     return text(parts.join(" "));
+  },
+);
+
+const macMediaTool = tool(
+  "mac_media",
+  `Controla Spotify en la Mac de ${OWNER}: play, pause, toggle, next, previous, now (qué suena), volume ` +
+    "(value 0-100, 'sube' o 'baja') y search (value = lo que quiere oír: abre la búsqueda en Spotify; darle " +
+    "play a un resultado es un clic suyo, dilo así). Úsala para 'pon música', 'pausa', 'siguiente canción', " +
+    "'¿qué está sonando?', 'súbele'.",
+  {
+    action: z.enum(MAC_MEDIA_ACTIONS).describe("play · pause · toggle · next · previous · now · volume · search"),
+    value: z.string().optional().describe("volume: 0-100, sube o baja · search: lo que quiere buscar"),
+  },
+  async (args) => {
+    const res = await macMedia(args.action, args.value);
+    return text(res.ok ? `Listo: ${res.detail}.` : `No pude: ${res.error}`);
   },
 );
 
@@ -1066,6 +1101,8 @@ const HERMES_TOOLS = [
   tvSceneTool,
   dayTaskTool,
   wakeTool,
+  macOpenTool,
+  macMediaTool,
   updateProfileTool,
   manageSkillTool,
   getDailyBriefTool,

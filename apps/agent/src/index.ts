@@ -153,6 +153,8 @@ import { nextAlarm, setNextAlarm, tickScenes } from "./tv/schedule.js";
 import { GREETING_MP3, prepareGreeting, readGreeting } from "./tv/greeting.js";
 import { confirmWake, setWakeCommit, wakeCandidates, wakeStatus } from "./wake/index.js";
 import { pickWakeTarget } from "./wake/plan.js";
+import { closeVision, openVision, type VisionSession } from "./vision/live.js";
+import { listMacApps, macMedia, openOnMac, MAC_MEDIA_ACTIONS, MAC_OPEN_KINDS, type MacMediaAction, type MacOpenKind } from "./mac.js";
 import { ruloviewStatus, ruviewToken, startServer, stopServer } from "./ruloview/server.js";
 import { subscribeRuloview } from "./ruloview/stream.js";
 import { deleteScan, readRoom, ROOM_PATH, SCAN_MAX_BYTES, SCAN_PATH, writeRoom, writeScan } from "./ruloview/room.js";
@@ -447,7 +449,7 @@ app.post("/v1/chat/completions", async (c) => {
   const gate = financeGate((h) => c.req.header(h));
   const clientNote =
     c.req.header("X-Hermes-Client") === "phone"
-      ? "[Escribo desde mi teléfono (Hermes Phone). \"Abre\", \"toca\", \"escribe\", \"lee la pantalla\" son en el TELÉFONO con las tools phone_*, salvo que diga \"en la Mac\".]" +
+      ? "[Escribo desde mi teléfono (Hermes Phone). \"Abre\", \"toca\", \"escribe\", \"lee la pantalla\" son en el TELÉFONO con las tools phone_*, salvo que diga \"en la Mac\" / \"en el computador\" / \"en el PC\": eso es mac_open y mac_media.]" +
         (gate.note ? `\n${gate.note}` : "")
       : null;
 
@@ -1049,6 +1051,45 @@ app.get(
   }),
 );
 
+// Visión en vivo (docs/gafas-meta.md): cuadros JPEG ↑ (binario) · lo que
+// Hermes dice ↓ (JSON, protocolo en shared/vision.ts). La usan las gafas vía
+// Hermes Phone y /dev/vision con la webcam. Una conexión = un proceso CLI;
+// abrir otra cierra la anterior (4001). Sí sale por el túnel: con las gafas
+// se camina fuera de casa (el auth global corre en el upgrade, ?key=).
+app.get(
+  "/vision/ws",
+  upgradeWebSocket(() => {
+    let session: VisionSession | null = null;
+    return {
+      onOpen(_evt, ws) {
+        if (!env.VISION_ENABLED) {
+          ws.close(4403, "visión apagada (HERMES_VISION=off)");
+          return;
+        }
+        session = openVision(
+          (ev) => {
+            try {
+              ws.send(JSON.stringify(ev));
+            } catch {
+              /* cliente roto: su close limpia */
+            }
+          },
+          () => ws.close(4001, "otra conexión abrió la visión"),
+        );
+        emit({ kind: "vision", detail: "visión en vivo conectada" });
+      },
+      onMessage(evt) {
+        if (typeof evt.data === "string") session?.onMessage(evt.data);
+        else if (evt.data instanceof ArrayBuffer) session?.onFrame(evt.data);
+      },
+      onClose() {
+        if (session) closeVision(session);
+        session = null;
+      },
+    };
+  }),
+);
+
 // ── Tutor de proyecto (Entender) ───────────────────────────────────────
 // Conversación de SOLO LECTURA sobre los repos, el vault y las actas de un
 // proyecto, que explica dibujando (Mermaid por tool + fuentes). Código y
@@ -1522,6 +1563,36 @@ app.post("/tv/sleep", async (c) => {
   const res = tvSleepIn(minutes);
   emit({ kind: "tv", detail: minutes ? `tv · se apaga en ${minutes} min` : "tv · temporizador cancelado" });
   return c.json({ ok: true, ...res });
+});
+
+// ── La Mac por voz (desde el teléfono / las gafas) ─────────────────────
+// Abrir apps instaladas o un sitio en Chrome, y Spotify. Mismo contrato que
+// /lights: 200 con { ok, detail | error } para que la voz lo diga tal cual.
+
+app.get("/mac/apps", async (c) => c.json({ ok: true, apps: (await listMacApps()).map((a) => a.name) }));
+
+app.post("/mac/open", async (c) => {
+  const body = await c.req.json<{ target?: string; kind?: string }>().catch(() => ({}) as { target?: string; kind?: string });
+  const target = body.target?.trim();
+  if (!target) return c.json({ ok: false, error: "target requerido" }, 400);
+  const kind = (body.kind ?? "auto") as MacOpenKind;
+  if (!MAC_OPEN_KINDS.includes(kind)) return c.json({ ok: false, error: `kind inválido (${MAC_OPEN_KINDS.join("|")})` }, 400);
+  const res = await openOnMac(target, kind);
+  if (res.ok) emit({ kind: "mac", detail: res.detail });
+  return c.json(res);
+});
+
+app.post("/mac/media", async (c) => {
+  const body = await c.req
+    .json<{ action?: string; value?: string | number }>()
+    .catch(() => ({}) as { action?: string; value?: string | number });
+  const action = body.action?.trim() as MacMediaAction | undefined;
+  if (!action || !MAC_MEDIA_ACTIONS.includes(action)) {
+    return c.json({ ok: false, error: `action inválida (${MAC_MEDIA_ACTIONS.join("|")})` }, 400);
+  }
+  const res = await macMedia(action, body.value == null ? undefined : String(body.value));
+  if (res.ok && action !== "now") emit({ kind: "mac", detail: `spotify · ${res.detail}` });
+  return c.json(res);
 });
 
 // ── Avatar Terminator (demo) ───────────────────────────────────────────

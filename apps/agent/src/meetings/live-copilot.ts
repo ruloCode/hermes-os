@@ -213,6 +213,8 @@ export interface FastGenRequest {
   promptFor?: (engine: FastEngine) => string;
   /** Viaja en start/done (ausente = "decir"). */
   kind?: LiveSuggestionKind;
+  /** Imágenes que van ANTES del texto en el mismo mensaje (visión en vivo, vision/live.ts). */
+  images?: { mediaType: "image/jpeg" | "image/png"; data: string }[];
 }
 
 /**
@@ -491,12 +493,20 @@ class SdkFastEngine implements FastEngine {
           if (owner.cancelled) continue; // lo pisaron antes de salir de la cola
           owner.yielded = true;
           self.yielded.push(owner);
+          const text = owner.req.promptFor ? owner.req.promptFor(self) : owner.req.prompt;
+          const images = owner.req.images ?? [];
+          const content = images.length
+            ? [
+                ...images.map((img) => ({
+                  type: "image" as const,
+                  source: { type: "base64" as const, media_type: img.mediaType, data: img.data },
+                })),
+                { type: "text" as const, text },
+              ]
+            : text;
           yield {
             type: "user",
-            message: {
-              role: "user",
-              content: owner.req.promptFor ? owner.req.promptFor(self) : owner.req.prompt,
-            },
+            message: { role: "user", content },
             parent_tool_use_id: null,
           } as SDKUserMessage;
           continue;

@@ -280,7 +280,9 @@ export interface AgentActivityEvent {
     | "ruloview"
     | "scheduled"
     | "learning"
-    | "phone";
+    | "phone"
+    | "mac"
+    | "vision";
   taskId?: string;
   sessionId?: string;
   toolName?: string;

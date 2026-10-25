@@ -87,6 +87,12 @@ export const env = {
   // Dojo de algoritmos (dojo/coach.ts): revisa si entendiste, cuestiona tu plan
   // y explica por qué falla un test, sin escribir nunca la solución.
   DOJO_MODEL: process.env.HERMES_DOJO_MODEL || "sonnet",
+  // Visión en vivo (vision/live.ts): describe lo que ve la cámara de las gafas.
+  // Sonnet: en vision:sim respondió igual de rápido que Haiku (~2 s) y leyó
+  // el texto exacto donde Haiku cambiaba letras. "off" en HERMES_VISION
+  // apaga /vision/ws.
+  VISION_MODEL: process.env.HERMES_VISION_MODEL || "sonnet",
+  VISION_ENABLED: (process.env.HERMES_VISION || "").toLowerCase() !== "off",
   // Otras formas en que te llaman en las reuniones (coma): "te nombraron" las
   // reconoce además de HERMES_OWNER_NAME.
   OWNER_ALIASES: (process.env.HERMES_OWNER_ALIASES || "")

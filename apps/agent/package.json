@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "google:auth": "tsx scripts/google-oauth.ts",
     "live:sim": "tsx scripts/live-sim.ts",
+    "vision:sim": "tsx scripts/vision-sim.ts",
     "seed:content": "tsx scripts/seed-content.ts",
     "seed:guiones": "tsx scripts/seed-guiones.ts",
     "test": "node --test --import tsx 'src/**/*.test.ts'"

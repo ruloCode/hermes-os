@@ -952,6 +952,38 @@ const PHONE_TOOLS: ToolDef[] = [
     expects_response: true,
     response_timeout_secs: 15,
   },
+  // La Mac desde el teléfono / las gafas (docs/gafas-meta.md). El teléfono las
+  // reenvía a POST /mac/open y POST /mac/media del agente (respuesta 200 con
+  // { ok, detail | error }). Republicar SOLO con una app que ya las implemente:
+  // una app vieja no las conoce y la voz cae a run_task (regla 13 del prompt).
+  {
+    name: "mac_open",
+    description: `Abre algo en la Mac de ${OWNER} (no en el teléfono): una app instalada ("spotify", "chrome", "la calculadora") o un sitio en Chrome ("linkedin", "youtube"). Pasa el nombre tal cual lo dijo.`,
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Lo que hay que abrir, tal cual se dijo" },
+        kind: { type: "string", description: "auto (default) | app | web — web fuerza el navegador" },
+      },
+      required: ["target"],
+    },
+    expects_response: true,
+    response_timeout_secs: 15,
+  },
+  {
+    name: "mac_media",
+    description: `Spotify en la Mac de ${OWNER}: play, pause, toggle, next, previous, now (qué suena), volume (value 0-100, sube o baja), search (value = lo que quiere oír; abre la búsqueda, el play a un resultado lo da él).`,
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "play | pause | toggle | next | previous | now | volume | search" },
+        value: { type: "string", description: "volume: 0-100, sube o baja · search: lo que quiere buscar" },
+      },
+      required: ["action"],
+    },
+    expects_response: true,
+    response_timeout_secs: 15,
+  },
 ];
 
 // De Hermes se reusan TAL CUAL memoria y trabajo en segundo plano (el
@@ -981,6 +1013,8 @@ Reglas:
 10. Metas: si ${OWNER} dice una meta, una fecha o un plan ("quiero…", "para diciembre", "L-V a las 6 voy a…"), pásalo con run_task tal cual lo dijo, para que lo anoten las tools del compañero. Nunca inventes ni propongas metas por tu cuenta.
 11. El cuarto: la TV y las luces se manejan DIRECTO y al instante, sin run_task. "Pon X en YouTube", "abre Netflix", "pausa", "sube el volumen", "apaga la tele" → control_tv. "Modo película", "buenas noches", "apaga la tele en media hora" → tv_scene. "Prende/apaga las luces", "ponlas en azul", "luz cálida" → control_lights. Confirma en UNA frase con lo que devolvió la tool (el título del video tal cual).
 12. Pendientes: "recuérdame…", "anota para el jueves…", "¿qué tengo pendiente?", "ya hice lo de…" → day_task DIRECTO (sin run_task). Resuelve "el jueves", "mañana" a AAAA-MM-DD con la FECHA ACTUAL.
+13. La Mac: "abre X en la Mac / en el computador / en el PC" → mac_open; música en la Mac ("pon música", "pausa", "siguiente", "¿qué suena?", "súbele") → mac_media. Responden en un segundo: di en una frase lo que devolvió. Si dicen que la app no conoce la tool, haz lo mismo con run_task. Si dice "pausa", "siguiente" o "súbele" sin decir dónde: es donde ya pusiste algo en esta conversación (TV = regla 11, Mac = esta); si no se sabe, pregunta corto: "¿En la TV o en la Mac?".
+14. Pedir un carro/taxi/viaje ("pídeme un carro a casa", "un Uber al trabajo") → run_task con el pedido TAL CUAL lo dijo (incluye si pidió rápido, barato, moto o una app concreta): el agente local conoce el procedimiento (Uber por defecto, inDrive si lo nombra) y maneja el teléfono, y el viaje se pide de una, SIN confirmación en pantalla (así lo decidió ${OWNER}). Dile en una frase que ya lo estás pidiendo ("Va, te pido el carro") — no le digas que confirme nada. Cuando check_task traiga el resultado, repórtale en UNA frase el conductor, el carro (marca, modelo y color), la placa, en cuántos minutos llega, la categoría y el precio; si aún busca conductor, dilo con categoría y precio.
 
 MODO LLAMADA: {{call_mode}}
 Si arriba dice "morning", "evening" o "weekly", esta conversación es una LLAMADA que ${OWNER} agendó (ya saludaste diciendo el motivo). Datos, cada uno con su fuente (no hay otros: no inventes cifras):

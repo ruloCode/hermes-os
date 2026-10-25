@@ -84,9 +84,14 @@ const SITE_ALIASES: Record<string, string> = {
  * Convierte lo que dijo la voz en una URL: alias conocido → dominio dicho
  * tal cual → búsqueda en Google como red de seguridad (siempre abre ALGO).
  */
-export function resolveTarget(raw: string): { url: string; label: string } {
+export function resolveTarget(raw: string): {
+  url: string;
+  label: string;
+  /** "search" = no era un sitio conocido y cayó a Google (mac.ts lo usa para decidir app vs web). */
+  kind: "url" | "alias" | "domain" | "search";
+} {
   const target = raw.trim();
-  if (/^https?:\/\//i.test(target)) return { url: target, label: target };
+  if (/^https?:\/\//i.test(target)) return { url: target, label: target, kind: "url" };
   const cleaned = target
     .toLowerCase()
     .normalize("NFD")
@@ -94,13 +99,14 @@ export function resolveTarget(raw: string): { url: string; label: string } {
     .replace(/^(mi|mis|el|la|los|las|un|una)\s+/, "")
     .trim();
   const alias = SITE_ALIASES[cleaned];
-  if (alias) return { url: alias, label: cleaned };
+  if (alias) return { url: alias, label: cleaned, kind: "alias" };
   if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/.test(cleaned)) {
-    return { url: `https://${cleaned}`, label: cleaned };
+    return { url: `https://${cleaned}`, label: cleaned, kind: "domain" };
   }
   return {
     url: `https://www.google.com/search?q=${encodeURIComponent(target)}`,
     label: `búsqueda "${target}"`,
+    kind: "search",
   };
 }
 

@@ -58,3 +58,4 @@ export * from "./english-plan.js";
 export * from "./lens.js";
 export * from "./dojo.js";
 export * from "./dojo-catalog.js";
+export * from "./vision.js";
