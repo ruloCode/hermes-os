@@ -13,6 +13,7 @@ import { useGestureControl } from "@/state/GestureControlProvider";
 import { useUiHands } from "@/state/UiHandsProvider";
 import { useEstudioContext } from "@/state/EstudioProvider";
 import { useTheme } from "@/state/ThemeProvider";
+import { toggleLocalLlm } from "@/lib/local-llm";
 
 export interface CommandContext {
   selectedProject: string | null;
@@ -74,6 +75,12 @@ export const COMMANDS: HermesCommand[] = [
     label: "Hablar con Hermes",
     hint: "Llamada de voz en tiempo real",
     run: (ctx) => ctx.startVoiceCall(),
+  },
+  {
+    id: "modo-avion",
+    label: "Modo avión (modelo local)",
+    hint: "Prende o apaga el chat con el modelo local de esta Mac, sin internet",
+    run: () => toggleLocalLlm(),
   },
   {
     id: "pulse-check",

@@ -20,11 +20,15 @@ import { useConversationStatus } from "@elevenlabs/react";
 import {
   CLASS_COACH_MODE,
   CLASS_PROJECT_SLUG,
+  audioHealth,
   classSpeakerNames,
+  DEAD_LEVEL,
   inferSelfSpeaker,
   looksLikeSilence,
   micHealth,
   TEAM_COACH_MODE,
+  VOICE_LEVEL,
+  type LiveAudioReport,
   type MicHealthReason,
   type SourceEnergy,
 } from "@hermes/shared";
@@ -83,10 +87,12 @@ export interface StreamingSuggestion {
 }
 
 /**
- * Por qué no te estaría oyendo: el sistema silenció o cortó el mic, o lo
- * medido (energía o transcript) dice que tu voz casi no entra.
+ * Por qué no te estaría oyendo: el sistema silenció o cortó el mic, lo
+ * medido (energía o transcript) dice que tu voz casi no entra, o el input
+ * está muerto del todo ("dead": 45 s sin ni el ruido de fondo — un driver
+ * virtual de Teams/Zoom o un mic desconectado; vale en clase y en juntas).
  */
-export type MicWarning = MicHealthReason | "muted" | "ended";
+export type MicWarning = MicHealthReason | "muted" | "ended" | "dead";
 
 export interface LiveMeetingValue {
   phase: LivePhase;
@@ -208,6 +214,8 @@ const MIC_KEY = "hermes_live_mic";
 const MIC_HEALTH_EVERY_MS = 5_000;
 /** "Te oigo bien" pospone el aviso medido. */
 const MIC_SNOOZE_MS = 5 * 60_000;
+/** Cada cuánto va al agente el diagnóstico del audio (log + transcript de la clase). */
+const AUDIO_REPORT_EVERY_MS = 60_000;
 /** Backpressure del WS: por encima se descarta el frame (hueco honesto). */
 const MAX_BUFFERED_BYTES = 256_000;
 /** El server manda ping cada 15 s → 20 s sin mensajes = conexión muerta. */
@@ -315,6 +323,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const [mic, setMic] = useState<MicInfo | null>(null);
   const [micIssue, setMicIssue] = useState<"muted" | "ended" | null>(null);
   const [micHealthWarning, setMicHealthWarning] = useState<MicHealthReason | null>(null);
+  const [micDead, setMicDead] = useState(false);
   const [fastCopilot, setFastCopilot] = useState(false);
   const [selfSpeaker, setSelfSpeaker] = useState<string | null>(null);
   const [mode, setMode] = useState<LiveAudioMode | null>(null);
@@ -351,6 +360,12 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
   const micSnoozeRef = useRef(0);
   /** Desde qué ms de audio enviado se mide la salud del mic (sube al cambiar de mic). */
   const micHealthFromRef = useRef(0);
+  /** Frames de toda la sesión con voz por fuente (el diagnóstico que va al agente). */
+  const voiceTotalsRef = useRef({ frames: 0, mic: 0, tab: 0 });
+  /** ¿Salió algún aviso de mic en esta sesión? (va en el diagnóstico) */
+  const micWarnedRef = useRef(false);
+  const micRef = useRef<MicInfo | null>(null);
+  micRef.current = mic;
 
   function setPhase(p: LivePhase): void {
     phaseRef.current = p;
@@ -704,6 +719,10 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
         const energy = energyRef.current;
         energy.push({ ms: sentMsRef.current, mic: levels.mic, tab: levels.tab });
         if (energy.length > MAX_ENERGY_FRAMES) energy.splice(0, energy.length - MAX_ENERGY_FRAMES);
+        const totals = voiceTotalsRef.current;
+        totals.frames += 1;
+        if (levels.mic >= VOICE_LEVEL) totals.mic += 1;
+        if (levels.tab >= VOICE_LEVEL) totals.tab += 1;
       }
       sentMsRef.current += FRAME_MS;
     }
@@ -761,6 +780,8 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     selfDecidedRef.current = false;
     micSnoozeRef.current = 0;
     micHealthFromRef.current = 0;
+    voiceTotalsRef.current = { frames: 0, mic: 0, tab: 0 };
+    micWarnedRef.current = false;
     liveIdRef.current = null;
     projectRef.current = null;
     setLiveIdState(null);
@@ -776,6 +797,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setMic(null);
     setMicIssue(null);
     setMicHealthWarning(null);
+    setMicDead(false);
     setFastCopilot(false);
     setSelfSpeaker(null);
     setMode(null);
@@ -892,6 +914,7 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     // un WS extra durante "processing": mátalo (y al watchdog) desde ya.
     clearReconnect();
     clearWatchdog();
+    sendAudioReport(); // la foto final del audio: el ingest de la clase corre después del stop
     setPhase("stopping");
     try {
       await stopLiveMeeting(id);
@@ -941,13 +964,31 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     setMic(info);
     setMicIssue(null);
     setMicHealthWarning(null);
+    setMicDead(false);
     // Lo medido con el mic anterior ya no cuenta.
     micHealthFromRef.current = sentMsRef.current;
+    micRef.current = info;
+    sendAudioReport();
+  }
+
+  /** Diagnóstico del audio al agente: queda en su log y en el transcript de la clase. */
+  function sendAudioReport(): void {
+    const ws = wsRef.current;
+    const t = voiceTotalsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || viewerRef.current || t.frames === 0) return;
+    const report: LiveAudioReport = {
+      mic: micRef.current?.label ?? "?",
+      micVoice: t.mic / t.frames,
+      tabVoice: t.tab / t.frames,
+      silentWarned: micWarnedRef.current,
+    };
+    ws.send(JSON.stringify({ type: "audio_report", report }));
   }
 
   function dismissMicWarning(): void {
     micSnoozeRef.current = Date.now() + MIC_SNOOZE_MS;
     setMicHealthWarning(null);
+    setMicDead(false);
   }
 
   function markSelf(speaker: string): void {
@@ -1099,6 +1140,29 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(t);
   }, [coachMode, mode, phase, selfSpeaker]);
 
+  // Cualquier sesión con audio propio (clase o junta, presencial o remota):
+  // input muerto 45 s = no te está oyendo nadie (driver virtual, mic
+  // desconectado). Callar en una junta es normal; un input sin ni ruido de
+  // fondo, no. Y el diagnóstico del audio al agente cada minuto.
+  useEffect(() => {
+    if (phase !== "live" || viewerRef.current) return;
+    let sinceReport = 0;
+    const t = setInterval(() => {
+      const from = micHealthFromRef.current;
+      const frames = from ? energyRef.current.filter((f) => f.ms >= from) : energyRef.current;
+      const h = audioHealth(frames);
+      const covered = frames.length > 0 && frames[frames.length - 1].ms - frames[0].ms >= 45_000;
+      setMicDead(Date.now() >= micSnoozeRef.current && covered && h.micPeak < DEAD_LEVEL);
+      sinceReport += MIC_HEALTH_EVERY_MS;
+      if (sinceReport >= AUDIO_REPORT_EVERY_MS) {
+        sinceReport = 0;
+        sendAudioReport();
+      }
+    }, MIC_HEALTH_EVERY_MS);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   // Aviso nativo del browser antes de cerrar la pestaña con junta en curso.
   useEffect(() => {
     if (!active) return;
@@ -1135,7 +1199,15 @@ export function LiveMeetingProvider({ children }: { children: ReactNode }) {
       if (!looksLikeSilence(streaming[i].text)) return streaming[i];
     return streaming.length ? streaming[streaming.length - 1] : null;
   }, [streaming]);
-  const micWarning: MicWarning | null = micIssue ?? micHealthWarning;
+  const micWarning: MicWarning | null = micIssue ?? micHealthWarning ?? (micDead ? "dead" : null);
+  // El diagnóstico dice si el aviso llegó a salir: el reporte de la clase lo lee.
+  useEffect(() => {
+    if (micWarning && !micWarnedRef.current) {
+      micWarnedRef.current = true;
+      sendAudioReport();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [micWarning]);
 
   const value = useMemo<LiveMeetingValue>(
     () => ({

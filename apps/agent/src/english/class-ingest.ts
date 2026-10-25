@@ -7,10 +7,12 @@
  * la clase ({{practice_context}}).
  */
 import {
+  audioReportLine,
   classMetricsLine,
   computeClassMetrics,
   correctionsFromSuggestions,
   type EnglishSession,
+  type LiveAudioReport,
   type LiveSegment,
   type LiveSuggestion,
 } from "@hermes/shared";
@@ -29,6 +31,8 @@ export async function ingestClass(p: {
   segments: LiveSegment[];
   selfSpeaker: string | undefined;
   suggestions: LiveSuggestion[];
+  /** Qué mic usó el browser y cuánta voz entró por cada fuente (si lo reportó). */
+  audio?: LiveAudioReport;
 }): Promise<EnglishSession> {
   const errors = correctionsFromSuggestions(p.suggestions, MAX_CLASS_ERRORS);
   const corrections = p.suggestions.filter((s) => s.kind === "corregir").length;
@@ -36,7 +40,9 @@ export async function ingestClass(p: {
   const session = await saveEnglishSession({
     startedAt: p.startedAt,
     durationSec: p.durationSec,
-    transcript: `${classMetricsLine(metrics)}\n\n${p.transcript}`,
+    transcript: [classMetricsLine(metrics), audioReportLine(p.audio), "", p.transcript]
+      .filter((l, i) => l || i === 2)
+      .join("\n"),
     errors,
     source: "class",
   });

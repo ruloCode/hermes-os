@@ -190,8 +190,9 @@ ${spokenEnglishRules()}
 
 ## Reglas
 - Sin markdown, sin comillas alrededor de todo, sin preámbulos.
+- Es una conversación 1 a 1: casi toda pregunta es para ${OWNER}, también las de seguimiento ("How much?", "Anything else?", "Why?") cuando se las piden a mano. Respóndelas con el contexto de la conversación — callar ahí lo deja solo justo cuando lo necesita.
 - En SEGUIR solo responde — si ella claramente quedó a media frase o es puro trámite de la clase ("Okay, let's see", "Give me a second").
-- En ANDAMIO y en FRASE automática, si el momento no lo amerita (no era una pregunta para ${OWNER}, ya respondió, es una pregunta retórica o de trámite como "Sound good?", "Can you hear me?", "Ready?"), responde EXACTAMENTE: —
+- En ANDAMIO y en FRASE automática responde EXACTAMENTE — solo si la pregunta no le pide hablar: no era para ${OWNER}, ya respondió, es retórica o ella misma se contesta, es de trámite ("Sound good?", "Can you hear me?", "Ready?") o es una coletilla de confirmación ("…, right?", "…, okay?").
 - Velocidad sobre perfección: llega a tiempo o no sirve.`,
     ...knowledgeBlocks(k),
   ]
@@ -263,6 +264,27 @@ export function worthAnswering(question: string): boolean {
   if (TRIVIAL_ASK.test(q)) return false;
   // Menos de tres palabras casi nunca es una pregunta para responder con una frase.
   return q.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length >= 3;
+}
+
+// Coletilla de confirmación al final: "…, right?", "…, okay?". No pide hablar.
+const TAG_TAIL =
+  /,\s*(?:right|okay|ok|yeah|yes|no|you know|correct|huh|eh|isn't it|is it|got it|makes? sense)\s*\?+$/i;
+const FILLER_LEAD = /^(?:(?:okay|ok|so|oh|um|uh|and|well|yeah|alright|all right)[,\s]+)+/i;
+const ASK_LEAD =
+  /^(?:what|why|how|when|where|who|which|whose|do|does|did|are|is|was|were|can|could|would|will|have|has|should|tell|describe|explain)\b/i;
+
+/**
+ * ¿Es una pregunta-coletilla ("she can't hear me, right?")? Una afirmación
+ * con "right?" al final no le pide a nadie que hable: en la clase del
+ * 2026-10-16 fueron un tercio de los silencios del modelo — cada uno pintaba
+ * "cargando…" para nada. Con pregunta real adelante ("How would you…, right?")
+ * sí cuenta.
+ */
+export function isTagQuestion(question: string): boolean {
+  const t = question.trim();
+  if (!TAG_TAIL.test(t)) return false;
+  const body = t.replace(TAG_TAIL, "").replace(FILLER_LEAD, "").trim();
+  return !ASK_LEAD.test(body);
 }
 
 export class ClassCompanionController implements FastCopilot {
@@ -352,6 +374,7 @@ export class ClassCompanionController implements FastCopilot {
   private autoAsk(question: string, inProgress: string | null): void {
     if (this.autoHelp === "off") return;
     if (!worthAnswering(lastCompleteSentence(question) ?? question)) return;
+    if (isTagQuestion(lastQuestion(question) ?? question)) return;
     const key = normQ(question);
     if (!key || this.answered.has(key)) return;
     if (Date.now() - this.lastHelpAt < HELP_MIN_INTERVAL_MS) return;
@@ -455,7 +478,7 @@ Corrección (o —):`;
         : intent === "full"
           ? manual
             ? `Modo: FRASE. ${OWNER} pidió la respuesta completa para lo que le preguntaron${question ? `: "${question}"` : lastOther ? `: "${lastOther}"` : ""}.`
-            : `Modo: FRASE (automática). ${other[0].toUpperCase()}${other.slice(1)} le pregunta: "${question ?? lastOther}". Dale la respuesta para decir YA (línea 1 de máximo 25 palabras, el punto primero, coherente con toda la conversación; "${LEVEL_UP_PREFIX}" opcional); si no era una pregunta para él, responde —.`
+            : `Modo: FRASE (automática). ${other[0].toUpperCase()}${other.slice(1)} le pregunta: "${question ?? lastOther}". Dale la respuesta para decir YA (línea 1 de máximo 25 palabras, el punto primero, articulada, coherente con toda la conversación; "${LEVEL_UP_PREFIX}" opcional); — solo si no le pide hablar.`
           : `Modo: ANDAMIO. Pregunta de ${other}: "${question ?? lastOther}"`);
     const trigger =
       intent === "explain"

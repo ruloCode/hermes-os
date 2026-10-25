@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { micDisplayName, pickMicDevice, type MicDeviceInfo } from "@hermes/shared";
 
 /**
  * Captura de audio para la junta EN VIVO → AudioWorklet → frames PCM16LE
@@ -15,6 +16,10 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
  *
  * El nivel (RMS) se escribe en `levelRef` mutable — el VU meter lo lee con
  * rAF y nadie re-renderiza por frame de audio.
+ *
+ * Micrófono: el que eligió el dueño (deviceId) o el predeterminado; si no hay
+ * elección (o la elegida ya no está) y el predeterminado es un driver virtual
+ * (Teams/Zoom instalan uno que entrega silencio), se abre el primer mic físico.
  *
  * Constraints presenciales (mic de la Mac captando la sala):
  *  - echoCancellation: false → no hay far-end (la voz ElevenLabs está
@@ -55,6 +60,12 @@ export type MicIssue = "muted" | "unmuted" | "ended";
 export interface MicInfo {
   deviceId: string | null;
   label: string;
+}
+
+/** Inputs de audio del sistema (con nombres: el permiso del mic ya se dio). */
+export async function listMicDevices(): Promise<MicDeviceInfo[]> {
+  const all = await navigator.mediaDevices.enumerateDevices();
+  return all.filter((d) => d.kind === "audioinput").map((d) => ({ deviceId: d.deviceId, label: d.label }));
 }
 
 const TARGET_RATE = 16_000;
@@ -361,7 +372,8 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
     }
     const info: MicInfo = {
       deviceId: track?.getSettings().deviceId ?? null,
-      label: track?.label || "Micrófono",
+      // Sin el "Predeterminado - " que antepone Chrome al alias del sistema.
+      label: micDisplayName(track?.label ?? ""),
     };
     micInfoRef.current = info;
     return info;
@@ -543,6 +555,22 @@ export function useLiveMeetingAudio(): LiveMeetingAudio {
       }
       streamRef.current = stream;
       try {
+        // Sin elección propia (o la elegida ya no está): si el predeterminado
+        // es un driver virtual, se cambia al primer mic físico.
+        const wanted = opts?.micDeviceId ?? null;
+        if (!wanted || stream.getAudioTracks()[0]?.getSettings().deviceId !== wanted) {
+          const pick = pickMicDevice(await listMicDevices().catch(() => []), null);
+          if (pick && pick !== stream.getAudioTracks()[0]?.getSettings().deviceId) {
+            const better = await navigator.mediaDevices
+              .getUserMedia({ audio: micConstraints(mode, pick) })
+              .catch(() => null);
+            if (better) {
+              stream.getTracks().forEach((t) => t.stop());
+              stream = better;
+              streamRef.current = stream;
+            }
+          }
+        }
         let ctx: AudioContext;
         try {
           ctx = new AudioContext({ sampleRate: TARGET_RATE });

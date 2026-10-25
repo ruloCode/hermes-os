@@ -26,6 +26,7 @@ const VERB: Record<string, string> = {
   search_memory: "Buscó en la memoria",
   save_preference: "Guardó una preferencia",
   get_project_status: "Leyó el estado del proyecto",
+  list_projects: "Listó los proyectos",
   update_project_note: "Actualizó la nota del proyecto",
   search_vault: "Buscó en el vault",
   capture_idea: "Capturó una idea",

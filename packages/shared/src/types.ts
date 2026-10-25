@@ -694,7 +694,20 @@ export type LiveClientMessage =
   | { type: "rename"; speaker: string; name: string }
   | { type: "suggest_now"; intent?: LiveHelpIntent }
   | { type: "mark_self"; speaker: string }
-  | { type: "auto_help"; mode: AutoHelpMode };
+  | { type: "auto_help"; mode: AutoHelpMode }
+  /** Diagnóstico del audio del browser (cada minuto): queda en el transcript de la clase. */
+  | { type: "audio_report"; report: LiveAudioReport };
+
+/** Lo que el browser reporta del audio de la junta (ver live-audio.ts). */
+export interface LiveAudioReport {
+  /** Nombre del micrófono abierto. */
+  mic: string;
+  /** Fracción de TODO el audio enviado con voz en el mic / en la llamada (0..1). */
+  micVoice: number;
+  tabVoice: number;
+  /** ¿El aviso de mic mudo llegó a salir en algún momento? */
+  silentWarned: boolean;
+}
 
 /** Protocolo WS agente→browser (siempre JSON). */
 export type LiveServerEvent =

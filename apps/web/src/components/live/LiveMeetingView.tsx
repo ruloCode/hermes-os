@@ -10,7 +10,7 @@ import { fmtLiveClock, useLiveMeeting } from "@/state/LiveMeetingProvider";
 import { LiveCoachStrip } from "./LiveCoachStrip";
 import { LiveTranscript } from "./LiveTranscript";
 import { LiveSuggestionsRail } from "./LiveSuggestionsRail";
-import { LiveSourceMeters, MicWarningBanner } from "./MicControls";
+import { LiveSourceMeters, MicPicker, MicWarningBanner } from "./MicControls";
 import { useClassPip } from "./ClassPip";
 
 /**
@@ -145,6 +145,12 @@ export function LiveMeetingView({ asView = false }: { asView?: boolean } = {}) {
       <span className="hidden md:block">
         <LiveSourceMeters />
       </span>
+      {/* El micrófono siempre a mano (no solo cuando hay aviso): cambiarlo no corta el STT. Sin mic propio (espectador) no hay qué cambiar. */}
+      {live.mic && (
+        <span className="hidden md:block">
+          <MicPicker compact />
+        </span>
+      )}
       {/* Fuente de audio: solo en remoto (presencial siempre es MIC). */}
       {live.mode === "remoto" && (
         <StatusPill

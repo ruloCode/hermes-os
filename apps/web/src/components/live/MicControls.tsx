@@ -7,6 +7,7 @@
 // lo medido dice que tu voz no está entrando.
 
 import { useEffect, useState } from "react";
+import { isVirtualMic, micDisplayName } from "@hermes/shared";
 import { Button } from "@/components/ui/Button";
 import {
   readMicPref,
@@ -34,6 +35,16 @@ export function LiveSourceMeters() {
       )}
     </span>
   );
+}
+
+/**
+ * Cómo se lee un input en el selector: sin el "Predeterminado - " de Chrome, y
+ * los drivers virtuales (Teams, Zoom) marcados — como entrada entregan silencio.
+ */
+function micOptionLabel(d: MediaDeviceInfo, i: number): string {
+  if (!d.label) return `Micrófono ${i + 1}`;
+  if (d.deviceId === "default") return d.label; // el alias muestra a qué apunta
+  return `${micDisplayName(d.label)}${isVirtualMic(d.label) ? " (virtual: sin voz)" : ""}`;
 }
 
 /** Entradas de audio del equipo (las etiquetas existen porque ya hay permiso de mic). */
@@ -86,7 +97,7 @@ export function MicPicker({ compact = false }: { compact?: boolean }) {
       >
         {inputs.map((d, i) => (
           <option key={d.deviceId || i} value={d.deviceId}>
-            {d.label || `Micrófono ${i + 1}`}
+            {micOptionLabel(d, i)}
           </option>
         ))}
       </select>
@@ -118,7 +129,7 @@ export function MicPreferencePicker() {
     >
       {inputs.map((d, i) => (
         <option key={d.deviceId || i} value={d.deviceId}>
-          {d.label || `Micrófono ${i + 1}`}
+          {micOptionLabel(d, i)}
         </option>
       ))}
     </select>
@@ -131,6 +142,7 @@ const WARNING_TEXT: Record<MicWarning, string> = {
   ended: "Tu micrófono se desconectó: no te estoy oyendo.",
   silent: "La profe se oye, pero tu micrófono casi no tiene voz hace más de un minuto.",
   lopsided: "En los últimos minutos casi no te he transcrito: tu voz no está entrando bien.",
+  dead: "Tu micrófono no entrega sonido hace 45 s (¿un driver virtual de Teams/Zoom, o desconectado?): no te estoy oyendo.",
 };
 
 /**
@@ -141,7 +153,7 @@ export function MicWarningBanner({ compact = false }: { compact?: boolean }) {
   const live = useLiveMeeting();
   const w = live.micWarning;
   if (!w || live.phase !== "live") return null;
-  const measured = w === "silent" || w === "lopsided";
+  const measured = w === "silent" || w === "lopsided" || w === "dead";
   return (
     <div
       role="alert"

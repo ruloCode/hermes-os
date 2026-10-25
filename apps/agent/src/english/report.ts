@@ -63,7 +63,7 @@ export async function generatePracticeReport(sessionId: number): Promise<void> {
 
     const isClass = session.source === "class";
     const header = isClass
-      ? `CLASE REAL de HOY, 1 a 1 con su profesora humana (no con el tutor de IA). En el transcript "Yo" es ${OWNER} y "Profe" la profesora; la primera línea trae sus métricas de speaking. Analiza SOLO lo que dijo ${OWNER}.`
+      ? `CLASE REAL de HOY, 1 a 1 con su profesora humana (no con el tutor de IA). En el transcript "Yo" es ${OWNER} y "Profe" la profesora; la primera línea trae sus métricas de speaking y la siguiente (si está) qué micrófono se usó y cuánta voz entró por él — si su micrófono casi no tuvo voz, dilo en una frase al inicio: el transcript está incompleto por el audio, no porque él no hablara. Analiza SOLO lo que dijo ${OWNER}.`
       : `Sesión de HOY (fluidez ${session.fluency ?? "?"}/5, temas: ${session.topics.join(", ") || "—"}):`;
     const q = query({
       prompt: `${header}
