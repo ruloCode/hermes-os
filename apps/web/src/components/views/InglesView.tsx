@@ -54,6 +54,7 @@ import { useEnglishPlan } from "@/hooks/useEnglishPlan";
 import { takeLessonOpening } from "@/lib/english-lesson";
 import { PlanTab } from "@/components/ingles/plan/PlanTab";
 import { LessonPlayer } from "@/components/ingles/plan/LessonPlayer";
+import { DailyReview, DailyReviewEntry, useDailyReview } from "@/components/ingles/DailyReview";
 
 type InglesTab = "plan" | "sesiones";
 const TAB_KEY = "hermes-ingles-tab";
@@ -85,6 +86,13 @@ export function InglesView({ active = true }: { active?: boolean }) {
   };
   const [openLesson, setOpenLesson] = useState<string | null>(null);
   const closeLesson = useCallback(() => setOpenLesson(null), []);
+  // Repaso diario (v6): sus tarjetas salen de tus errores reales; abierto toma el lienzo.
+  const daily = useDailyReview();
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const closeReview = useCallback(() => {
+    setReviewOpen(false);
+    void daily.refresh();
+  }, [daily.refresh]);
   const { sendUserMessage } = useConversationControls();
   const voice = useVoiceConnect();
   const vida = useVidaContext();
@@ -225,12 +233,14 @@ export function InglesView({ active = true }: { active?: boolean }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ViewHeader
         title="Inglés"
-        onBack={openLesson && !tutorLive && !classLive ? closeLesson : undefined}
-        backLabel="Plan"
+        onBack={
+          tutorLive || classLive ? undefined : reviewOpen ? closeReview : openLesson ? closeLesson : undefined
+        }
+        backLabel={reviewOpen && tab === "sesiones" ? "Sesiones" : "Plan"}
         // El riel que se esconde es el de Sesiones (el Plan trae el suyo y en vivo manda la sesión).
         railToggle={!tutorLive && !classLive && tab === "sesiones"}
         tabs={
-          tutorLive || classLive || openLesson ? undefined : (
+          tutorLive || classLive || openLesson || reviewOpen ? undefined : (
             <Segmented
               value={tab}
               onChange={setTab}
@@ -245,6 +255,8 @@ export function InglesView({ active = true }: { active?: boolean }) {
         meta={
           classLive
             ? "En clase"
+            : reviewOpen && daily.review && !tutorLive
+              ? `${daily.review.mastered} de ${daily.review.totalCards} tarjetas dominadas`
             : tutorLive
               ? pendingUnit
                 ? `Lección · ${pendingUnit.title}`
@@ -286,7 +298,11 @@ export function InglesView({ active = true }: { active?: boolean }) {
       />
 
       {/* En vivo (práctica o clase) la conversación manda: las stats esperan. */}
-      <div className={`shrink-0 pb-3 ${tutorLive || classLive || tab === "plan" ? "hidden" : ""}`}>
+      {!tutorLive && !classLive && !openLesson && !reviewOpen && (
+        <DailyReviewEntry review={daily.review} onStart={() => setReviewOpen(true)} />
+      )}
+
+      <div className={`shrink-0 pb-3 ${tutorLive || classLive || tab === "plan" || reviewOpen ? "hidden" : ""}`}>
         <EnglishStats sessions={sessions} vocab={vocab} streak={streak} />
         {classError && (
           <p className="mt-3 flex items-center gap-2 text-sm text-text-dim">
@@ -329,7 +345,9 @@ export function InglesView({ active = true }: { active?: boolean }) {
       )}
 
       {/* Plan: ruta + riel, o la lección abierta a todo el lienzo. */}
-      {!tutorLive && !classLive && tab === "plan" ? (
+      {reviewOpen && !tutorLive && !classLive ? (
+        <DailyReview review={daily.review} setReview={daily.setReview} active={active} onExit={closeReview} />
+      ) : !tutorLive && !classLive && tab === "plan" ? (
         openLesson && planData.plan ? (
           <LessonPlayer
             lessonId={openLesson}
