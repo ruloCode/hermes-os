@@ -14,6 +14,7 @@ import { useUiHands } from "@/state/UiHandsProvider";
 import { useEstudioContext } from "@/state/EstudioProvider";
 import { useTheme } from "@/state/ThemeProvider";
 import { toggleLocalLlm } from "@/lib/local-llm";
+import { openPulseInbox } from "@/lib/pulse-api";
 
 export interface CommandContext {
   selectedProject: string | null;
@@ -162,6 +163,12 @@ export const COMMANDS: HermesCommand[] = [
     slash: "/clase de inglés",
     hint: "Compañera en tu clase de Google Meet: correcciones, ayuda para responder y reporte",
     run: (ctx) => ctx.startEnglishClass(),
+  },
+  {
+    id: "bandeja",
+    label: "Bandeja",
+    hint: "Lo que el pulso encontró: pendientes vencidos, juntas sin preparar, metas sin avance…",
+    run: () => openPulseInbox(),
   },
   {
     id: "ver-finanzas",

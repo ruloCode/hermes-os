@@ -34,6 +34,7 @@ import { UiHandsChip } from "./UiHandsChip";
 import { ThemeToggle } from "./ThemeToggle";
 import { VoiceDock } from "./VoiceDock";
 import { HermesMark } from "./HermesMark";
+import { PulseChip, PulseSheet } from "@/components/pulse/PulseInbox";
 
 export const SIDEBAR_W = 236;
 export const SIDEBAR_W_COLLAPSED = 56;
@@ -221,6 +222,9 @@ export function Sidebar({
           <div>
             <UiHandsChip />
           </div>
+          <div>
+            <PulseChip />
+          </div>
         </div>
       )}
 
@@ -276,8 +280,14 @@ export function Sidebar({
           <div>
             <UiHandsChip />
           </div>
+          <div>
+            <PulseChip collapsed />
+          </div>
         </div>
       )}
+
+      {/* Bandeja del pulso: hoja lateral que abren el contador y ⌘K «Bandeja». */}
+      <PulseSheet />
     </nav>
   );
 }
