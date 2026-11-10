@@ -172,6 +172,8 @@ export class LocalEmbedEngine implements EmbedEngine {
       if (await this.servesOurModel()) {
         this.phase = "ready";
         this.adopted = true;
+        // Adoptado tras un reinicio: si nada vuelve a embeber, también se apaga solo.
+        this.touch();
         return;
       }
       return this.fail(`El puerto ${this.cfg.port} lo ocupa otro modelo; cambia HERMES_EMBED_PORT.`);
@@ -203,7 +205,16 @@ export class LocalEmbedEngine implements EmbedEngine {
       }
       await new Promise((r) => setTimeout(r, 300));
     }
-    if (!exited) this.fail(`El motor de vectores no respondió en ${Math.round(this.cfg.startTimeoutMs / 1000)} s. Mira ${this.cfg.logPath}.`);
+    if (!exited) {
+      this.fail(`El motor de vectores no respondió en ${Math.round(this.cfg.startTimeoutMs / 1000)} s. Mira ${this.cfg.logPath}.`);
+      // Si no se mata aquí, queda un llama-server de ~760 MB vivo sin dueño (revisión v6, hallazgo 9).
+      try {
+        if (child.pid) process.kill(child.pid, "SIGTERM");
+      } catch {
+        /* ya no existe */
+      }
+      this.writePid(undefined);
+    }
   }
 
   /** Arranca (o adopta) el servidor si hace falta. true = listo. */
