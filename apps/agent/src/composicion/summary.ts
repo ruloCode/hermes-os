@@ -8,7 +8,8 @@
  * crea desde la sesión. Por eso se validan contra la transcripción: una línea
  * que no aparece ahí se descarta — el modelo no escribe letra aquí.
  */
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type { ComposeSession, SessionSummary, TranscriptWord } from "@hermes/shared";
 import { childEnv } from "../agent/child-env.js";
@@ -133,7 +134,7 @@ export async function summarizeSession(
   const onAbort = () => abort.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    const q = query({
+    const q = trackedQuery("composicion.summary", {
       prompt: `Sesión: **${session.title}** (${clock(session.durationSec ?? 0)} de grabación).
 Voces: ${session.speakers.map((s) => `${s.id} = ${s.name}`).join(", ") || "sin diarización"}.
 
@@ -146,7 +147,6 @@ Arma el resumen y llama a record_session_summary.`,
       options: {
         cwd: process.cwd(),
         systemPrompt: SYSTEM_PROMPT,
-        model: process.env.HERMES_MODEL || undefined,
         maxTurns: 8,
         settingSources: [],
         env: childEnv(),

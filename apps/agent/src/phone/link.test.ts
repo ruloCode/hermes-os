@@ -170,7 +170,103 @@ describe("phone link", () => {
   });
 });
 
+const helloV6 = (id: string) =>
+  JSON.stringify({
+    t: "hello",
+    device: { id, model: "S25", android: "16", sdk: 36, app: "0.2.0" },
+    capabilities: ["list_apps", "open_app", "read_screen", "tap", "type", "global", "scroll", "pending", "act2", "act_batch", "intent"],
+  });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("plazo de confirmación compartido (v6)", () => {
+  it("el welcome dice lo que entiende el agente (un teléfono viejo lo ignora)", async () => {
+    const link = createPhoneLink({ store: memStore() });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, hello("dev-1"));
+    await link.flush();
+    await tick();
+    assert.deepEqual(ws.last("welcome").capabilities, ["pending", "act2"]);
+  });
+
+  it("«Más tiempo»: cada pending re-arma la espera al plazo nuevo y el agente sigue esperando", async () => {
+    const link = createPhoneLink({ store: memStore(), pendingGraceMs: 20 });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, helloV6("dev-1"));
+    const p = link.callPhone("tap", { target: "Enviar" }, { timeoutMs: 40 });
+    const id = ws.last("call").id;
+    link.handleMessage(ws, JSON.stringify({ t: "pending", id, ms: 60, why: "confirm" }));
+    await sleep(50); // pasó el timeout base: con el pending sigue esperando
+    link.handleMessage(ws, JSON.stringify({ t: "pending", id, ms: 80, why: "confirm" })); // «Más tiempo»
+    await sleep(70);
+    link.handleMessage(ws, JSON.stringify({ t: "result", id, ok: true, data: "ok" }));
+    assert.deepEqual(await p, { ok: true, data: "ok" });
+    assert.equal(ws.last("cancel"), undefined, "no se canceló nada");
+  });
+
+  it("aprobación tardía: al vencer el plazo el agente manda cancel y un result posterior se ignora", async () => {
+    const link = createPhoneLink({ store: memStore(), pendingGraceMs: 5 });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, helloV6("dev-1"));
+    const p = link.callPhone("tap", { target: "Enviar" }, { timeoutMs: 1000 });
+    const id = ws.last("call").id;
+    link.handleMessage(ws, JSON.stringify({ t: "pending", id, ms: 10, why: "confirm" }));
+    const r = await p;
+    assert.equal(r.ok, false);
+    assert.deepEqual(ws.last("cancel"), { t: "cancel", id, reason: "plazo" });
+    link.handleMessage(ws, JSON.stringify({ t: "result", id, ok: true, data: "tarde" })); // no revienta ni resuelve nada
+  });
+
+  it("el tope duro gana aunque el teléfono pida más", async () => {
+    const link = createPhoneLink({ store: memStore(), pendingGraceMs: 5, hardCapMs: 40 });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, helloV6("dev-1"));
+    const started = Date.now();
+    const p = link.callPhone("tap", { target: "n1" }, { timeoutMs: 20 });
+    link.handleMessage(ws, JSON.stringify({ t: "pending", id: ws.last("call").id, ms: 60_000, why: "confirm" }));
+    assert.equal((await p).ok, false);
+    assert.ok(Date.now() - started < 1000);
+  });
+
+  it("si la tarea se aborta, se deja de esperar y el teléfono recibe cancel", async () => {
+    const link = createPhoneLink({ store: memStore() });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, helloV6("dev-1"));
+    const ac = new AbortController();
+    const p = link.callPhone("tap", { target: "Pagar" }, { timeoutMs: 60_000, signal: ac.signal });
+    const id = ws.last("call").id;
+    ac.abort();
+    const r = await p;
+    assert.equal(r.ok, false);
+    assert.equal(ws.last("cancel").id, id);
+  });
+
+  it("teléfono viejo (sin pending): espera fija de siempre, ni un frame nuevo", async () => {
+    const link = createPhoneLink({ store: memStore(), pendingGraceMs: 5 });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, hello("dev-1"));
+    assert.equal(link.supports("pending"), false);
+    const r = await link.callPhone("tap", { target: "n1" }, { timeoutMs: 15 });
+    assert.equal(r.ok, false);
+    assert.equal(ws.last("cancel"), undefined, "a una app 0.1.0 no se le manda cancel");
+  });
+
+  it("un pending de otro socket no extiende la espera", async () => {
+    const link = createPhoneLink({ store: memStore(), pendingGraceMs: 5 });
+    const ws = new FakeSocket();
+    link.handleMessage(ws, helloV6("dev-1"));
+    const p = link.callPhone("tap", { target: "n1" }, { timeoutMs: 20 });
+    link.handleMessage(new FakeSocket(), JSON.stringify({ t: "pending", id: ws.last("call").id, ms: 60_000 }));
+    assert.equal((await p).ok, false);
+  });
+});
+
 describe("protocolo", () => {
+  it("pending: id y ms obligatorios; why por defecto confirm", () => {
+    assert.deepEqual(parsePhoneMessage(JSON.stringify({ t: "pending", id: "a", ms: 1200.7 })), { t: "pending", id: "a", ms: 1200, why: "confirm" });
+    assert.equal(parsePhoneMessage(JSON.stringify({ t: "pending", id: "a" })), null);
+    assert.equal(parsePhoneMessage(JSON.stringify({ t: "pending", ms: 5 })), null);
+  });
+
   it("descarta JSON roto, tipos desconocidos y hello sin id", () => {
     assert.equal(parsePhoneMessage("{no"), null);
     assert.equal(parsePhoneMessage(JSON.stringify({ t: "otra" })), null);

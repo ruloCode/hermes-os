@@ -14,8 +14,12 @@
  *   {"t":"shown","id":"<notice id>","at":"ISO"}             (salió en un momento libre)
  *   {"t":"vetoed","id":"<notice id>","reason":"…"}          (se cerró la ventana bajo un veto)
  *   {"t":"call_result","id":"<call id>","outcome":"answered|declined|missed|failed","reason"?}
+ *   v6, solo una app que anuncia "pending":
+ *   {"t":"pending","id":"<call id>","ms":120000,"why":"confirm|running"}   (la llamada sigue: espérala ms más)
  * Agente → teléfono:
- *   {"t":"welcome","device_id":"...","first_seen":"ISO"}
+ *   {"t":"welcome","device_id":"...","first_seen":"ISO","capabilities":["pending","act2"]}
+ *     (v6: lo que ENTIENDE el agente; una app vieja ignora la lista y una nueva, sin ella, se porta como la 0.1.0)
+ *   {"t":"cancel","id":"<call id>","reason":"…"}   (el agente dejó de esperar: no ejecutes nada de esa llamada; solo a quien anuncia "pending")
  *   {"t":"call","id":"<uuid>","tool":"open_app","args":{...}}
  *   {"t":"pong"}
  *   {"t":"notify","id","title","body","source","created_at", kind?, why?, replies?, not_after?}   (solo si el hello trae "notify")
@@ -39,6 +43,10 @@ export const PHONE_CAPABILITIES = [
   "focus",
   // Grabar una junta: el micrófono y la grabación viven en el teléfono (graban sin la Mac).
   "meeting",
+  // v6: varios pasos seguidos (se detiene en el primero que exige confirmación negada o falla).
+  "act_batch",
+  // v6: intents de una lista cerrada (enlace, lugar, marcar, compartir, buscar en una app).
+  "intent",
 ] as const;
 export type PhoneCapability = (typeof PHONE_CAPABILITIES)[number];
 
@@ -60,10 +68,12 @@ export type PhoneInbound =
   | { t: "feedback"; id: string; value: "up" | "down" | "later" | "never" }
   | { t: "shown"; id: string; at: string }
   | { t: "vetoed"; id: string; reason: string }
-  | { t: "call_result"; id: string; outcome: "answered" | "declined" | "missed" | "failed"; reason?: string };
+  | { t: "call_result"; id: string; outcome: "answered" | "declined" | "missed" | "failed"; reason?: string }
+  | { t: "pending"; id: string; ms: number; why: "confirm" | "running" };
 
 export type PhoneOutbound =
-  | { t: "welcome"; device_id: string; first_seen: string }
+  | { t: "welcome"; device_id: string; first_seen: string; capabilities: string[] }
+  | { t: "cancel"; id: string; reason: string }
   | { t: "call"; id: string; tool: PhoneCapability; args: Record<string, unknown> }
   | { t: "pong" }
   | {
@@ -85,6 +95,12 @@ export type PhoneOutbound =
 export const NOTIFY_CAPABILITY = "notify";
 /** Capacidad del compañero: respuestas a los check-ins y la llamada semanal. */
 export const GROWTH_CAPABILITY = "growth";
+/** v6: el teléfono avisa el plazo de una confirmación (`pending`) y entiende `cancel`. */
+export const PENDING_CAPABILITY = "pending";
+/** v6: tap/type/scroll/global responden con la pantalla ya estable y `changed`. */
+export const ACT2_CAPABILITY = "act2";
+/** Lo que ESTE agente entiende; va en el welcome. Sin la lista, el teléfono se porta como la 0.1.0. */
+export const AGENT_FEATURES = [PENDING_CAPABILITY, ACT2_CAPABILITY] as const;
 
 /** Resultado que devuelve callPhone (y que reciben las tools). */
 export type PhoneCallResult = { ok: true; data: unknown } | { ok: false; error: string };
@@ -135,6 +151,12 @@ export function parsePhoneMessage(raw: string): PhoneInbound | null {
       if (!id || (o !== "answered" && o !== "declined" && o !== "missed" && o !== "failed")) return null;
       const reason = str(m.reason, 300);
       return { t: "call_result", id, outcome: o, ...(reason ? { reason } : {}) };
+    }
+    case "pending": {
+      const id = str(m.id, 100);
+      const ms = typeof m.ms === "number" && Number.isFinite(m.ms) ? Math.max(0, Math.floor(m.ms)) : null;
+      if (!id || ms === null) return null;
+      return { t: "pending", id, ms, why: m.why === "running" ? "running" : "confirm" };
     }
     case "hello": {
       const d = (m.device ?? {}) as Record<string, unknown>;

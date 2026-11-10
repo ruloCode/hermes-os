@@ -4,7 +4,8 @@
  * recurrentes y drills para la próxima sesión. Los drills alimentan
  * {{practice_context}} → la siguiente clase abre calentando con ellos.
  */
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { env } from "../env.js";
 import { emit } from "../events.js";
@@ -65,7 +66,7 @@ export async function generatePracticeReport(sessionId: number): Promise<void> {
     const header = isClass
       ? `CLASE REAL de HOY, 1 a 1 con su profesora humana (no con el tutor de IA). En el transcript "Yo" es ${OWNER} y "Profe" la profesora; la primera línea trae sus métricas de speaking y la siguiente (si está) qué micrófono se usó y cuánta voz entró por él — si su micrófono casi no tuvo voz, dilo en una frase al inicio: el transcript está incompleto por el audio, no porque él no hablara. Analiza SOLO lo que dijo ${OWNER}.`
       : `Sesión de HOY (fluidez ${session.fluency ?? "?"}/5, temas: ${session.topics.join(", ") || "—"}):`;
-    const q = query({
+    const q = trackedQuery("english.report", {
       prompt: `${header}
 
 Errores ${isClass ? "detectados en vivo por el corrector" : "anotados por el tutor"}:
@@ -92,14 +93,13 @@ Reglas:
 - Prioriza patrones que se REPITEN entre sesiones sobre errores puntuales.
 - Los drills deben ser hablados y concretos ("describe tu proyecto actual usando solo pasado perfecto", no "estudiar gramática").
 - Responde SIEMPRE llamando a la tool record_practice_report UNA sola vez.`,
-        model: process.env.HERMES_MODEL || undefined,
         maxTurns: 6,
         settingSources: [],
         mcpServers: { english: server },
         allowedTools: ["mcp__english__record_practice_report"],
         permissionMode: "default",
       },
-    });
+    }, { ref: `sesion-${sessionId}` });
     for await (const message of q) void message;
 
     if (!captured) throw new Error("el modelo no llamó record_practice_report");

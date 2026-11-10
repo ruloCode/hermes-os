@@ -24,6 +24,7 @@ import { notifyMac } from "../notify.js";
 import { emit } from "../events.js";
 import { startSession, finishSession, checkpointSession } from "./claude-sessions.js";
 import { childEnv } from "./child-env.js";
+import { knownModels, modelIdFor } from "./models.js";
 import { registerOfficeWorker, setOfficeMode, setOfficeSpend } from "../office/state.js";
 import { officeModeFromCli } from "@hermes/shared";
 import { closeApprovalsFor, issueRunToken, revokeRunToken } from "../office/approvals.js";
@@ -31,15 +32,9 @@ import { startTrace } from "../office/trace.js";
 import { capField, type CliRunConfig } from "@hermes/shared";
 
 // ── Allowlists (rechaza cualquier valor no esperado) ───────────────────
-const MODELS = new Set([
-  // Alias (el CLI los resuelve al último modelo de cada línea).
-  "opus", "sonnet", "haiku", "fable",
-  // IDs vigentes — los que ofrece la UI.
-  "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5",
-  "claude-fable-5-1",
-  // Anteriores: siguen activos y aparecen en sesiones guardadas.
-  "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
-]);
+// Alias, ids vigentes y anteriores (siguen activos en sesiones guardadas): todo
+// sale del catálogo único (agent/models.ts), no de una lista a mano.
+const MODELS = new Set(knownModels());
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 // Los modos del CLI (2.1.285): "auto" es el modo con clasificador (antes era
 // un alias de acceptEdits en esta UI; ahora el CLI lo trae de verdad) y
@@ -65,7 +60,7 @@ export interface ClaudeExecOpts {
 }
 
 function sanitize(opts: ClaudeExecOpts) {
-  const model = MODELS.has(opts.model ?? "") ? opts.model! : "sonnet";
+  const model = MODELS.has(opts.model ?? "") ? opts.model! : modelIdFor("cli.run");
   const effort = EFFORTS.has(opts.effort ?? "") ? opts.effort! : "high";
   // Sin modo explícito → "default" (pide permisos / deniega en headless).
   // Los disparos sin humano en el loop (voz, triage de reuniones, tareas)

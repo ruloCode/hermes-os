@@ -18,7 +18,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { modelIdFor } from "../agent/models.js";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type { WSContext } from "hono/ws";
 import {
@@ -755,6 +757,7 @@ async function initFastCopilot(s: LiveSession): Promise<void> {
     });
     s.fastCopilot = createFastCopilot({
       systemStatic,
+      meta: { project: s.project, ref: s.id },
       getWindow: () => buildRecentWindow(s),
       onEvent: (ev) => handleFastEvent(s, ev),
     });
@@ -772,6 +775,8 @@ async function initFastCopilot(s: LiveSession): Promise<void> {
 function initArticulation(s: LiveSession): void {
   if (env.ARTICULATION === "off" || s.articulation) return;
   const engine = createFastEngine(buildPolishSystemPrompt(), (ev) => handleFastEvent(s, ev), {
+    feature: "copilot.polish",
+    meta: { project: s.project, ref: s.id },
     interrupt: false,
     maxQueue: 1,
     warmup: 'Reunión iniciada. Responde únicamente "—".',
@@ -793,6 +798,8 @@ async function initClassCompanion(s: LiveSession): Promise<void> {
     if (s.status !== "live" || sessions.get(s.id) !== s) return;
     const onEvent = (ev: FastCopilotEvent) => handleFastEvent(s, ev);
     const correct = createFastEngine(buildCorrectionSystemPrompt(knowledge), onEvent, {
+      feature: "copilot.correct",
+      meta: { project: s.project, ref: s.id },
       interrupt: false,
       maxQueue: 2,
       warmup: 'Clase iniciada. Responde únicamente "—".',
@@ -803,7 +810,8 @@ async function initClassCompanion(s: LiveSession): Promise<void> {
     // termina y queda en el historial; de lo que espera, solo sigue lo último
     // (y lo pedido a mano nunca lo saca una pregunta detectada).
     const help = createFastEnginePool(buildHelpSystemPrompt(knowledge), onEvent, {
-      model: env.COPILOT_CLASS_MODEL,
+      feature: "copilot.class",
+      meta: { project: s.project, ref: s.id },
       warmup: 'Clase iniciada. Responde únicamente "OK".',
     });
     if (!correct || !help) {
@@ -850,12 +858,15 @@ async function initTeamCopilot(s: LiveSession): Promise<void> {
     // escribirse termina aunque se abra otra ventana, y la nueva va al motor
     // libre en vez de esperar.
     const help = createFastEnginePool(buildTeamHelpPrompt(ctx), onEvent, {
-      model: env.COPILOT_TEAM_MODEL,
+      feature: "copilot.team",
+      meta: { project: s.project, ref: s.id },
       warmup: 'Reunión iniciada; aún no hay conversación. Responde únicamente "OK".',
     });
     if (!help) return;
     // Sin glosario el aporte sigue: el concepto es un extra, no un requisito.
     const concepts = createFastEngine(buildTeamConceptsPrompt(ctx), onEvent, {
+      feature: "copilot.concepts",
+      meta: { project: s.project, ref: s.id },
       interrupt: false,
       maxQueue: 2,
       warmup: 'Reunión iniciada; aún no hay conversación. Responde únicamente "OK".',
@@ -893,11 +904,12 @@ function initDeepEngine(s: LiveSession, context: MeetingContext, knowledge: stri
     }),
     (ev) => handleFastEvent(s, ev),
     {
-      model: env.COPILOT_DEEP_MODEL,
+      feature: "meetings.strategic",
+      meta: { project: s.project, ref: s.id },
       warmup: 'Junta iniciada; aún no hay conversación. Responde únicamente "OK".',
     },
   );
-  console.log(`[live] estratégico persistente ${s.deepEngine ? `listo (${env.COPILOT_DEEP_MODEL})` : "apagado"}`);
+  console.log(`[live] estratégico persistente ${s.deepEngine ? `listo (${modelIdFor("meetings.strategic")})` : "apagado"}`);
 }
 
 /** Lo que el motor estratégico aún no vio (todo, si su sesión es nueva). */
@@ -1298,7 +1310,7 @@ async function generateSuggestions(s: LiveSession, manual: boolean): Promise<voi
     // Última verificación síncrona antes de arrancar el CLI (defensa doble
     // por si se agrega otro await entre el contexto y este punto).
     if (s.status !== "live") return;
-    const q = query({
+    const q = trackedQuery("meetings.strategic", {
       prompt: `Transcripción en vivo (ventana reciente, el final es lo que se está diciendo ahora):
 """
 ${windowText}
@@ -1308,9 +1320,8 @@ Evalúa el momento actual y llama a record_live_suggestions.`,
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt,
-        model: env.COPILOT_DEEP_MODEL,
-        // Sin razonamiento extendido: una sugerencia que llega tarde ya no sirve.
-        thinking: { type: "disabled" },
+        // Modelo y «sin razonamiento extendido» salen del catálogo (agent/models.ts):
+        // una sugerencia que llega tarde ya no sirve.
         maxTurns: 3,
         settingSources: [],
         mcpServers: { livecoach: server },

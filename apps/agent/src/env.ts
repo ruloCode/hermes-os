@@ -66,42 +66,21 @@ export const env = {
   // no requiere API key. "" = activada | "fake" (respuesta enlatada, e2e sin
   // gastar) | "off" (solo queda el loop estratégico de 20-45 s).
   COPILOT_PROVIDER: (process.env.HERMES_COPILOT || "").toLowerCase(),
-  COPILOT_MODEL: process.env.HERMES_COPILOT_MODEL || "claude-haiku-4-5",
-  // Reunión de equipo: modelo del motor que propone QUÉ APORTAR. Sonnet: en el
-  // replay de una junta real fue igual de rápido que Haiku (1,4-2,1 s al primer
-  // token) y trajo continuidad (actas anteriores, nombres, pendientes) donde
-  // Haiku daba preguntas genéricas. Los conceptos van con HERMES_COPILOT_MODEL.
-  COPILOT_TEAM_MODEL: process.env.HERMES_COPILOT_TEAM_MODEL || "sonnet",
-  // Loop estratégico de juntas (dato/rumbo/preguntar cada 20-45 s y en cada
-  // ventana del modo equipo), sin razonamiento extendido.
-  COPILOT_DEEP_MODEL: process.env.HERMES_COPILOT_DEEP_MODEL || "sonnet",
-  // Clase de inglés: el motor que da la FRASE / el andamio. Es el inglés que el
-  // dueño va a repetir en voz alta, así que la articulación pesa más que el
-  // medio segundo de Haiku (las correcciones siguen con HERMES_COPILOT_MODEL).
-  COPILOT_CLASS_MODEL: process.env.HERMES_COPILOT_CLASS_MODEL || "sonnet",
+  // Los MODELOS de cada motor (capa rápida, equipo, estratégico, clase, visión,
+  // gimnasio, tutor, dojo, Upwork, aprendizaje, letras…) viven en el catálogo
+  // único agent/models.ts. Sus variables de siempre (HERMES_COPILOT_MODEL,
+  // HERMES_COPILOT_TEAM_MODEL, HERMES_GYM_MODEL…) siguen valiendo allí.
   // "Dilo más claro" (meetings/live-articulation.ts): reescribe TUS
   // intervenciones con el punto primero, en juntas y equipo con «soy yo».
   // "" = activado (con HERMES_COPILOT_MODEL) · "off" = apagado.
   ARTICULATION: (process.env.HERMES_ARTICULATION || "").toLowerCase(),
-  // Gimnasio de articulación (gym/analyze.ts): evalúa cada repetición.
-  GYM_MODEL: process.env.HERMES_GYM_MODEL || "sonnet",
   // Oportunidades de Upwork desde Gmail (upwork/): "off" apaga el job y las
-  // rutas. El borrador de propuesta usa UPWORK_MODEL; la guía de voz y el
+  // rutas. El modelo del borrador sale del catálogo (upwork.draft); la guía de voz y el
   // perfil viven FUERA del repo (~/.hermes-os/upwork/guia.md y profile.md).
   UPWORK: (process.env.HERMES_UPWORK || "").toLowerCase(),
-  UPWORK_MODEL: process.env.HERMES_UPWORK_MODEL || "sonnet",
   UPWORK_GUIDE: process.env.HERMES_UPWORK_GUIDE || "",
   UPWORK_NOTIFY_MIN: Number(process.env.HERMES_UPWORK_NOTIFY_MIN || 70),
-  // Tutor de proyecto (Entender): explica leyendo repos y actas y dibujando.
-  TUTOR_MODEL: process.env.HERMES_TUTOR_MODEL || "sonnet",
-  // Dojo de algoritmos (dojo/coach.ts): revisa si entendiste, cuestiona tu plan
-  // y explica por qué falla un test, sin escribir nunca la solución.
-  DOJO_MODEL: process.env.HERMES_DOJO_MODEL || "sonnet",
-  // Visión en vivo (vision/live.ts): describe lo que ve la cámara de las gafas.
-  // Sonnet: en vision:sim respondió igual de rápido que Haiku (~2 s) y leyó
-  // el texto exacto donde Haiku cambiaba letras. "off" en HERMES_VISION
-  // apaga /vision/ws.
-  VISION_MODEL: process.env.HERMES_VISION_MODEL || "sonnet",
+  // Visión en vivo (vision/live.ts): "off" en HERMES_VISION apaga /vision/ws.
   VISION_ENABLED: (process.env.HERMES_VISION || "").toLowerCase() !== "off",
   // Otras formas en que te llaman en las reuniones (coma): "te nombraron" las
   // reconoce además de HERMES_OWNER_NAME.
@@ -185,10 +164,9 @@ export const env = {
   FFMPEG_BIN: process.env.FFMPEG_BIN || "/opt/homebrew/bin/ffmpeg",
   // Aprendizaje (revisión en background tras cada turno → propuestas de
   // skill/perfil/memoria). "" = activo con aprobación · "auto" = aplica sin
-  // preguntar · "off" = no revisa. El modelo de la revisión es barato a
-  // propósito: corre después de CADA turno con señal.
+  // preguntar · "off" = no revisa. El modelo de la revisión (catálogo,
+  // learning.review) es barato a propósito: corre después de CADA turno con señal.
   LEARNING: (process.env.HERMES_LEARNING || "").toLowerCase(),
-  LEARNING_MODEL: process.env.HERMES_LEARNING_MODEL || "claude-haiku-4-5",
   // Zona horaria por defecto de las tareas programadas (cron en hora local).
   SCHEDULED_TZ: process.env.HERMES_SCHEDULED_TZ || process.env.GOOGLE_CALENDAR_TZ || "America/Bogota",
   // Avisos al teléfono (Hermes Phone) por día: el que se pasa se descarta con
@@ -218,10 +196,10 @@ export const env = {
     join(process.env.HERMES_HOME || join(homedir(), ".hermes-os"), "models", "audio-separator"),
   COMPOSICION_SEPARATOR_MODEL:
     process.env.COMPOSICION_SEPARATOR_MODEL || "vocals_mel_band_roformer.ckpt",
-  // Letras sobre molde: modelo y esfuerzo PROPIOS. Con el modelo por defecto de
-  // la cuenta y razonamiento extendido, 4 versiones de un coro tardaban 11 min
-  // (medido); escribir contra un molde medido no pide razonamiento profundo.
-  COMPOSICION_LYRICS_MODEL: process.env.COMPOSICION_LYRICS_MODEL || "claude-sonnet-5",
+  // Letras sobre molde: modelo propio en el catálogo (composicion.lyrics) y
+  // esfuerzo aquí. Con el modelo por defecto de la cuenta y razonamiento
+  // extendido, 4 versiones de un coro tardaban 11 min (medido); escribir
+  // contra un molde medido no pide razonamiento profundo.
   COMPOSICION_LYRICS_EFFORT: (["low", "medium", "high", "xhigh", "max"] as const).find(
     (e) => e === process.env.COMPOSICION_LYRICS_EFFORT,
   ) ?? "medium",

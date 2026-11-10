@@ -50,11 +50,13 @@ export class PracticeCompanion {
     if (this.closed) return;
     const onEvent = (ev: FastCopilotEvent) => this.handleEvent(ev);
     const correct = createFastEngine(buildCorrectionSystemPrompt(knowledge, "tutor"), onEvent, {
+      feature: "copilot.correct",
       interrupt: false,
       maxQueue: 2,
       warmup: 'Práctica iniciada. Responde únicamente "—".',
     });
     const help = createFastEngine(buildHelpSystemPrompt(knowledge, "tutor"), onEvent, {
+      feature: "copilot.practice",
       warmup: 'Práctica iniciada. Responde únicamente "OK".',
     });
     if (!correct || !help) {

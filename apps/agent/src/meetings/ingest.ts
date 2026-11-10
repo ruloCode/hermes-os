@@ -7,7 +7,8 @@
  * modelo a llamar una tool MCP acotada (`record_meeting_result`, validada por
  * Zod); si por algún motivo no la llama, caemos a parsear un bloque JSON.
  */
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
@@ -147,7 +148,7 @@ export async function ingestMeeting(opts: IngestOptions): Promise<Meeting> {
   emit({ kind: "tool_call", taskId: opts.taskId, toolName: "analizar_reunión", detail: opts.project });
 
   try {
-    const q = query({
+    const q = trackedQuery("meetings.ingest", {
       prompt: buildUserPrompt(
         opts.rewrite?.base.title ?? opts.title,
         transcript.slice(0, MAX_TRANSCRIPT_CHARS),
@@ -155,7 +156,6 @@ export async function ingestMeeting(opts: IngestOptions): Promise<Meeting> {
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt,
-        model: process.env.HERMES_MODEL || undefined,
         // 6 se quedaba corto con transcripciones largas (el modelo razona un
         // par de turnos antes de llamar a la tool) y el SDK LANZA al topar el
         // límite → se perdían juntas enteras. Con el catch de abajo el límite
@@ -168,7 +168,7 @@ export async function ingestMeeting(opts: IngestOptions): Promise<Meeting> {
         allowedTools: ["mcp__ingest__record_meeting_result"],
         permissionMode: "default",
       },
-    });
+    }, { project: opts.project, ref: opts.taskId });
 
     let finalText = "";
     // El SDK LANZA desde el iterador cuando el result es de error (p.ej.

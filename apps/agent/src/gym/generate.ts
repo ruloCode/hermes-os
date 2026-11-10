@@ -8,7 +8,8 @@
  * pedir "otra ronda" es instantáneo mientras haya temas preparados.
  */
 import { randomUUID } from "node:crypto";
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import {
   articulationRules,
@@ -117,7 +118,7 @@ export async function generateBatch(): Promise<GymScenario[]> {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), TIMEOUT_MS);
   try {
-    const q = query({
+    const q = trackedQuery("gym.generate", {
       prompt: buildGenerateUserPrompt({
         topics,
         about: soulSection("Quién soy"),
@@ -129,8 +130,6 @@ export async function generateBatch(): Promise<GymScenario[]> {
       }),
       options: {
         systemPrompt: buildGenerateSystemPrompt(),
-        model: env.GYM_MODEL,
-        thinking: { type: "disabled" },
         maxTurns: 3,
         settingSources: [],
         env: childEnv(),

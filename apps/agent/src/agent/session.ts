@@ -1,8 +1,9 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { HookCallbackMatcher, HookEvent, Options } from "@anthropic-ai/claude-agent-sdk";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
-import type { ChatToolStep, HermesTask, RunTokenUsage, SdkAgentConfig, SpendModel } from "@hermes/shared";
+import { dirname, join, resolve } from "node:path";
+import type { CapturedPrompt, ChatToolStep, HermesTask, RunTokenUsage, SdkAgentConfig, SpendModel } from "@hermes/shared";
 import { needsApproval, parseModelUsage, tokensFromApiUsage, toolTarget } from "@hermes/shared";
 import { officeWatched, registerOfficeWorker, setOfficeSpend } from "../office/state.js";
 import { recordRunSpend } from "../usage.js";
@@ -12,15 +13,20 @@ import { emit } from "../events.js";
 import { notifyMac } from "../notify.js";
 import { setPresence } from "../presence.js";
 import { supabase } from "../supabase.js";
-import { buildSystemPromptCaptured } from "./system-prompt.js";
+import { buildBasePromptCaptured, buildTurnContext, withTurnContext, type TurnContext } from "./system-prompt.js";
 import { startTrace, type TraceHandle } from "../office/trace.js";
 import { checkTool } from "./guardrails.js";
-import { childEnv } from "./child-env.js";
-import { PLUGIN_DIR } from "../learning/skills.js";
+import { PLUGIN_DIR, SKILLS_DIR, recordSkillUse } from "../learning/skills.js";
 import { reviewTurnInBackground } from "../learning/review.js";
 import { hermesMcpServer, HERMES_TOOL_NAMES, HERMES_TOOL_DEFS } from "./tools.js";
 import { linearEnabled } from "../linear.js";
 import { ensureCdpChrome, CDP_URL } from "../browser.js";
+import { modelIdFor, type Feature } from "./models.js";
+import { trackedQuery } from "./tracked-query.js";
+import { chatProfile, toolProfileSpec, type ToolProfile } from "./tool-profiles.js";
+import { ContextLedger, SnapshotCache, snapshotKey, wrapUserMessage } from "./turn-context.js";
+import { skillUseName } from "./skill-use.js";
+import { runLiveChatTurn, type LiveChatSpec } from "./chat-sessions.js";
 
 /**
  * MCP oficial de Linear (remoto, hosteado por ellos). Auth headless: la misma
@@ -69,8 +75,13 @@ function chromeMcpServer(bin: string) {
   };
 }
 
+/** Qué servidores y tools integradas lleva un perfil EN ESTA máquina. */
+function profileSpec(profile: ToolProfile) {
+  return toolProfileSpec(profile, { linear: linearEnabled(), browser: env.BROWSER_AGENT_ENABLED && resolveChromeMcpBin() !== null });
+}
+
 /** Tools que corren sin preguntar (lectura + MCP de Hermes + web + Linear). */
-function sdkAllowedTools(): string[] {
+function sdkAllowedTools(profile: ToolProfile): string[] {
   return [
     "Read",
     "Glob",
@@ -81,8 +92,18 @@ function sdkAllowedTools(): string[] {
     ...HERMES_TOOL_NAMES,
     // "mcp__linear" pelado = todas las tools del server (regla de permisos
     // por prefijo). Son mutaciones de workspace, no de la máquina.
-    ...(linearEnabled() ? ["mcp__linear"] : []),
+    ...(profileSpec(profile).mcpServers.includes("linear") ? ["mcp__linear"] : []),
   ];
+}
+
+function sdkMcpServers(profile: ToolProfile): NonNullable<Options["mcpServers"]> {
+  const names = profileSpec(profile).mcpServers;
+  const bin = resolveChromeMcpBin();
+  return {
+    hermes: hermesMcpServer,
+    ...(names.includes("linear") ? { linear: linearMcpServer() } : {}),
+    ...(names.includes("chrome-devtools") && bin ? { "chrome-devtools": chromeMcpServer(bin) } : {}),
+  };
 }
 
 /** Tools que revisa el guardrail (guardrails.ts) dentro de canUseTool. */
@@ -90,18 +111,19 @@ const GUARDED_TOOLS = ["Bash", "Write", "Edit", "NotebookEdit"];
 const CHROME_PREFIX = "mcp__chrome-devtools__";
 
 /**
- * La configuración de permisos REAL de las tareas del SDK, para el inventario
- * de la Oficina ("Qué tiene este agente"). Sale de las mismas listas que usa
- * query(): no hay una copia a mano que se desactualice.
+ * La configuración de permisos REAL de un perfil (por defecto el de las
+ * tareas, que es lo que la Oficina muestra en "Qué tiene este agente"). Sale
+ * de las mismas listas que usa la llamada al SDK: no hay una copia a mano que
+ * se desactualice.
  */
-export function sdkAgentConfig(): SdkAgentConfig & { hermesTools: { name: string; description: string }[] } {
+export function sdkAgentConfig(profile: ToolProfile = "task"): SdkAgentConfig & { hermesTools: { name: string; description: string }[] } {
   return {
-    allowedTools: sdkAllowedTools(),
+    allowedTools: sdkAllowedTools(profile),
     guardedTools: GUARDED_TOOLS,
     checkedPrefixes: [{ prefix: CHROME_PREFIX, note: "canUseTool: garantiza el Chrome CDP dedicado antes de cada uso (si no está, se niega)" }],
     approvalTools: ["Bash"],
     permissionMode: "default",
-    mcpServers: ["hermes", ...(linearEnabled() ? ["linear"] : []), ...(env.BROWSER_AGENT_ENABLED && resolveChromeMcpBin() ? ["chrome-devtools"] : [])],
+    mcpServers: profileSpec(profile).mcpServers,
     hermesTools: HERMES_TOOL_DEFS,
   };
 }
@@ -121,6 +143,28 @@ function captureInventory(q: { mcpServerStatus(): Promise<any[]>; supportedComma
     })
     .catch(() => {});
 }
+
+/**
+ * Hook PostToolUse sobre `Skill`: cada vez que el modelo carga una skill del
+ * plugin de Hermes, cuenta un uso. Sin esto recordSkillUse no tenía llamador y
+ * el curador archivaba a los 45 días skills que se usaban a diario. Nunca
+ * frena el turno: el registro es en segundo plano y un fallo solo se loguea.
+ */
+const isHermesSkill = (name: string) => /^[a-z0-9-]+$/.test(name) && existsSync(join(SKILLS_DIR, name, "SKILL.md"));
+export const SKILL_USE_HOOKS: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {
+  PostToolUse: [
+    {
+      matcher: "Skill",
+      hooks: [
+        async (input) => {
+          const name = input.hook_event_name === "PostToolUse" ? skillUseName(input.tool_input, isHermesSkill) : null;
+          if (name) void recordSkillUse(name).catch((err) => console.error("[skills] uso:", String(err).slice(0, 160)));
+          return { continue: true };
+        },
+      ],
+    },
+  ],
+};
 
 /**
  * Corre UN turno agéntico con el Claude Agent SDK.
@@ -145,10 +189,24 @@ export interface RunTurnOptions {
   cwd?: string;
   /**
    * Modelo de ESTE turno. Lo usan las tareas programadas, que congelan su
-   * modelo al crearse: cambiar HERMES_MODEL después no debe mover en silencio
-   * el destino de una tarea vieja. Sin él, el default global.
+   * modelo al crearse: cambiar el catálogo después no debe mover en silencio
+   * el destino de una tarea vieja. Sin él, el del catálogo para el canal.
    */
   model?: string;
+  /**
+   * Qué es este turno: el chat de texto, una tarea (/tasks, voz) o una
+   * programada. Decide la función del catálogo (modelo y registro de gasto) y
+   * las tools. Sin él: tarea si trae taskId, chat si no.
+   */
+  channel?: "chat" | "task" | "scheduled";
+  /** Chat: X-Hermes-Session-Id. Con él la base del prompt se fotografía por sesión y la sesión del CLI queda viva. */
+  clientSession?: string;
+  /** Chat: quién escribe (X-Hermes-Client). El teléfono carga menos tools. */
+  client?: "web" | "phone";
+  /** Lo que escribió el usuario, sin notas del canal: con eso se busca el contexto. */
+  userText?: string;
+  /** Chat: el cliente pidió una conversación NUEVA (X-Hermes-Resume: new). */
+  fresh?: boolean;
   onDelta?: (text: string) => void;
   /** Avisa el session id del SDK apenas llega el init (para tabs/resume). */
   onSession?: (sdkSessionId: string) => void;
@@ -170,27 +228,274 @@ export interface RunTurnResult {
   finalText: string;
   toolCalls: number;
   isError: boolean;
-  /** Métricas del result del SDK (costo, tokens, modelos), si llegó. */
+  /**
+   * Métricas del result del SDK (costo, tokens, modelos), si llegó. En la
+   * sesión viva del chat el costo y los modelos son ACUMULADOS de la sesión
+   * (el gasto por turno lo lleva el registro de trackedQuery).
+   */
   costUsd?: number;
   usage?: RunTokenUsage;
   models?: SpendModel[];
 }
 
+/**
+ * Lo que un turno hace con cada mensaje del SDK (texto en streaming, tools,
+ * sesión, resultado). Lo comparten el camino de una vuelta y la sesión viva:
+ * los dos pintan lo mismo en la consola y en la Oficina.
+ */
+export class TurnCollector {
+  sdkSessionId?: string;
+  finalText = "";
+  toolCalls = 0;
+  isError = false;
+  costUsd?: number;
+  usage?: RunTokenUsage;
+  models?: SpendModel[];
+  /** Ya salió algo hacia el cliente (texto o tool): un reintento lo duplicaría. */
+  emitted = false;
+  private deltasSeen = false;
+  private announced?: string;
+
+  constructor(private readonly opts: Pick<RunTurnOptions, "onDelta" | "onSession" | "onTool" | "taskId">) {}
+
+  announce(sdkSessionId: string): void {
+    this.sdkSessionId = sdkSessionId;
+    if (this.announced === sdkSessionId) return;
+    this.announced = sdkSessionId;
+    this.opts.onSession?.(sdkSessionId);
+    emit({ kind: "session_start", sessionId: sdkSessionId, taskId: this.opts.taskId });
+  }
+
+  /** Procesa un mensaje; true = era el `result` que cierra el turno. */
+  handle(message: unknown): boolean {
+    const m = message as Record<string, any>;
+    const taskId = this.opts.taskId;
+    if (m.type === "system" && m.session_id) {
+      this.sdkSessionId = m.session_id as string;
+      if (m.subtype === "init") this.announce(this.sdkSessionId);
+      return false;
+    }
+    // Streaming de texto (partial message events del SDK)
+    if (m.type === "stream_event") {
+      const ev = m.event;
+      if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+        this.deltasSeen = true;
+        this.emitted = true;
+        this.opts.onDelta?.(ev.delta.text as string);
+      }
+      return false;
+    }
+    if (m.type === "assistant") {
+      const content = m.message?.content ?? m.content ?? [];
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          this.finalText = block.text as string;
+          if (!this.deltasSeen) {
+            this.emitted = true;
+            this.opts.onDelta?.(block.text as string);
+          }
+          emit({ kind: "text", taskId, detail: (block.text as string).slice(0, 200) });
+        }
+        if (block.type === "tool_use") {
+          this.toolCalls += 1;
+          this.emitted = true;
+          setPresence("thinking", `${block.name}`);
+          const input = (block.input ?? {}) as Record<string, unknown>;
+          emit({ kind: "tool_call", taskId, toolName: block.name as string, detail: JSON.stringify(input).slice(0, 300) });
+          this.opts.onTool?.({ name: block.name as string, target: toolTarget(input) });
+        }
+      }
+      return false;
+    }
+    if (m.type === "user") {
+      const content = m.message?.content ?? m.content ?? [];
+      for (const block of Array.isArray(content) ? content : []) {
+        if (block.type === "tool_result") {
+          const raw = typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+          emit({ kind: "tool_result", taskId, detail: raw.slice(0, 200) });
+        }
+      }
+      return false;
+    }
+    if (m.type === "result") {
+      // Gasto real del turno (la Oficina lo suma al tablero cuando es una tarea).
+      if (typeof m.total_cost_usd === "number") this.costUsd = m.total_cost_usd;
+      this.usage = tokensFromApiUsage(m.usage) ?? undefined;
+      this.models = parseModelUsage(m.modelUsage);
+      if (m.subtype === "success" && typeof m.result === "string") {
+        this.finalText = m.result || this.finalText;
+      } else if (m.subtype && m.subtype !== "success") {
+        this.isError = true;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  result(): RunTurnResult {
+    const { sdkSessionId, finalText, toolCalls, isError, costUsd, usage, models } = this;
+    return { sdkSessionId, finalText, toolCalls, isError, costUsd, usage, models };
+  }
+}
+
+// ── Prompt: base por sesión + contexto del turno ───────────────────────
+
+interface PromptSnapshot {
+  base: CapturedPrompt;
+  /** Lo que ya viajó en <contexto-hermes> en esta sesión. */
+  ledger: ContextLedger;
+}
+
+/** La base de cada sesión de chat, reutilizada 1 h (spec «sesion»). */
+const snapshots = new SnapshotCache<PromptSnapshot>();
+
+async function promptSnapshot(opts: RunTurnOptions): Promise<PromptSnapshot> {
+  if (!opts.clientSession) return { base: await buildBasePromptCaptured(opts.project), ledger: new ContextLedger() };
+  const key = snapshotKey(opts.clientSession, opts.project);
+  if (opts.fresh) snapshots.delete(key);
+  const hit = snapshots.get(key, Date.now());
+  if (hit) return hit;
+  const snap = { base: await buildBasePromptCaptured(opts.project), ledger: new ContextLedger() };
+  snapshots.set(key, snap, Date.now());
+  return snap;
+}
+
+function channelOf(opts: RunTurnOptions): "chat" | "task" | "scheduled" {
+  return opts.channel ?? (opts.taskId ? "task" : "chat");
+}
+
+function profileOf(opts: RunTurnOptions): ToolProfile {
+  const ch = channelOf(opts);
+  return ch === "chat" ? chatProfile(opts.client) : ch;
+}
+
+/**
+ * El modelo que corre. Una programada vieja sin modelo congelado (fila con
+ * null) corría con el default del CLI (claude-opus-5-5): sigue en el nivel de
+ * las tareas para no cambiarle el modelo en silencio.
+ */
+function modelOf(opts: RunTurnOptions): { feature: Feature; model: string } {
+  const ch = channelOf(opts);
+  if (opts.model) return { feature: ch, model: opts.model };
+  return { feature: ch, model: modelIdFor(ch === "scheduled" ? "task" : ch) };
+}
+
+/** Las opciones del SDK de un turno (las mismas para una vuelta y para la sesión viva). */
+function turnOptions(opts: RunTurnOptions, p: { systemPrompt: string; model: string; resume?: string; abort?: AbortController; trace: TraceHandle | null }): Options {
+  const profile = profileOf(opts);
+  const spec = profileSpec(profile);
+  return {
+    cwd: opts.cwd || env.VAULT_PATH || process.cwd(),
+    systemPrompt: p.systemPrompt,
+    model: p.model,
+    maxTurns: 40,
+    includePartialMessages: true,
+    settingSources: [],
+    // Sin `env`: trackedQuery pone childEnv() — el hijo NO hereda las llaves
+    // del .env (ver child-env.ts). Las tools de Hermes corren en ESTE proceso.
+    // Skills aprendidas (~/.hermes-os/plugin): el CLI las descubre del
+    // disco y solo carga el cuerpo cuando la description matchea, así
+    // el costo en contexto es el índice y no todos los procedimientos.
+    plugins: [{ type: "local" as const, path: PLUGIN_DIR }],
+    hooks: SKILL_USE_HOOKS,
+    ...(spec.builtinTools ? { tools: spec.builtinTools } : {}),
+    ...(p.resume ? { resume: p.resume } : {}),
+    ...(p.abort ? { abortController: p.abort } : {}),
+    mcpServers: sdkMcpServers(profile),
+    allowedTools: sdkAllowedTools(profile),
+    ...(opts.disallowedTools?.length ? { disallowedTools: opts.disallowedTools } : {}),
+    permissionMode: "default",
+    canUseTool: async (toolName, input) => {
+      const trace = p.trace;
+      // Doble seguro: si una tool apagada llegara a pedirse, se niega aquí también.
+      if (opts.disallowedTools?.includes(toolName)) return { behavior: "deny", message: "Finanzas está bloqueada en el teléfono." };
+      // Tools del navegador: NO van en allowedTools a propósito — pasar
+      // por aquí garantiza el Chrome CDP dedicado ANTES de cada uso (el
+      // MCP solo se conecta; si el Chrome no está, el tool fallaría).
+      if (toolName.startsWith(CHROME_PREFIX)) {
+        const chrome = await ensureCdpChrome();
+        if (!chrome.ok) {
+          emit({ kind: "error", taskId: opts.taskId, toolName, detail: chrome.error });
+          trace?.permission({ tool: toolName, decision: "denied", by: "chrome", text: chrome.error ?? "Chrome CDP no disponible" });
+          return { behavior: "deny", message: chrome.error ?? "Chrome CDP no disponible" };
+        }
+        return { behavior: "allow", updatedInput: input };
+      }
+      const verdict = checkTool(toolName, input as Record<string, unknown>);
+      if (!verdict.allowed) {
+        emit({ kind: "error", taskId: opts.taskId, toolName, detail: `GUARDRAIL: ${verdict.reason}` });
+        trace?.guardrail(toolName, verdict.reason ?? "Bloqueado por guardrail", input);
+        return { behavior: "deny", message: verdict.reason ?? "Bloqueado por guardrail" };
+      }
+      // Un Bash con efectos en una tarea con personaje, y alguien mirando la
+      // Oficina: el agente levanta la mano y espera tu decisión. Sin nadie
+      // mirando, el guardrail decide como siempre (una tarea por voz no se
+      // queda colgada esperando a un humano que no está).
+      if (opts.taskId && toolName === "Bash" && officeWatched() && needsApproval(toolName, input as Record<string, unknown>)) {
+        const decision = await requestApproval(opts.taskId, toolName, input as Record<string, unknown>).decision;
+        if (decision.behavior === "deny") return { behavior: "deny", message: decision.message };
+      }
+      return { behavior: "allow", updatedInput: input };
+    },
+  };
+}
+
+/** HERMES_CHAT_SESSION=oneshot fuerza el camino de una vuelta. Default: sesión viva. */
+function liveChatEnabled(): boolean {
+  return (process.env.HERMES_CHAT_SESSION || "").toLowerCase() !== "oneshot";
+}
+
 export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
-  const captured = await buildSystemPromptCaptured(opts.prompt, opts.project);
-  const systemPrompt = captured.raw;
+  const snap = await promptSnapshot(opts);
+  const ctx: TurnContext = await buildTurnContext({ message: opts.userText ?? opts.prompt, focusSlug: opts.project, ledger: snap.ledger });
+  const userMessage = wrapUserMessage(ctx.text, opts.prompt);
+  const { feature, model } = modelOf(opts);
+
+  // Chat con sesión de cliente: el proceso del CLI queda vivo entre turnos.
+  if (channelOf(opts) === "chat" && opts.clientSession && liveChatEnabled()) {
+    setPresence("working", (opts.userText ?? opts.prompt).slice(0, 120));
+    try {
+      const collector = new TurnCollector(opts);
+      const spec: LiveChatSpec = {
+        clientId: opts.clientSession,
+        profile: profileOf(opts),
+        model,
+        project: opts.project,
+        disallowedTools: opts.disallowedTools,
+        resume: opts.resumeSessionId,
+        fresh: Boolean(opts.fresh),
+        meta: { project: opts.project },
+        options: (resume) => turnOptions(opts, { systemPrompt: snap.base.raw, model, resume, trace: null }),
+      };
+      const outcome = await runLiveChatTurn(spec, userMessage, collector, opts.signal);
+      if (outcome === "ok") return collector.result();
+      if (outcome === "aborted") return { ...collector.result(), isError: false };
+      // Falló con algo ya enviado al cliente: repetirlo lo duplicaría.
+      if (collector.emitted) return { ...collector.result(), isError: true, finalText: collector.finalText || "La sesión se cortó a mitad de la respuesta." };
+      console.warn("[chat] la sesión viva falló antes de responder: este turno va por el camino de una vuelta");
+      return runOneShot(opts, snap, ctx, userMessage, feature, model, collector.sdkSessionId ?? opts.resumeSessionId);
+    } finally {
+      setPresence("idle");
+    }
+  }
+  return runOneShot(opts, snap, ctx, userMessage, feature, model, opts.resumeSessionId);
+}
+
+/** El camino de una vuelta: un proceso del CLI por turno, con `resume` para el hilo. */
+async function runOneShot(
+  opts: RunTurnOptions,
+  snap: PromptSnapshot,
+  ctx: TurnContext,
+  userMessage: string,
+  feature: Feature,
+  model: string,
+  resume: string | undefined,
+): Promise<RunTurnResult> {
   // Traza completa del loop (solo tareas con personaje en la Oficina; el chat no tiene taskId).
   const trace = opts.taskId ? startTrace({ id: opts.taskId, source: "sdk", title: opts.prompt, project: opts.project || "general" }) : null;
-  trace?.setPrompt(captured);
+  trace?.setPrompt(withTurnContext(snap.base, ctx));
   let inventoryAsked = false;
-  let sdkSessionId: string | undefined;
-  let finalText = "";
-  let toolCalls = 0;
-  let isError = false;
-  let deltasSeen = false;
-  let costUsd: number | undefined;
-  let usage: RunTokenUsage | undefined;
-  let models: SpendModel[] | undefined;
+  const collector = new TurnCollector(opts);
 
   setPresence("working", opts.prompt.slice(0, 120));
 
@@ -201,73 +506,11 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
   }
 
   try {
-    const q = query({
-      prompt: opts.prompt,
-      options: {
-        cwd: opts.cwd || env.VAULT_PATH || process.cwd(),
-        systemPrompt,
-        model: opts.model || process.env.HERMES_MODEL || undefined,
-        maxTurns: 40,
-        includePartialMessages: true,
-        settingSources: [],
-        // Entorno saneado: el hijo NO hereda las llaves del .env (ver
-        // child-env.ts). Las tools de Hermes corren en ESTE proceso.
-        env: childEnv(),
-        // Skills aprendidas (~/.hermes-os/plugin): el CLI las descubre del
-        // disco y solo carga el cuerpo cuando la description matchea, así
-        // el costo en contexto es el índice y no todos los procedimientos.
-        plugins: [{ type: "local" as const, path: PLUGIN_DIR }],
-        resume: opts.resumeSessionId,
-        abortController: abort,
-        mcpServers: {
-          hermes: hermesMcpServer,
-          ...(linearEnabled() ? { linear: linearMcpServer() } : {}),
-          ...(env.BROWSER_AGENT_ENABLED && resolveChromeMcpBin()
-            ? { "chrome-devtools": chromeMcpServer(resolveChromeMcpBin()!) }
-            : {}),
-        },
-        allowedTools: sdkAllowedTools(),
-        ...(opts.disallowedTools?.length ? { disallowedTools: opts.disallowedTools } : {}),
-        permissionMode: "default",
-        canUseTool: async (toolName, input) => {
-          // Doble seguro: si una tool apagada llegara a pedirse, se niega aquí también.
-          if (opts.disallowedTools?.includes(toolName)) return { behavior: "deny", message: "Finanzas está bloqueada en el teléfono." };
-          // Tools del navegador: NO van en allowedTools a propósito — pasar
-          // por aquí garantiza el Chrome CDP dedicado ANTES de cada uso (el
-          // MCP solo se conecta; si el Chrome no está, el tool fallaría).
-          if (toolName.startsWith(CHROME_PREFIX)) {
-            const chrome = await ensureCdpChrome();
-            if (!chrome.ok) {
-              emit({ kind: "error", taskId: opts.taskId, toolName, detail: chrome.error });
-              trace?.permission({ tool: toolName, decision: "denied", by: "chrome", text: chrome.error ?? "Chrome CDP no disponible" });
-              return { behavior: "deny", message: chrome.error ?? "Chrome CDP no disponible" };
-            }
-            return { behavior: "allow", updatedInput: input };
-          }
-          const verdict = checkTool(toolName, input as Record<string, unknown>);
-          if (!verdict.allowed) {
-            emit({
-              kind: "error",
-              taskId: opts.taskId,
-              toolName,
-              detail: `GUARDRAIL: ${verdict.reason}`,
-            });
-            trace?.guardrail(toolName, verdict.reason ?? "Bloqueado por guardrail", input);
-            return { behavior: "deny", message: verdict.reason ?? "Bloqueado por guardrail" };
-          }
-          // Un Bash con efectos en una tarea con personaje, y alguien mirando la
-          // Oficina: el agente levanta la mano y espera tu decisión. Sin nadie
-          // mirando, el guardrail decide como siempre (una tarea por voz no se
-          // queda colgada esperando a un humano que no está).
-          if (opts.taskId && toolName === "Bash" && officeWatched() && needsApproval(toolName, input as Record<string, unknown>)) {
-            const decision = await requestApproval(opts.taskId, toolName, input as Record<string, unknown>).decision;
-            if (decision.behavior === "deny") return { behavior: "deny", message: decision.message };
-          }
-          return { behavior: "allow", updatedInput: input };
-        },
-      },
-    });
-
+    const q = trackedQuery(
+      feature,
+      { prompt: userMessage, options: turnOptions(opts, { systemPrompt: snap.base.raw, model, resume, abort, trace }) },
+      { project: opts.project, ref: opts.taskId },
+    );
     for await (const message of q) {
       const m = message as Record<string, any>;
       // La traza lleva el mensaje entero (sin los deltas parciales: el bloque completo llega después).
@@ -278,95 +521,22 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
           captureInventory(q, trace);
         }
       }
-
-      if (m.type === "system" && m.session_id) {
-        sdkSessionId = m.session_id as string;
-        if (m.subtype === "init") {
-          opts.onSession?.(sdkSessionId);
-          emit({ kind: "session_start", sessionId: sdkSessionId, taskId: opts.taskId });
-        }
-        continue;
-      }
-
-      // Streaming de texto (partial message events del SDK)
-      if (m.type === "stream_event") {
-        const ev = m.event;
-        if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta") {
-          deltasSeen = true;
-          opts.onDelta?.(ev.delta.text as string);
-        }
-        continue;
-      }
-
-      if (m.type === "assistant") {
-        const content = m.message?.content ?? m.content ?? [];
-        for (const block of content) {
-          if (block.type === "text" && block.text) {
-            finalText = block.text as string;
-            if (!deltasSeen) opts.onDelta?.(block.text as string);
-            emit({ kind: "text", taskId: opts.taskId, detail: (block.text as string).slice(0, 200) });
-          }
-          if (block.type === "tool_use") {
-            toolCalls += 1;
-            setPresence("thinking", `${block.name}`);
-            const input = (block.input ?? {}) as Record<string, unknown>;
-            emit({
-              kind: "tool_call",
-              taskId: opts.taskId,
-              toolName: block.name as string,
-              detail: JSON.stringify(input).slice(0, 300),
-            });
-            opts.onTool?.({ name: block.name as string, target: toolTarget(input) });
-          }
-        }
-        continue;
-      }
-
-      if (m.type === "user") {
-        const content = m.message?.content ?? m.content ?? [];
-        for (const block of Array.isArray(content) ? content : []) {
-          if (block.type === "tool_result") {
-            const raw =
-              typeof block.content === "string"
-                ? block.content
-                : JSON.stringify(block.content ?? "");
-            emit({
-              kind: "tool_result",
-              taskId: opts.taskId,
-              detail: raw.slice(0, 200),
-            });
-          }
-        }
-        continue;
-      }
-
-      if (m.type === "result") {
-        // Gasto real del turno (la Oficina lo suma al tablero cuando es una tarea).
-        if (typeof m.total_cost_usd === "number") costUsd = m.total_cost_usd;
-        usage = tokensFromApiUsage(m.usage) ?? undefined;
-        models = parseModelUsage(m.modelUsage);
-        if (m.subtype === "success" && typeof m.result === "string") {
-          finalText = m.result || finalText;
-        } else if (m.subtype && m.subtype !== "success") {
-          isError = true;
-        }
-      }
+      collector.handle(m);
     }
   } catch (err) {
     // Detenido por el cliente: lo dicho hasta aquí vale y no es un error.
     // (el finally igual corre: presencia y traza se cierran ahí).
-    if (abort.signal.aborted) {
-      return { sdkSessionId, finalText, toolCalls, isError: false, costUsd, usage, models };
-    }
+    if (abort.signal.aborted) return { ...collector.result(), isError: false };
     // Resume de una sesión SDK que ya no existe (transcript limpiado o CLI
     // actualizado): reintenta UNA vez con sesión fresca. El session_id nuevo
     // se guarda al terminar el turno, así el mapeo stale se auto-repara.
-    if (opts.resumeSessionId && /No conversation found with session ID/i.test(String(err))) {
+    if (resume && /No conversation found with session ID/i.test(String(err))) {
       setPresence("idle");
-      return runAgentTurn({ ...opts, resumeSessionId: undefined });
+      trace?.end();
+      return runOneShot(opts, snap, ctx, userMessage, feature, model, undefined);
     }
-    isError = true;
-    finalText = finalText || `Error ejecutando al agente: ${String(err).slice(0, 500)}`;
+    collector.isError = true;
+    collector.finalText = collector.finalText || `Error ejecutando al agente: ${String(err).slice(0, 500)}`;
     emit({ kind: "error", taskId: opts.taskId, detail: String(err).slice(0, 300) });
     trace?.error(`Error ejecutando al agente: ${String(err)}`);
   } finally {
@@ -374,7 +544,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
     trace?.end();
   }
 
-  return { sdkSessionId, finalText, toolCalls, isError, costUsd, usage, models };
+  return collector.result();
 }
 
 // ── Mapeo sesión-cliente (X-Hermes-Session-Id) → sesión SDK ────────────
@@ -432,7 +602,7 @@ export function startTask(prompt: string, opts: { disallowedTools?: string[] } =
   emit({ kind: "task_start", taskId: task.id, detail: prompt.slice(0, 200) });
 
   void (async () => {
-    const result = await runAgentTurn({ prompt, taskId: task.id, disallowedTools: opts.disallowedTools });
+    const result = await runAgentTurn({ prompt, taskId: task.id, channel: "task", disallowedTools: opts.disallowedTools });
     task.status = result.isError ? "error" : "done";
     task.result = result.finalText;
     task.toolCalls = result.toolCalls;

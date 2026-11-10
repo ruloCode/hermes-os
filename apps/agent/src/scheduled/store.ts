@@ -1,3 +1,4 @@
+import { modelIdFor } from "../agent/models.js";
 import type { ScheduledTask, ScheduledTaskRun } from "@hermes/shared";
 import { env } from "../env.js";
 import { supabase } from "../supabase.js";
@@ -44,8 +45,8 @@ export async function createScheduledTask(
       cron: input.cron.trim(),
       tz,
       skills: input.skills ?? [],
-      // Congelado AL CREAR: cambiar HERMES_MODEL después no mueve esta tarea.
-      model: input.model ?? process.env.HERMES_MODEL ?? null,
+      // Congelado AL CREAR: cambiar el catálogo o las variables después no mueve esta tarea.
+      model: input.model ?? modelIdFor("scheduled"),
       project: input.project ?? null,
       deliver: input.deliver ?? { notify: true },
       next_run_at: next.toISOString(),

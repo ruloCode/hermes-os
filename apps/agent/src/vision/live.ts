@@ -23,6 +23,7 @@ import {
   type VisionReplyKind,
   type VisionServerEvent,
 } from "@hermes/shared";
+import { modelIdFor } from "../agent/models.js";
 import { env } from "../env.js";
 import { OWNER } from "../owner.js";
 import { createFastEngine, type FastCopilotEvent, type FastEngine } from "../meetings/live-copilot.js";
@@ -87,7 +88,7 @@ export class VisionSession {
   constructor(private readonly send: Send) {
     this.timer = setInterval(() => this.tick(), TICK_MS);
     this.ensureEngine();
-    send({ t: "ready", mode: this.mode, model: env.VISION_MODEL });
+    send({ t: "ready", mode: this.mode, model: modelIdFor("copilot.vision") });
   }
 
   onFrame(buf: ArrayBuffer): void {
@@ -105,7 +106,7 @@ export class VisionSession {
     if (!msg || this.closed) return;
     if (msg.t === "mode") {
       this.mode = msg.mode;
-      this.send({ t: "ready", mode: this.mode, model: env.VISION_MODEL });
+      this.send({ t: "ready", mode: this.mode, model: modelIdFor("copilot.vision") });
     } else {
       // El cuadro nítido que manda el cliente tras la pregunta es el que se mira (nextVisionAction).
       this.pendingAsk = msg.text;
@@ -128,7 +129,7 @@ export class VisionSession {
     this.engine = createFastEngine(buildVisionSystemPrompt(), (ev) => this.onEngineEvent(ev), {
       interrupt: false,
       maxQueue: 1,
-      model: env.VISION_MODEL,
+      feature: "copilot.vision",
       warmup: 'Visión iniciada. Responde únicamente "OK".',
     });
     this.imagesInSession = 0;

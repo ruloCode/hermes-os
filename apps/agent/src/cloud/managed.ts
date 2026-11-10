@@ -1,3 +1,4 @@
+import { modelFor, modelIdFor } from "../agent/models.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -330,7 +331,7 @@ export async function createCloudAgent(input: { name: string; role: string; host
     body: {
       name,
       description: role.split("\n")[0]!.slice(0, 200),
-      model: { id: "claude-opus-5-5", effort: { type: "low" } },
+      model: { id: modelIdFor("cloud.agent"), effort: { type: modelFor("cloud.agent").effort ?? "low" } },
       system: cloudSystem(name, role, hosts),
       // Igual que Teky: el chat del teléfono no tiene dónde aprobar un paso, así
       // que todo corre solo, dentro de un sandbox que solo alcanza [hosts].

@@ -226,6 +226,13 @@ export const COMMANDS: HermesCommand[] = [
     run: (ctx) => ctx.navigate("/equipo"),
   },
   {
+    id: "ver-gasto",
+    label: "Gasto de modelos",
+    slash: "/gasto",
+    hint: "Cuánto consume cada función que llama al modelo: costo estimado, caché, latencia y qué modelo usa",
+    run: (ctx) => ctx.navigate("/gasto"),
+  },
+  {
     id: "ver-oficina",
     label: "Oficina de agentes",
     slash: "/oficina",

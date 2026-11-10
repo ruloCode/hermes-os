@@ -529,6 +529,12 @@ app.post("/v1/chat/completions", async (c) => {
     const result = await runAgentTurn({
       prompt: clientNote ? `${clientNote}\n\n${lastUser}` : lastUser,
       resumeSessionId: resume,
+      // Sesión viva del CLI por cliente, base del prompt por sesión y tools por canal (agent/session.ts).
+      channel: "chat",
+      clientSession,
+      client: c.req.header("X-Hermes-Client") === "phone" ? "phone" : "web",
+      userText: lastUser,
+      fresh: resumeHeader === "new",
       disallowedTools: gate.disallowedTools,
       project: focusProject,
       cwd,

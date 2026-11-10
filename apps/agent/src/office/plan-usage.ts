@@ -8,7 +8,7 @@
 // mensaje: el CLI arranca, responde el control y se cierra. Cero tokens.
 // Caché de 60 s y una sola consulta en vuelo: arrancar el CLI tarda ~2 s.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { parsePlanUsage, type PlanUsage } from "@hermes/shared";
 import { childEnv } from "../agent/child-env.js";
 
@@ -24,7 +24,7 @@ async function fetchPlanUsage(): Promise<PlanUsage> {
   async function* input(): AsyncGenerator<never> {
     await gate;
   }
-  const q = query({
+  const q = trackedQuery("office.usage", {
     prompt: input(),
     options: { cwd: process.cwd(), settingSources: [], tools: [], env: childEnv(), permissionMode: "default" },
   });

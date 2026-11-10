@@ -12,6 +12,8 @@ import { mountFocusWeeklyRoutes } from "./focus/weekly-routes.js";
 import { mountMeetingPrepRoutes } from "./meetings/prep-routes.js";
 import { registerMemoriaJobs } from "./memoria/jobs.js";
 import { mountMemoriaRoutes } from "./memoria/routes.js";
+import { registerPulseJobs } from "./pulso/jobs.js";
+import { mountPulseRoutes } from "./pulso/routes.js";
 import { mountUsageRoutes } from "./usage-routes.js";
 
 export function mountV6Routes(app: Hono): void {
@@ -21,9 +23,11 @@ export function mountV6Routes(app: Hono): void {
   mountEnglishReviewRoutes(app);
   mountFinanceTodayRoutes(app);
   mountFocusWeeklyRoutes(app);
+  mountPulseRoutes(app);
 }
 
 /** Se llama junto a los demás registerJob: con HERMES_JOBS=off no corre nada. */
 export function registerV6Jobs(): void {
   registerMemoriaJobs();
+  registerPulseJobs();
 }

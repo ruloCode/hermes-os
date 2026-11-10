@@ -15,8 +15,10 @@ import {
   type PhoneNotice,
 } from "./notices.js";
 import {
+  AGENT_FEATURES,
   GROWTH_CAPABILITY,
   NOTIFY_CAPABILITY,
+  PENDING_CAPABILITY,
   parsePhoneMessage,
   type PhoneCallResult,
   type PhoneCapability,
@@ -35,7 +37,11 @@ import {
  *   socket se cierra, las llamadas pendientes se resuelven con error — nunca
  *   quedan colgadas hasta el timeout.
  * - La confirmación humana de acciones con efectos vive EN EL TELÉFONO: aquí
- *   solo se espera (por eso tap tiene un timeout largo).
+ *   solo se espera. Con un teléfono que anuncia "pending" (v6) el plazo lo dicta
+ *   él: cada `pending` re-arma la espera a `ms + gracia`, con un tope duro total;
+ *   cuando el agente deja de esperar (plazo, tarea abortada) le manda `cancel`
+ *   para que una aprobación tardía NO ejecute nada. Con un teléfono viejo, la
+ *   espera fija de siempre (tap 130 s) y ningún frame nuevo.
  *
  * - Avisos (agente → teléfono, `notify`): ver notices.ts. Se mandan solo a una
  *   app que anuncia "notify" en su hello; el resto espera en cola.
@@ -78,9 +84,20 @@ interface Pending {
   tool: PhoneCapability;
   resolve: (r: PhoneCallResult) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** Pasado esto no se espera más, diga lo que diga el teléfono. */
+  hardAt: number;
+  /** El teléfono entiende `cancel` (anunció "pending"). */
+  follows: boolean;
+  onAbort?: () => void;
+  signal?: AbortSignal;
 }
 
 export const PHONE_DEFAULT_TIMEOUT_MS = 20_000;
+/** Sobre el plazo que avisa el teléfono: red + ejecutar la acción tras aprobar. */
+export const PENDING_GRACE_MS = 10_000;
+/** Tope duro de una llamada aunque el teléfono pida más (su máximo es 120 s × 4 = 8 min). */
+export const PENDING_HARD_CAP_MS = 10 * 60_000;
+export const PHONE_CANCELLED_ERROR = "Cancelado: la tarea dejó de esperar al teléfono.";
 /** Para que un ping no reescriba devices.json cada 15 s. */
 const TOUCH_EVERY_MS = 60_000;
 
@@ -101,11 +118,16 @@ export function createPhoneLink(opts: {
   noticesPerDay?: () => number;
   tz?: string;
   newId?: () => string;
+  /** Para los tests: gracia sobre `pending` y tope duro (ms). */
+  pendingGraceMs?: number;
+  hardCapMs?: number;
 }) {
   const now = opts.now ?? (() => new Date());
   const onEvent = opts.onEvent ?? (() => {});
   let active: Active | null = null;
   const pending = new Map<string, Pending>();
+  const grace = opts.pendingGraceMs ?? PENDING_GRACE_MS;
+  const hardCap = opts.hardCapMs ?? PENDING_HARD_CAP_MS;
   let lastTouch = 0;
   // Escrituras del registro en serie: load→modificar→save sin pisarse.
   let writes: Promise<unknown> = Promise.resolve();
@@ -191,12 +213,33 @@ export function createPhoneLink(opts: {
     return sent.length;
   }
 
+  function settle(id: string, p: Pending, r: PhoneCallResult): void {
+    clearTimeout(p.timer);
+    pending.delete(id);
+    if (p.onAbort) p.signal?.removeEventListener("abort", p.onAbort);
+    p.resolve(r);
+  }
+
+  /**
+   * El agente deja de esperar la llamada: se resuelve con [error] y, si el teléfono
+   * entiende `cancel`, se le avisa — así la hoja vence y aprobar no ejecuta nada.
+   */
+  function giveUp(id: string, p: Pending, error: string, reason: string): void {
+    settle(id, p, { ok: false, error });
+    if (p.follows && active?.ws === p.ws) send(p.ws, { t: "cancel", id, reason });
+  }
+
+  function arm(id: string, p: Pending, ms: number, error: string): void {
+    clearTimeout(p.timer);
+    const left = Math.min(ms, p.hardAt - Date.now());
+    if (left <= 0) return giveUp(id, p, error, "plazo");
+    p.timer = setTimeout(() => giveUp(id, p, error, "plazo"), left);
+  }
+
   function rejectPendingOf(ws: PhoneSocket, error: string): void {
     for (const [id, p] of pending) {
       if (p.ws !== ws) continue;
-      clearTimeout(p.timer);
-      pending.delete(id);
-      p.resolve({ ok: false, error });
+      settle(id, p, { ok: false, error });
     }
   }
 
@@ -231,7 +274,7 @@ export function createPhoneLink(opts: {
     mine.firstSeen = firstSeen;
     lastTouch = Date.now();
     if (active !== mine) return; // otro hello ganó mientras escribíamos
-    send(ws, { t: "welcome", device_id: device.id, first_seen: firstSeen });
+    send(ws, { t: "welcome", device_id: device.id, first_seen: firstSeen, capabilities: [...AGENT_FEATURES] });
     onEvent(`teléfono conectado: ${label(device)}${device.android ? ` · Android ${device.android}` : ""}`);
     // Lo que se acumuló mientras no estaba (con su hora original: el teléfono dice si llegó tarde).
     const n = await flushNotices(mine, true);
@@ -264,6 +307,13 @@ export function createPhoneLink(opts: {
         void mutateNotices((list) => ({ notices: markAcked(list, msg.id, iso), out: null })).catch(() => {});
         return;
       }
+      if (msg.t === "pending") {
+        // El teléfono sigue con la llamada (la hoja espera al dueño, o ya aprobó y ejecuta).
+        const p = pending.get(msg.id);
+        if (!p || p.ws !== ws) return;
+        arm(msg.id, p, msg.ms + grace, `El teléfono no respondió a tiempo (plazo de confirmación vencido).`);
+        return;
+      }
       if (msg.t === "reply" || msg.t === "feedback" || msg.t === "shown" || msg.t === "vetoed" || msg.t === "call_result") {
         // Solo cuenta lo que manda el teléfono activo: un socket viejo no responde por el dueño.
         if (active?.ws === ws) fire(frameListeners, msg);
@@ -272,9 +322,7 @@ export function createPhoneLink(opts: {
       // result: solo cuenta si lo manda el MISMO socket al que se le pidió.
       const p = pending.get(msg.id);
       if (!p || p.ws !== ws) return;
-      clearTimeout(p.timer);
-      pending.delete(msg.id);
-      p.resolve(msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error });
+      settle(msg.id, p, msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error });
     },
 
     /** Cierre del socket: rechaza lo pendiente y, si era el activo, lo suelta. */
@@ -288,11 +336,14 @@ export function createPhoneLink(opts: {
       onEvent(`teléfono desconectado: ${label(gone.device)}`);
     },
 
-    /** Pide una acción al teléfono activo. Nunca lanza: el error viene en el resultado. */
+    /**
+     * Pide una acción al teléfono activo. Nunca lanza: el error viene en el resultado.
+     * `signal`: si la tarea que la pidió se aborta, se deja de esperar (y el teléfono se entera).
+     */
     callPhone(
       tool: PhoneCapability,
       args: Record<string, unknown> = {},
-      callOpts: { timeoutMs?: number } = {},
+      callOpts: { timeoutMs?: number; signal?: AbortSignal } = {},
     ): Promise<PhoneCallResult> {
       const target = active;
       if (!target) return Promise.resolve({ ok: false, error: NO_PHONE_ERROR });
@@ -302,14 +353,27 @@ export function createPhoneLink(opts: {
           error: `El teléfono conectado no sabe hacer "${tool}" (versión de la app ${target.device.app || "desconocida"}).`,
         });
       }
+      if (callOpts.signal?.aborted) return Promise.resolve({ ok: false, error: PHONE_CANCELLED_ERROR });
       const timeoutMs = callOpts.timeoutMs ?? PHONE_DEFAULT_TIMEOUT_MS;
       const id = randomUUID();
       return new Promise<PhoneCallResult>((resolve) => {
-        const timer = setTimeout(() => {
-          pending.delete(id);
-          resolve({ ok: false, error: `El teléfono no respondió a tiempo (${Math.round(timeoutMs / 1000)} s).` });
-        }, timeoutMs);
-        pending.set(id, { ws: target.ws, tool, resolve, timer });
+        const p: Pending = {
+          ws: target.ws,
+          tool,
+          resolve,
+          timer: setTimeout(() => {}, 0),
+          hardAt: Date.now() + Math.max(timeoutMs, hardCap),
+          follows: target.capabilities.includes(PENDING_CAPABILITY),
+          signal: callOpts.signal,
+        };
+        pending.set(id, p);
+        arm(id, p, timeoutMs, `El teléfono no respondió a tiempo (${Math.round(timeoutMs / 1000)} s).`);
+        if (callOpts.signal) {
+          p.onAbort = () => {
+            if (pending.get(id) === p) giveUp(id, p, PHONE_CANCELLED_ERROR, "tarea detenida");
+          };
+          callOpts.signal.addEventListener("abort", p.onAbort, { once: true });
+        }
         send(target.ws, { t: "call", id, tool, args });
       });
     },
@@ -343,6 +407,11 @@ export function createPhoneLink(opts: {
 
     isConnected(): boolean {
       return active !== null;
+    },
+
+    /** ¿El teléfono activo anunció esta capacidad? (act2, pending, act_batch, intent…). */
+    supports(capability: string): boolean {
+      return !!active && active.capabilities.includes(capability);
     },
 
     /**
@@ -419,3 +488,4 @@ export const phoneLink: PhoneLink = createPhoneLink({
 });
 
 export const callPhone: PhoneLink["callPhone"] = (tool, args, o) => phoneLink.callPhone(tool, args, o);
+export const phoneSupports = (capability: string): boolean => phoneLink.supports(capability);

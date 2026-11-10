@@ -132,7 +132,12 @@ export function SpendPanel({
         <span className="text-xs text-text-dim">
           {plan?.subscription ? `plan ${plan.subscription} · ` : ""}límites del plan (lo mismo que /usage) y gasto de los agentes
         </span>
-        <button type="button" onClick={onRefresh} disabled={refreshing} className="ml-auto rounded-md px-2 py-1 text-sm text-text-dim hover:bg-panel-2 hover:text-text disabled:opacity-50">
+        {/* Este tablero cuenta runs; el gasto de TODA llamada (chat, juntas, Estudio), por función, vive en /gasto.
+            En otra pestaña: salir de la Oficina desmonta la escena. */}
+        <a href="/gasto" target="_blank" rel="noreferrer" className="ml-auto rounded-md px-2 py-1 text-sm text-text-dim hover:bg-panel-2 hover:text-text">
+          Gasto por función ↗
+        </a>
+        <button type="button" onClick={onRefresh} disabled={refreshing} className="rounded-md px-2 py-1 text-sm text-text-dim hover:bg-panel-2 hover:text-text disabled:opacity-50">
           {refreshing ? "Actualizando…" : "↻ Actualizar"}
         </button>
         <button type="button" onClick={onClose} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-text-dim hover:bg-panel-2 hover:text-text" aria-label="Cerrar">

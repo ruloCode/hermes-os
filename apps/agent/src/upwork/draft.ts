@@ -10,7 +10,9 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { modelIdFor } from "../agent/models.js";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { childEnv } from "../agent/child-env.js";
 import { env } from "../env.js";
@@ -87,12 +89,10 @@ export async function draftProposal(o: Opportunity): Promise<ProposalDraft> {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), TIMEOUT_MS);
   try {
-    const q = query({
+    const q = trackedQuery("upwork.draft", {
       prompt: buildDraftUserPrompt(o),
       options: {
         systemPrompt: buildDraftSystemPrompt(profile, guide),
-        model: env.UPWORK_MODEL,
-        thinking: { type: "disabled" },
         maxTurns: 3,
         settingSources: [],
         env: childEnv(),
@@ -116,5 +116,5 @@ export async function draftProposal(o: Opportunity): Promise<ProposalDraft> {
   }
   if (!captured) throw new Error("el modelo no registró el borrador");
   const c = captured as Omit<ProposalDraft, "model" | "at">;
-  return { ...c, model: env.UPWORK_MODEL, at: new Date().toISOString() };
+  return { ...c, model: modelIdFor("upwork.draft"), at: new Date().toISOString() };
 }

@@ -5,7 +5,8 @@
  * unidad: si los verbos van en pasado, si cada frase tiene sujeto, si la
  * preposición es la correcta… El resto de errores se anota pero pesa poco.
  */
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { stripWrappingQuotes, type PlanDrill, type PlanDrillResult, type PlanUnit } from "@hermes/shared";
 import { childEnv } from "../agent/child-env.js";
@@ -95,13 +96,12 @@ export async function evaluateDrill(i: DrillInput): Promise<PlanDrillResult> {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), TIMEOUT_MS);
   try {
-    const q = query({
+    const q = trackedQuery("english.drill", {
       prompt: buildDrillUserPrompt(i),
       options: {
         systemPrompt: buildDrillSystemPrompt(soulSection("Quién soy")),
-        model: env.GYM_MODEL,
-        // Sin razonamiento extendido: la nota tiene que llegar con la frase fresca.
-        thinking: { type: "disabled" },
+        // Modelo y «sin razonamiento extendido» salen del catálogo (agent/models.ts): la
+        // nota tiene que llegar con la frase fresca.
         maxTurns: 3,
         settingSources: [],
         env: childEnv(),

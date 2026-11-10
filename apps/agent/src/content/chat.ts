@@ -9,7 +9,8 @@
  * se anuncia al stream (`onPiece`) para que la UI se refresque en vivo sin
  * esperar el poll.
  */
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { newPublication } from "@hermes/shared";
 import type { ContentPiece } from "@hermes/shared";
@@ -260,14 +261,13 @@ export async function pieceChatTurn(
   void appendChatMessage(pieceId, "user", message);
 
   try {
-    const q = query({
+    const q = trackedQuery("content.chat", {
       // El snapshot va en el turno (no en el system prompt): la sesión se
       // resume entre visitas y la pieza pudo cambiar por fuera del chat.
       prompt: `Estado actual de la pieza:\n${pieceSnapshot(piece)}${creative}\n\nRulo dice: ${message}`,
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt: SYSTEM_PROMPT,
-        model: process.env.HERMES_MODEL || undefined,
         maxTurns: 12,
         includePartialMessages: true,
         settingSources: [],
@@ -277,7 +277,7 @@ export async function pieceChatTurn(
         allowedTools: ["mcp__piece__get_piece", "mcp__piece__update_piece"],
         permissionMode: "default",
       },
-    });
+    }, { ref: `pieza-${pieceId}` });
 
     for await (const raw of q) {
       const m = raw as Record<string, any>;

@@ -20,7 +20,9 @@
  * - HERMES_COPILOT=fake responde enlatado en ~400 ms (e2e sin gastar);
  *   "off" desactiva la capa y todo queda como antes.
  */
-import { query, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Feature } from "../agent/models.js";
+import { trackedQuery, type TrackMeta } from "../agent/tracked-query.js";
 import { articulationRules, guessLang } from "@hermes/shared";
 import type { LiveHelpIntent, LiveSuggestionKind, LiveSuggestionLang } from "@hermes/shared";
 import { env } from "../env.js";
@@ -113,6 +115,8 @@ export type FastCopilotEvent =
 export interface FastCopilotDeps {
   /** System prompt ESTÁTICO (briefing/knowledge congelados al start de la junta). */
   systemStatic: string;
+  /** Proyecto / junta, para rastrear el gasto. */
+  meta?: TrackMeta;
   /** Ventana reciente del transcript (finales + parcial actual, con nombres). */
   getWindow(): string;
   onEvent(ev: FastCopilotEvent): void;
@@ -131,7 +135,7 @@ export function createFastCopilot(deps: FastCopilotDeps): FastCopilot | null {
   // Pool en cola: lo que empieza a escribirse termina (antes la pregunta
   // siguiente lo cortaba a la mitad) y una pregunta nueva no espera a la
   // anterior mientras haya un motor libre.
-  const engine = createFastEnginePool(deps.systemStatic, deps.onEvent);
+  const engine = createFastEnginePool(deps.systemStatic, deps.onEvent, { feature: "copilot.fast", meta: deps.meta });
   return engine ? new FastCopilotController(engine, deps) : null;
 }
 
@@ -146,8 +150,15 @@ export interface FastEngineOptions {
   maxQueue?: number;
   /** Mensaje del warm-up silencioso que paga el arranque del CLI. */
   warmup?: string;
-  /** Modelo de ESTE motor (default HERMES_COPILOT_MODEL). */
-  model?: string;
+  /**
+   * Función de ESTE motor en el catálogo (agent/models.ts): de ahí salen el
+   * modelo, el «sin razonamiento» y la fila del registro de gasto. El mismo
+   * motor sirve a la capa rápida, al equipo, a la clase, a la visión… y cada
+   * uno se mide aparte. Default "copilot.fast".
+   */
+  feature?: Feature;
+  /** Proyecto / junta, para rastrear el gasto. */
+  meta?: TrackMeta;
 }
 
 /** Motor de la capa rápida (real o fake según HERMES_COPILOT); null = apagado. */
@@ -371,7 +382,8 @@ class SdkFastEngine implements FastEngine {
   private closed = false;
   private readonly interrupt: boolean;
   private readonly maxQueue: number;
-  private readonly model: string;
+  private readonly feature: Feature;
+  private readonly meta: TrackMeta;
   private sessions = 0;
 
   constructor(
@@ -381,7 +393,8 @@ class SdkFastEngine implements FastEngine {
   ) {
     this.interrupt = opts.interrupt ?? true;
     this.maxQueue = Math.max(1, opts.maxQueue ?? 2);
-    this.model = opts.model || env.COPILOT_MODEL;
+    this.feature = opts.feature ?? "copilot.fast";
+    this.meta = opts.meta ?? {};
     this.ensureSession();
     // Warm-up: paga el arranque del proceso CLI antes del primer trigger real.
     this.enqueue(
@@ -518,20 +531,20 @@ class SdkFastEngine implements FastEngine {
       }
     }
     this.sessions += 1;
-    const q = query({
+    // Modelo y «sin razonamiento» salen del catálogo según la función del motor
+    // (todas las copilot.* y meetings.strategic van sin razonar: aquí manda el TTFT).
+    const q = trackedQuery(this.feature, {
       prompt: input(),
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt: this.systemStatic,
-        model: this.model,
         includePartialMessages: true,
-        thinking: { type: "disabled" }, // mínima latencia: aquí manda el TTFT
         maxTurns: 1000, // toda la junta vive en UNA sesión
         settingSources: [],
         tools: [], // sin tools: texto plano directo, sin round-trips
         permissionMode: "default",
       },
-    });
+    }, this.meta);
     this.q = q;
     void this.consume(q);
   }

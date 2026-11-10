@@ -5,7 +5,8 @@
  * manuales y las anteriores no se pisan; elegir cuál queda activa es un acto
  * humano en la UI (reescribe hook/script_md, la única fuente de verdad).
  */
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type { ContentPiece, ContentVariant, HookKind } from "@hermes/shared";
 import { emit } from "../events.js";
@@ -82,7 +83,7 @@ export async function generatePartVariants(
   const server = createSdkMcpServer({ name: "variants", version: "0.1.0", tools: [recordTool] });
 
   try {
-    const q = query({
+    const q = trackedQuery("content.variants", {
       prompt: `Pieza: **${piece.title}** (${piece.pillar.toUpperCase()} · ${piece.format} · ${piece.platforms.join(", ") || "sin plataformas"})
 
 Parte a versionar: **${isHook ? "HOOK (el primer segundo del video)" : part}**
@@ -100,14 +101,13 @@ Genera 3-5 variantes con ángulos distintos y llama a record_variants.`,
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt: SYSTEM_PROMPT,
-        model: process.env.HERMES_MODEL || undefined,
         maxTurns: 4,
         settingSources: [],
         mcpServers: { variants: server },
         allowedTools: ["mcp__variants__record_variants"],
         permissionMode: "default",
       },
-    });
+    }, { ref: `pieza-${pieceId}` });
     for await (const message of q) void message;
 
     if (!captured) throw new Error("el modelo no llamó record_variants");

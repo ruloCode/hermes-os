@@ -4,7 +4,8 @@
  * dijiste, tu respuesta dicha mejor (en el idioma del escenario, sin inventar
  * datos) y un consejo para el siguiente intento.
  */
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import {
   articulationRules,
@@ -105,13 +106,12 @@ export async function analyzeRep(i: AnalyzeInput): Promise<GymFeedback> {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), TIMEOUT_MS);
   try {
-    const q = query({
+    const q = trackedQuery("gym.analyze", {
       prompt: buildGymUserPrompt(i),
       options: {
         systemPrompt: buildGymSystemPrompt(soulSection("Quién soy")),
-        model: env.GYM_MODEL,
-        // Sin razonamiento extendido: la nota tiene que llegar mientras la frase está fresca.
-        thinking: { type: "disabled" },
+        // Modelo y «sin razonamiento extendido» salen del catálogo (agent/models.ts): la
+        // nota tiene que llegar mientras la frase está fresca.
         maxTurns: 3,
         settingSources: [],
         env: childEnv(),

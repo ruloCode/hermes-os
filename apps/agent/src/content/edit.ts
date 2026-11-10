@@ -19,7 +19,8 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type {
   ClipBrowse,
@@ -359,16 +360,21 @@ async function runEdit(
   });
 
   try {
-    const q = query({
+    const q = trackedQuery("content.edit", {
       prompt,
       options: {
         cwd: env.VIDEO_EDIT_PATH,
-        model: process.env.HERMES_MODEL || undefined,
         // Un render footage-led encadena MUCHAS llamadas (probe, review,
         // pipeline por etapas, Remotion): el tope alto es a propósito.
         maxTurns: 300,
         // El contrato de OpenMontage vive en SU repo (CLAUDE.md → AGENT_GUIDE).
         settingSources: ["project"],
+        // Sin `env`: trackedQuery pone childEnv(), así que este run (Bash + 300
+        // vueltas) ya NO hereda el .env de Hermes (service role de Supabase,
+        // Linear, ElevenLabs…). No le falta nada: OpenMontage carga SU propio
+        // .env desde su repo (tools/base_tool.py) y el prompt le prohíbe los
+        // proveedores de pago; ffmpeg, node y python salen del PATH, que sí pasa.
+        // Si un día necesita una llave de aquí: childEnv({ NOMBRE: valor }).
         mcpServers: { edit: server },
         // Como en session.ts: lo seguro va en allowedTools; Bash/Write/Edit
         // pasan por canUseTool → guardrails (deny-list + roots de escritura,
@@ -397,7 +403,7 @@ async function runEdit(
           return { behavior: "allow", updatedInput: input };
         },
       },
-    });
+    }, { ref: `pieza-${pieceId}` });
     // El SDK LANZA desde el iterador en errores de result (maxTurns, abort…);
     // si el modelo YA llamó record_edit_result, el catch aprovecha `captured`.
     for await (const message of q) void message;

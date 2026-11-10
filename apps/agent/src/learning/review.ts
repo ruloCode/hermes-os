@@ -1,4 +1,5 @@
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { env } from "../env.js";
 import { OWNER } from "../owner.js";
@@ -198,10 +199,9 @@ export async function reviewTurn(input: ReviewInput): Promise<number> {
       .map((s) => `- ${s.name}: ${s.description}`)
       .join("\n");
 
-    const q = query({
+    const q = trackedQuery("learning.review", {
       prompt: buildPrompt(input, skillIndex, profile.map((e) => `- ${e}`).join("\n")),
       options: {
-        model: env.LEARNING_MODEL,
         maxTurns: MAX_TURNS,
         // Sin cwd del proyecto ni settings: la revisión no lee el disco.
         settingSources: [],

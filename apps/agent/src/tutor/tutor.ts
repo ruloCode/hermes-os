@@ -19,7 +19,8 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type { TutorDiagram, TutorProject, TutorStreamEvent } from "@hermes/shared";
 import { env } from "../env.js";
@@ -299,14 +300,13 @@ export async function tutorTurn(
   let isError = false;
 
   try {
-    const q = query({
+    const q = trackedQuery("tutor", {
       prompt: input.voice
         ? `${VOICE_INSTRUCTIONS}\n\n${OWNER} (hablando): ${input.message}`
         : `${OWNER}: ${input.message}`,
       options: {
         cwd: ws.cwd,
         ...(system ? { systemPrompt: system } : {}),
-        model: env.TUTOR_MODEL,
         maxTurns: 40,
         includePartialMessages: true,
         settingSources: [],
@@ -333,7 +333,7 @@ export async function tutorTurn(
         },
         permissionMode: "default",
       },
-    });
+    }, { project });
 
     for await (const raw of q) {
       const m = raw as Record<string, any>;

@@ -64,3 +64,40 @@ Cada vez que el modelo carga una skill, DEBE quedar registrado su uso.
 #### Scenario: Skill usada
 - CUANDO un turno invoca la tool `Skill` con una skill del plugin de Hermes
 - ENTONCES `recordSkillUse` actualiza su último uso y el curador no la archiva por inactividad
+
+## Notas de implementación
+
+- **Prompt estable.** `system-prompt.ts` arma la BASE (`buildBasePromptCaptured`: identidad, teléfono,
+  SOUL, USER.md, perfil del vault, proyectos, preferencias, índice de skills, foco y las REGLAS del
+  modo Vida) y aparte el contexto del turno (`buildTurnContext`). La base se fotografía por
+  `snapshotKey(sesión, proyecto)` durante 1 h (`SnapshotCache`, session.ts). Las cifras del modo Vida
+  salieron del system prompt: viajan en cada turno (sin dedupe) en la sección «Cifras de hoy» del bloque.
+- **Contexto del turno** (`turn-context.ts`, puro): memorias recientes solo en el primer turno, lo
+  relevante solo si el mensaje tiene ≥3 palabras con contenido, sin repetir claves ya enviadas
+  (`ContextLedger`, vive con la foto de la base). Una etiqueta `contexto-hermes` dentro de los datos se
+  neutraliza. La identidad dice que el bloque es dato y no instrucciones.
+- **Oficina.** La traza de las tareas muestra la base tal cual se envió y, como sección aparte
+  (`turnContext`, con su porqué), el bloque que viajó en el mensaje (`withTurnContext`). Los `WHY` de
+  `vida` y `knowledge` se reescribieron.
+- **Sesión viva** (`chat-sessions.ts` + reglas puras en `chat-session-policy.ts`). Solo el chat con
+  `X-Hermes-Session-Id`; `index.ts` ahora pasa `channel`, `clientSession`, `client`, `userText` y `fresh`
+  (cinco líneas en la llamada a `runAgentTurn`). Si la sesión viva falla ANTES de mandar algo al
+  cliente, el turno corre de una vuelta con `resume`; si ya había mandado texto, el turno termina como
+  error con lo dicho (reintentar duplicaría la respuesta). En streaming el tope de vueltas es de la
+  sesión entera (`maxTurns: 1000`, como la capa rápida), no 40 por turno. El costo y los modelos que
+  devuelve `runAgentTurn` en este camino son acumulados de la sesión (el gasto por turno lo da el
+  registro de `trackedQuery`).
+- **Medido** (agente de ensayo :8661, Haiku 5.5 por `HERMES_MODEL`, misma sesión, tres turnos):
+  una vuelta → primer texto 6,1 / 5,2 / 2,1 s, total 7,9 / 6,2 / 3,1 s, caché leída 0 / 57 / 67 %;
+  persistente → 3,2 / 0,8 / 0,6 s, total 3,9 / 1,3 / 0,9 s, caché leída 92 / 76 / 99 %. Detener a mitad
+  deja el turno `aborted` y el siguiente responde en 0,9 s recordando el pedido cortado.
+- **Tools por canal** (`tool-profiles.ts`): `chat-web` y `chat-phone` limitan las integradas a 10 (Read,
+  Glob, Grep, Bash, Write, Edit, WebSearch, WebFetch, Skill, ToolSearch) con la opción `tools` del SDK;
+  `chat-phone` registra solo el MCP de Hermes. Evidencia: el `init` de una sesión real trae 24 integradas
+  (Task, CronCreate/Delete/List, DesignSync, EnterWorktree, ListAgents, Monitor, PushNotification,
+  ScheduleWakeup, SendMessage, Workflow…); en un turno trivial sin MCP el prefijo baja de 24.608 a 18.993
+  tokens. Turno trivial real por el agente: web 25.041 tokens de entrada, teléfono 21.891 (primer texto
+  2,6 s → 1,5 s). Tareas y programadas: sin cambios (todo). `sdkAgentConfig()` sale de las mismas listas.
+- **Skills.** Hook `PostToolUse` con `matcher: "Skill"` en todos los turnos de `runAgentTurn`;
+  `skillUseName` cuenta `hermes:<nombre>` y un nombre sin prefijo solo si existe en el plugin. No se
+  verificó con una invocación real (la única skill del plugin tiene efectos en el mundo).

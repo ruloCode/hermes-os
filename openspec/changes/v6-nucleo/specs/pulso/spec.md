@@ -20,6 +20,10 @@ metas en marcha, foco, finanzas del día y oportunidades) y decidir si hay algo 
 - CUANDO `HERMES_PULSE=off`
 - ENTONCES no corre
 
+#### Scenario: Horas de silencio
+- CUANDO es de noche (entre las 22:00 y las 7:00 hora local)
+- ENTONCES el pulso no llama al modelo ni avisa; lo que cambió se revisa en la primera pasada de la mañana
+
 ### Requirement: Bandeja antes que aviso
 Lo que el pulso encuentra DEBE ir a una bandeja visible en el dashboard y en el teléfono. Solo lo
 urgente gasta un aviso del presupuesto diario.
@@ -28,8 +32,12 @@ urgente gasta un aviso del presupuesto diario.
 - CUANDO el pulso encuentra algo útil pero no urgente
 - ENTONCES queda en la bandeja y no suena nada
 
-#### Scenario: Hallazgo urgente con presupuesto
-- CUANDO el hallazgo es urgente y quedan avisos hoy
+#### Scenario: Avisos apagados (por defecto)
+- CUANDO `HERMES_PULSE` no es `notify`
+- ENTONCES nada suena nunca: todo queda en la bandeja, también lo urgente
+
+#### Scenario: Hallazgo urgente con avisos prendidos y presupuesto
+- CUANDO `HERMES_PULSE=notify`, el hallazgo es urgente y quedan avisos hoy
 - ENTONCES sale un aviso al teléfono, con el motivo
 
 #### Scenario: Sin presupuesto

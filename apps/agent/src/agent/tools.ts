@@ -78,11 +78,24 @@ const saveMemoryTool = tool(
   async (args) => text(await saveMemory({ ...args, source: "agent" })),
 );
 
-const KNOWLEDGE_SOURCES = ["memory", "meeting", "execution", "conversation", "vault"] as const;
+// Las fuentes de la memoria v2: las cinco del RPC + los almacenes de ~/.hermes-os.
+const KNOWLEDGE_SOURCES = [
+  "memory",
+  "meeting",
+  "execution",
+  "conversation",
+  "vault",
+  "gym",
+  "english",
+  "growth",
+  "upwork",
+  "day",
+  "tutor",
+] as const;
 
 const searchKnowledgeTool = tool(
   "search_knowledge",
-  "Búsqueda semántica unificada en TODO lo que Hermes sabe: memorias, reuniones, ejecuciones de tareas, conversaciones pasadas (texto y voz) y notas del vault. Primera opción para '¿en qué quedamos?', '¿qué sabemos de X?' o cualquier contexto histórico.",
+  "Búsqueda semántica unificada en TODO lo que Hermes sabe: memorias, reuniones, ejecuciones de tareas, conversaciones pasadas (texto y voz), notas del vault, gimnasio de articulación, inglés (clases, prácticas y plan), metas y actas del compañero, oportunidades de Upwork, pendientes del día y conversaciones del tutor. Primera opción para '¿en qué quedamos?', '¿qué sabemos de X?' o cualquier contexto histórico.",
   {
     query: z.string().describe("Qué buscar, en lenguaje natural"),
     sources: z

@@ -8,7 +8,8 @@
  * juzgar un plan), así que el prompt lo prohíbe y `stripCode` quita lo que se
  * cuele de todos modos.
  */
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { stripCode, type DojoCoachFeedback, type DojoCoachStage, type DojoItem } from "@hermes/shared";
 import { childEnv } from "../agent/child-env.js";
@@ -107,12 +108,10 @@ export async function coach(i: CoachInput): Promise<DojoCoachFeedback> {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), TIMEOUT_MS);
   try {
-    const q = query({
+    const q = trackedQuery("dojo.coach", {
       prompt: buildCoachUserPrompt(i),
       options: {
         systemPrompt: buildCoachSystemPrompt(),
-        model: env.DOJO_MODEL,
-        thinking: { type: "disabled" },
         maxTurns: 3,
         settingSources: [],
         env: childEnv(),

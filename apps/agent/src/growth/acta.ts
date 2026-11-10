@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { CALL_LABEL, type CallKind } from "@hermes/shared";
 import { env } from "../env.js";
@@ -13,8 +14,6 @@ import { childEnv } from "../agent/child-env.js";
  * persona). Solo con lo que se DIJO y los datos de la semana: lo que no se
  * habló queda como "No se habló", nunca se rellena.
  */
-
-const MODEL = process.env.HERMES_GROWTH_MODEL || "sonnet";
 
 export async function writeActa(input: {
   kind: CallKind;
@@ -40,7 +39,7 @@ export async function writeActa(input: {
   );
   const server = createSdkMcpServer({ name: "growth", version: "0.1.0", tools: [record] });
   const lines = input.transcript.map((l) => `${l.role === "user" ? OWNER : "Hermes"}: ${l.text}`).join("\n");
-  const q = query({
+  const q = trackedQuery("growth.acta", {
     prompt: `Datos de la semana (con su fuente):
 ${input.context.join("\n")}
 
@@ -58,7 +57,6 @@ Reglas:
 - Sin elogios ni juicios. Tono neutro y corto, en español.
 - Si una parte no se habló, escribe "No se habló".
 - El ajuste es el que ${OWNER} aceptó, no el que Hermes propuso.`,
-      model: MODEL,
       maxTurns: 4,
       settingSources: [],
       env: childEnv(),
@@ -122,12 +120,11 @@ async function writeDayNote(input: {
   );
   const server = createSdkMcpServer({ name: "growth", version: "0.1.0", tools: [record] });
   const lines = input.transcript.map((l) => `${l.role === "user" ? OWNER : "Hermes"}: ${l.text}`).join("\n");
-  const q = query({
+  const q = trackedQuery("growth.acta", {
     prompt: `Datos del día (con su fuente):\n${input.context.join("\n")}\n\nConversación:\n"""\n${lines.slice(0, 12_000)}\n"""\n\nEscribe la nota llamando a record_day.`,
     options: {
       systemPrompt: `Tomas la nota de la llamada corta de ${input.kind === "morning" ? "la mañana" : "la tarde"} entre ${OWNER} y Hermes.
 Reglas: solo lo dicho y los datos de arriba; nada inventado; "sin dato" o "plan nuevo" NO es cero; tono neutro, corto, en español; sin elogios ni juicios.`,
-      model: MODEL,
       maxTurns: 4,
       settingSources: [],
       env: childEnv(),

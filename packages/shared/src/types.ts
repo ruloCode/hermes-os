@@ -23,13 +23,53 @@ export interface Memory {
   created_at: string;
 }
 
-/** Fuente de un resultado de la base de conocimiento unificada (RPC match_knowledge). */
+/**
+ * Fuente de un resultado de la base de conocimiento unificada. Las cinco
+ * primeras son las del RPC match_knowledge; las demás solo existen en el índice
+ * local de la memoria v2 (almacenes de `~/.hermes-os` que el RPC nunca vio).
+ */
 export type KnowledgeSource =
   | "memory"
   | "meeting"
   | "execution"
   | "conversation"
-  | "vault";
+  | "vault"
+  | "gym"
+  | "english"
+  | "growth"
+  | "upwork"
+  | "day"
+  | "tutor";
+
+/** Todas las fuentes, en el orden en que se muestran. */
+export const KNOWLEDGE_SOURCES: readonly KnowledgeSource[] = [
+  "memory",
+  "meeting",
+  "execution",
+  "conversation",
+  "vault",
+  "gym",
+  "english",
+  "growth",
+  "upwork",
+  "day",
+  "tutor",
+];
+
+/** Nombre corto de cada fuente, el mismo en el agente (lo lee el modelo) y en la web. */
+export const KNOWLEDGE_SOURCE_LABEL: Record<KnowledgeSource, string> = {
+  memory: "memoria",
+  meeting: "reunión",
+  execution: "ejecución",
+  conversation: "chat",
+  vault: "vault",
+  gym: "gimnasio",
+  english: "inglés",
+  growth: "metas",
+  upwork: "upwork",
+  day: "pendiente",
+  tutor: "tutor",
+};
 
 /** Un hit de búsqueda semántica cross-fuente: memorias, reuniones, ejecuciones,
  *  conversaciones (texto/voz) y notas del vault. */

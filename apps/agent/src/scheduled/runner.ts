@@ -76,6 +76,7 @@ export async function runScheduledTask(task: ScheduledTask, attempt = 1): Promis
   const result = await runAgentTurn({
     prompt,
     taskId: task.id,
+    channel: "scheduled",
     project: task.project ?? undefined,
     cwd,
     model: task.model ?? undefined,

@@ -1,26 +1,68 @@
 /**
- * Base de conocimiento unificada: una sola búsqueda semántica sobre TODO lo
- * que Hermes sabe — memorias, reuniones, ejecuciones de tareas, conversaciones
- * (texto y voz) y notas del vault. Delega el ranking al RPC match_knowledge
- * (migración 009); si el RPC o los embeddings no están, degrada a la búsqueda
- * de memorias clásica (ILIKE + recencia) para no romper nada.
+ * Base de conocimiento unificada: una sola búsqueda sobre TODO lo que Hermes
+ * sabe — memorias, reuniones, ejecuciones, conversaciones (texto y voz), notas
+ * del vault y, desde la memoria v2, los almacenes de `~/.hermes-os` (gimnasio,
+ * inglés, metas, Upwork, pendientes del día, tutor).
+ *
+ * Dos caminos, elegidos con `HERMES_MEMORY`:
+ * - `v2`: el índice local híbrido (memoria/): BM25 + vectores locales. No
+ *   depende de ningún proveedor externo.
+ * - `supabase`: el camino anterior — RPC match_knowledge con vectores de OpenAI
+ *   y, sin ellos, ILIKE de la frase entera sobre las memorias.
+ * - `auto` (por defecto): v2 si el índice existe y tiene documentos; si no, supabase.
  */
-import type { KnowledgeHit, KnowledgeSource, KnowledgeStats } from "@hermes/shared";
+import { KNOWLEDGE_SOURCE_LABEL, type KnowledgeHit, type KnowledgeSource, type KnowledgeStats } from "@hermes/shared";
 import { supabase } from "./supabase.js";
 import { embed } from "./embeddings.js";
 import { searchMemory } from "./memory.js";
+import { indexReady, noteSearch, searchMemoria } from "./memoria/service.js";
 
 export interface SearchKnowledgeOptions {
   sources?: KnowledgeSource[];
   project?: string;
   limit?: number;
+  /** Solo memoria v2: incluir los hechos reemplazados (historial). */
+  includeSuperseded?: boolean;
+}
+
+export type MemoryBackend = "auto" | "v2" | "supabase";
+
+export function memoryBackend(): MemoryBackend {
+  const v = (process.env.HERMES_MEMORY || "auto").toLowerCase();
+  return v === "v2" || v === "supabase" ? v : "auto";
+}
+
+/** El camino que respondería ahora una búsqueda. */
+export async function activeBackend(): Promise<"v2" | "supabase"> {
+  const b = memoryBackend();
+  if (b !== "auto") return b;
+  return (await indexReady()) ? "v2" : "supabase";
 }
 
 export async function searchKnowledge(
   query: string,
   opts: SearchKnowledgeOptions = {},
 ): Promise<KnowledgeHit[]> {
+  if ((await activeBackend()) === "v2") {
+    try {
+      const { hits } = await searchMemoria(query, opts);
+      touchMemories(hits);
+      return hits;
+    } catch (err) {
+      // Un índice roto no deja al agente sin memoria: cae al camino anterior.
+      console.error("[memoria] búsqueda v2 falló, uso el camino anterior:", (err as Error).message);
+    }
+  }
+  return searchKnowledgeLegacy(query, opts);
+}
+
+/** El camino anterior (RPC de Supabase con vectores de OpenAI, o ILIKE). Lo usa también la evaluación. */
+export async function searchKnowledgeLegacy(
+  query: string,
+  opts: SearchKnowledgeOptions = {},
+): Promise<KnowledgeHit[]> {
   if (!supabase) return [];
+  const t = Date.now();
   const limit = opts.limit ?? 12;
   const embedding = await embed(query);
   if (embedding) {
@@ -35,12 +77,14 @@ export async function searchKnowledge(
     if (!error && data) {
       const hits = diversify(data as KnowledgeHit[], limit);
       touchMemories(hits);
+      noteSearch({ at: new Date().toISOString(), mode: "supabase", ms: Date.now() - t });
       return hits;
     }
     if (error) console.error("[knowledge] match_knowledge:", error.message);
   }
   // Fallback (sin RPC o sin embeddings): al menos las memorias por ILIKE.
   const mems = await searchMemory(query, undefined, limit);
+  noteSearch({ at: new Date().toISOString(), mode: "supabase", ms: Date.now() - t, why: "sin vectores de OpenAI: ILIKE de la frase entera" });
   return mems.map((m) => ({
     source: "memory" as const,
     ref: m.id,
@@ -88,13 +132,7 @@ function touchMemories(hits: KnowledgeHit[]): void {
   });
 }
 
-const SOURCE_LABEL: Record<KnowledgeSource, string> = {
-  memory: "memoria",
-  meeting: "reunión",
-  execution: "ejecución",
-  conversation: "chat",
-  vault: "vault",
-};
+const SOURCE_LABEL = KNOWLEDGE_SOURCE_LABEL;
 
 // ── Conteos de la base de conocimiento (panel MEMORIA ACTIVA) ───────────
 

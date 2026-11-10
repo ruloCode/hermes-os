@@ -40,6 +40,7 @@ import { EntenderView } from "@/components/views/EntenderView";
 import { GymView } from "@/components/views/GymView";
 import { DojoView } from "@/components/views/DojoView";
 import { EquipoView } from "@/components/views/EquipoView";
+import { GastoView } from "@/components/gasto/GastoView";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -71,6 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/gimnasio": "gimnasio",
     "/dojo": "dojo",
     "/equipo": "equipo",
+    "/gasto": "gasto",
   };
   const view = WORKSPACE_VIEWS[pathname];
   if (!view) return <>{children}</>;
@@ -145,6 +147,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className={`min-h-0 flex-1 ${view === "equipo" ? "flex flex-col" : "hidden"}`}>
               <EquipoView active={view === "equipo"} />
+            </div>
+            <div className={`min-h-0 flex-1 ${view === "gasto" ? "flex flex-col" : "hidden"}`}>
+              <GastoView active={view === "gasto"} />
             </div>
           </div>
         </main>

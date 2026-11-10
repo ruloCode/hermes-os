@@ -12,7 +12,8 @@ import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import matter from "gray-matter";
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type {
   RunTokenUsage,
@@ -197,19 +198,18 @@ ${input.transcript}
 Analiza la ejecución y llama a record_execution_analysis.`;
 
   try {
-    const q = query({
+    const q = trackedQuery("executions.analysis", {
       prompt: userPrompt,
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt,
-        model: process.env.HERMES_MODEL || undefined,
         maxTurns: 4,
         settingSources: [],
         mcpServers: { execanalysis: server },
         allowedTools: ["mcp__execanalysis__record_execution_analysis"],
         permissionMode: "default",
       },
-    });
+    }, { project: input.projectSlug });
     // Solo nos interesa el efecto de la tool (captured). Drenamos el stream.
     for await (const message of q) void message;
   } catch (err) {

@@ -51,19 +51,29 @@ export const FEATURES = {
   task: { tier: "deep", legacyEnv: ["HERMES_MODEL"], label: "Tareas (/tasks, voz)" },
   scheduled: { tier: "balanced", label: "Tareas programadas (las nuevas; las viejas conservan su modelo)" },
   "executions.analysis": { tier: "fast", label: "Análisis de una ejecución" },
+  // Default de los runs de `claude -p` (consola, Oficina) cuando no se eligió
+  // modelo. No pasan por trackedQuery (son el CLI directo): su gasto lo lleva usage.ts.
+  // Sonnet como antes de v6: subirlo a Opus duplicaría el costo de cada run sin pedirlo.
+  "cli.run": { tier: "balanced", label: "Runs de claude -p (consola, Oficina)" },
+  // Agentes en la nube (Managed Agents, cloud/managed.ts): el modelo con que nacen.
+  "cloud.agent": { tier: "deep", effort: "low", label: "Agentes en la nube (al crearlos)" },
   // ── Juntas ────────────────────────────────────────────────────────────
   "meetings.ingest": { tier: "deep", effort: "medium", label: "Acta de junta" },
   "meetings.strategic": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_COPILOT_DEEP_MODEL"], label: "Junta: loop estratégico" },
   "meetings.prep": { tier: "balanced", thinking: "off", label: "Preparación de junta" },
   "copilot.fast": { tier: "fast", thinking: "off", legacyEnv: ["HERMES_COPILOT_MODEL"], label: "Junta: capa rápida" },
+  "copilot.polish": { tier: "fast", thinking: "off", legacyEnv: ["HERMES_COPILOT_MODEL"], label: "Junta: «dilo más claro»" },
+  "copilot.concepts": { tier: "fast", thinking: "off", legacyEnv: ["HERMES_COPILOT_MODEL"], label: "Junta de equipo: conceptos" },
   "copilot.team": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_COPILOT_TEAM_MODEL"], label: "Junta de equipo: aportar" },
   "copilot.class": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_COPILOT_CLASS_MODEL"], label: "Clase de inglés: frase y andamio" },
+  "copilot.correct": { tier: "fast", thinking: "off", legacyEnv: ["HERMES_COPILOT_MODEL"], label: "Clase y práctica de inglés: correcciones" },
+  "copilot.practice": { tier: "fast", thinking: "off", legacyEnv: ["HERMES_COPILOT_MODEL"], label: "Práctica con la tutora: ayuda" },
   "copilot.vision": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_VISION_MODEL"], label: "Visión en vivo" },
   // ── Aprender ──────────────────────────────────────────────────────────
   "english.report": { tier: "balanced", label: "Inglés: reporte de sesión" },
-  "english.drill": { tier: "balanced", thinking: "off", label: "Inglés: evaluación del plan" },
+  "english.drill": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_GYM_MODEL"], label: "Inglés: evaluación del plan" },
   "gym.analyze": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_GYM_MODEL"], label: "Gimnasio: devolución" },
-  "gym.generate": { tier: "balanced", legacyEnv: ["HERMES_GYM_MODEL"], label: "Gimnasio: escenarios nuevos" },
+  "gym.generate": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_GYM_MODEL"], label: "Gimnasio: escenarios nuevos" },
   "dojo.coach": { tier: "balanced", thinking: "off", legacyEnv: ["HERMES_DOJO_MODEL"], label: "Dojo: coach" },
   tutor: { tier: "balanced", legacyEnv: ["HERMES_TUTOR_MODEL"], label: "Entender (tutor de proyecto)" },
   // ── Crear ─────────────────────────────────────────────────────────────
@@ -71,7 +81,7 @@ export const FEATURES = {
   "content.variants": { tier: "balanced", label: "Estudio: variantes" },
   "content.chat": { tier: "balanced", label: "Estudio: chat de la pieza" },
   "content.edit": { tier: "deep", label: "Estudio: edición automática" },
-  "composicion.lyrics": { tier: "balanced", thinking: "off", legacyEnv: ["COMPOSICION_LYRICS_MODEL"], label: "Composición: letras" },
+  "composicion.lyrics": { tier: "balanced", effort: "medium", thinking: "off", legacyEnv: ["COMPOSICION_LYRICS_MODEL"], label: "Composición: letras" },
   "composicion.summary": { tier: "balanced", label: "Composición: resumen" },
   // ── Fondo ─────────────────────────────────────────────────────────────
   "learning.review": { tier: "fast", legacyEnv: ["HERMES_LEARNING_MODEL"], label: "Aprendizaje: revisión del turno" },

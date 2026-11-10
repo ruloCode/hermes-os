@@ -6,14 +6,14 @@
 // Patrón de english/report.ts: Agent SDK + una tool que captura el resultado.
 // Su única superficie es esa tool: sin Bash, sin Read, sin red.
 
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import type { NewQueueItem } from "@hermes/shared";
 import { env } from "../env.js";
 import { readProjects } from "../vault/projects.js";
 import { OWNER } from "../owner.js";
 
-const MODEL = process.env.HERMES_QUEUE_MODEL || "claude-haiku-4-5";
 export const PLAN_MAX_TASKS = 6;
 
 export async function planQueue(text: string, project?: string): Promise<{ ok: true; tasks: NewQueueItem[] } | { ok: false; error: string }> {
@@ -52,7 +52,7 @@ export async function planQueue(text: string, project?: string): Promise<{ ok: t
   const server = createSdkMcpServer({ name: "cola", version: "0.1.0", tools: [propose] });
 
   try {
-    const q = query({
+    const q = trackedQuery("office.queue", {
       prompt: `Pedido de ${OWNER || "el dueño"}${project ? ` (proyecto sugerido: ${project})` : ""}:
 """
 ${ask.slice(0, 4000)}
@@ -72,7 +72,6 @@ Reglas:
 - Nada destructivo ni irreversible (borrar, publicar, hacer push) a menos que el pedido lo diga con todas sus letras.
 - Usa solo slugs de la lista; si no sabes cuál, "general".
 - Responde SIEMPRE llamando a propose_tasks una sola vez.`,
-        model: MODEL,
         maxTurns: 4,
         settingSources: [],
         mcpServers: { cola: server },

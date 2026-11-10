@@ -22,7 +22,8 @@
  * modelo no se corrige a sí mismo hasta el infinito, el humano decide).
  */
 import { randomUUID } from "node:crypto";
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import {
   LYRIC_ANGLES,
@@ -458,12 +459,11 @@ async function runToolSdk<T>(
   signal?.addEventListener("abort", onAbort, { once: true });
   if (signal?.aborted) abort.abort();
   try {
-    const q = query({
+    const q = trackedQuery("composicion.lyrics", {
       prompt,
       options: {
         cwd: process.cwd(),
         systemPrompt: SYSTEM_PROMPT,
-        model: env.COMPOSICION_LYRICS_MODEL,
         effort: env.COMPOSICION_LYRICS_EFFORT,
         ...(env.COMPOSICION_LYRICS_THINKING === "off"
           ? { thinking: { type: "disabled" as const } }

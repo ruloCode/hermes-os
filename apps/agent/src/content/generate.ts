@@ -6,7 +6,8 @@
  * acto consciente), tomas/edición/publicación solo se llenan si están
  * vacíos (jamás pisar material real grabado).
  */
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { trackedQuery } from "../agent/tracked-query.js";
 import { z } from "zod";
 import { newPublication } from "@hermes/shared";
 import type { ContentPiece } from "@hermes/shared";
@@ -103,7 +104,7 @@ export async function generatePieceKit(
   const context = await buildCreativeContext(piece, { full: true });
 
   try {
-    const q = query({
+    const q = trackedQuery("content.generate", {
       prompt: `Pieza a desarrollar:
 
 - **Título:** ${piece.title}
@@ -118,14 +119,13 @@ Genera el kit completo y llama a record_content_kit.`,
       options: {
         cwd: env.VAULT_PATH || process.cwd(),
         systemPrompt: SYSTEM_PROMPT,
-        model: process.env.HERMES_MODEL || undefined,
         maxTurns: 6,
         settingSources: [],
         mcpServers: { content: server },
         allowedTools: ["mcp__content__record_content_kit"],
         permissionMode: "default",
       },
-    });
+    }, { ref: `pieza-${pieceId}` });
     for await (const message of q) void message;
 
     if (!captured) throw new Error("el modelo no llamó record_content_kit");
