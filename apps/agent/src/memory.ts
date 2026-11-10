@@ -61,7 +61,9 @@ export async function saveMemory(input: SaveMemoryInput): Promise<string> {
     };
     const { error } = await supabase.from("memories").update(row).eq("id", top.id);
     if (!error) {
-      await indexMemory({ ...top, ...row, type: input.type, created_at: top.created_at }, local?.vector).catch(logIndexError);
+      // Sin await: el índice va en fila con la sincronización y el sueño (y el motor puede tardar en
+      // arrancar); Supabase ya quedó escrito y la tool no debe quedarse esperando minutos.
+      void indexMemory({ ...top, ...row, type: input.type, created_at: top.created_at }, local?.vector).catch(logIndexError);
       return `Memoria actualizada (${top.id}): ya existía una casi idéntica.`;
     }
   }
@@ -83,7 +85,7 @@ export async function saveMemory(input: SaveMemoryInput): Promise<string> {
     .single();
   if (error) return `Error guardando memoria: ${error.message}`;
   // Al índice local YA: buscable al instante, sin esperar la sincronización.
-  await indexMemory(data, local?.vector).catch(logIndexError);
+  void indexMemory(data, local?.vector).catch(logIndexError);
   return `Memoria guardada (${data.id}).`;
 }
 

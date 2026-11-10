@@ -126,7 +126,12 @@ export async function runDream(idx: MemoryIndex, opts: RunDreamOptions): Promise
   const decided = new Set(idx.state.decidedPairs);
   const groups = dreamCandidates(dreamItems(idx), { threshold: opts.threshold, skipPairs: decided });
   const run: DreamRun = { at: now.toISOString(), candidates: groups.length, asked: 0, calls: 0, proposals: 0, applied: 0 };
-  if (!groups.length) return run;
+  if (!groups.length) {
+    // Sin candidatos la noche también cuenta como hecha: si no, dreamDue seguiría en verdadero
+    // y el barrido de 5 min repetiría los cosenos O(n²) hasta medianoche.
+    idx.state.lastDream = now.toISOString();
+    return run;
+  }
 
   const view = (g: DreamGroup) =>
     g.keys.map((key) => {

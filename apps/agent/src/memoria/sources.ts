@@ -28,7 +28,6 @@ import {
   type GymScenario,
   type KnowledgeSource,
   type PlanAttempt,
-  type TutorConversation,
 } from "@hermes/shared";
 import { HERMES_HOME } from "../home.js";
 
@@ -51,7 +50,9 @@ export interface SourceCollector {
 }
 
 /** Almacenes que NUNCA entran al índice. */
-export const EXCLUDED_SOURCES = ["finance", "composicion"] as const;
+// `tutor`: sus conversaciones traen código y actas de clientes y /tutor/* es solo LAN; indexarlas las
+// dejaría salir por el túnel (búsqueda y contexto del chat). Revisión v6, hallazgo 1.
+export const EXCLUDED_SOURCES = ["finance", "composicion", "tutor"] as const;
 
 /** Mensajes de chat más cortos que esto («ok», «dale», «gracias») son ruido para buscar. */
 export const MIN_CHAT_CHARS = 15;
@@ -451,41 +452,6 @@ export function localCollectors(home: string = HERMES_HOME): SourceCollector[] {
             createdAt: typeof o.receivedAt === "number" ? new Date(o.receivedAt).toISOString() : iso(o.updatedAt),
           };
         });
-      },
-    },
-    {
-      id: "tutor",
-      origin: "local",
-      async collect() {
-        const root = join(home, "tutor");
-        let projects: string[] = [];
-        try {
-          projects = await readdir(root);
-        } catch {
-          return [];
-        }
-        const out: SourceDoc[] = [];
-        for (const project of projects) {
-          let files: string[] = [];
-          try {
-            files = (await readdir(join(root, project))).filter((f) => f.endsWith(".json"));
-          } catch {
-            continue;
-          }
-          for (const f of files) {
-            const c = await readJsonFile<TutorConversation>(join(root, project, f));
-            if (!c?.id || !Array.isArray(c.history) || !c.history.length) continue;
-            out.push({
-              source: "tutor",
-              ref: `${project}/${c.id}`,
-              title: `Tutor ${project}: ${c.title}`,
-              text: c.history.map((m) => `${m.role === "user" ? "Pregunta" : "Tutor"}: ${m.text}`).join("\n\n"),
-              project,
-              createdAt: iso(c.updatedAt, iso(c.createdAt)),
-            });
-          }
-        }
-        return out;
       },
     },
   ];
