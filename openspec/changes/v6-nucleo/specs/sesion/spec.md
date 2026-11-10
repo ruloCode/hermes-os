@@ -83,8 +83,16 @@ Cada vez que el modelo carga una skill, DEBE quedar registrado su uso.
   `X-Hermes-Session-Id`; `index.ts` ahora pasa `channel`, `clientSession`, `client`, `userText` y `fresh`
   (cinco líneas en la llamada a `runAgentTurn`). Si la sesión viva falla ANTES de mandar algo al
   cliente, el turno corre de una vuelta con `resume`; si ya había mandado texto, el turno termina como
-  error con lo dicho (reintentar duplicaría la respuesta). En streaming el tope de vueltas es de la
-  sesión entera (`maxTurns: 1000`, como la capa rápida), no 40 por turno. El costo y los modelos que
+  error con lo dicho (reintentar duplicaría la respuesta). Un turno fallido cierra la sesión viva antes
+  de ese reintento (dos procesos sobre el mismo hilo lo bifurcan). Pedir otra conversación o una nueva
+  reemplaza la sesión aunque esté respondiendo: su cola termina y se cierra; si se retoma el MISMO hilo
+  que lleva una sesión que se cierra, se espera a que termine. Tras Detener, si el `result` no llega en
+  12 s la sesión se cierra; ningún turno pasa de 10 min. `X-Hermes-Session-Id` ausente (`default`, que
+  comparten varios clientes) va de una vuelta. El chat niega `Bash` con `run_in_background` (abriría un
+  turno propio del CLI y descuadraría la correlación). `maxTurns` es 40 POR MENSAJE también en streaming:
+  en el CLI 0.3.322 el limitador de la corrida suma el `num_turns` de cada resultado y vuelve a cero con
+  cada mensaje del host (`turnEnded`/`tally`), y el bucle de cada mensaje recibe el mismo tope; la sesión
+  viva midió `num_turns: 1` por turno. Contratos en `chat-sessions.test.ts` con un Query falso. El costo y los modelos que
   devuelve `runAgentTurn` en este camino son acumulados de la sesión (el gasto por turno lo da el
   registro de `trackedQuery`).
 - **Medido** (agente de ensayo :8661, Haiku 5.5 por `HERMES_MODEL`, misma sesión, tres turnos):

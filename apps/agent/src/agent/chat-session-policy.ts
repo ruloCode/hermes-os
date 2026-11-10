@@ -99,3 +99,44 @@ export function liveMatchesResume(live: { sdkSessionId?: string; resumedFrom?: s
   if (!requested) return true;
   return requested === live.sdkSessionId || requested === live.resumedFrom;
 }
+
+/**
+ * Tope de vueltas (idas y vueltas al modelo) por MENSAJE del chat. En entrada
+ * por streaming el CLI 0.3.322 cuenta `maxTurns` por mensaje, no acumulado:
+ * su limitador de la corrida suma el `num_turns` de cada resultado y vuelve a
+ * cero con cada mensaje nuevo del host (`turnEnded` / `tally` en el CLI), y el
+ * bucle de cada mensaje recibe el mismo `maxTurns`. Medido además: en la
+ * sesión viva cada turno trae `num_turns: 1`, no la suma.
+ */
+export const CHAT_MAX_TURNS = 40;
+
+/** Tras Detener, cuánto se espera el `result` antes de dar la sesión por colgada y cerrarla. */
+export const ABORT_GRACE_MS = 12_000;
+/** Tope duro de un turno del chat: más que esto es un CLI colgado, no una respuesta. */
+export const TURN_MAX_MS = 10 * 60_000;
+
+/** Qué hacer con la sesión viva que hay para la clave (ocupada o no, da igual). */
+export function reuseDecision(
+  live: { closed: boolean; sdkSessionId?: string; resumedFrom?: string } | undefined,
+  requested: string | undefined,
+  fresh: boolean,
+): "create" | "reuse" | "replace" {
+  if (!live || live.closed) return "create";
+  // Ocupada o no: si lleva OTRA conversación, el mensaje nuevo no entra en su
+  // cola (la pestaña adoptaría el hilo viejo). Se reemplaza.
+  return liveMatchesResume(live, requested, fresh) ? "reuse" : "replace";
+}
+
+/**
+ * Lo que el chat no puede usar aunque la tool exista. Un `Bash` en segundo
+ * plano hace que el CLI arranque un turno PROPIO cuando termina; en la sesión
+ * viva ese turno no tiene mensaje del usuario y descuadra qué respuesta va con
+ * qué mensaje. En el chat se niega con el motivo; una tarea larga va por
+ * run_task / schedule_task.
+ */
+export function chatToolDenial(toolName: string, input: Record<string, unknown>): string | null {
+  if (toolName === "Bash" && input.run_in_background === true) {
+    return "En el chat no se corren comandos en segundo plano: córrelo en primer plano (con un timeout) o, si es largo, lánzalo como tarea con run_task.";
+  }
+  return null;
+}

@@ -27,6 +27,7 @@ import { chatProfile, toolProfileSpec, type ToolProfile } from "./tool-profiles.
 import { ContextLedger, SnapshotCache, snapshotKey, wrapUserMessage } from "./turn-context.js";
 import { skillUseName } from "./skill-use.js";
 import { runLiveChatTurn, type LiveChatSpec } from "./chat-sessions.js";
+import { CHAT_MAX_TURNS, chatToolDenial } from "./chat-session-policy.js";
 
 /**
  * MCP oficial de Linear (remoto, hosteado por ellos). Auth headless: la misma
@@ -388,7 +389,8 @@ function turnOptions(opts: RunTurnOptions, p: { systemPrompt: string; model: str
     cwd: opts.cwd || env.VAULT_PATH || process.cwd(),
     systemPrompt: p.systemPrompt,
     model: p.model,
-    maxTurns: 40,
+    // En la sesión viva del chat el CLI lo cuenta por mensaje (CHAT_MAX_TURNS), igual que aquí.
+    maxTurns: CHAT_MAX_TURNS,
     includePartialMessages: true,
     settingSources: [],
     // Sin `env`: trackedQuery pone childEnv() — el hijo NO hereda las llaves
@@ -409,6 +411,12 @@ function turnOptions(opts: RunTurnOptions, p: { systemPrompt: string; model: str
       const trace = p.trace;
       // Doble seguro: si una tool apagada llegara a pedirse, se niega aquí también.
       if (opts.disallowedTools?.includes(toolName)) return { behavior: "deny", message: "Finanzas está bloqueada en el teléfono." };
+      // Chat: nada en segundo plano (un Bash de fondo abre un turno propio del
+      // CLI y descuadra la sesión viva). El modelo recibe el motivo y cambia de plan.
+      if (channelOf(opts) === "chat") {
+        const denial = chatToolDenial(toolName, input as Record<string, unknown>);
+        if (denial) return { behavior: "deny", message: denial };
+      }
       // Tools del navegador: NO van en allowedTools a propósito — pasar
       // por aquí garantiza el Chrome CDP dedicado ANTES de cada uso (el
       // MCP solo se conecta; si el Chrome no está, el tool fallaría).
@@ -452,7 +460,10 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<RunTurnResult>
   const { feature, model } = modelOf(opts);
 
   // Chat con sesión de cliente: el proceso del CLI queda vivo entre turnos.
-  if (channelOf(opts) === "chat" && opts.clientSession && liveChatEnabled()) {
+  // "default" = un cliente que no mandó X-Hermes-Session-Id (voz, clientes
+  // viejos): varios comparten ese id, así que no se les da un proceso vivo
+  // común; van de una vuelta como siempre.
+  if (channelOf(opts) === "chat" && opts.clientSession && opts.clientSession !== "default" && liveChatEnabled()) {
     setPresence("working", (opts.userText ?? opts.prompt).slice(0, 120));
     try {
       const collector = new TurnCollector(opts);
