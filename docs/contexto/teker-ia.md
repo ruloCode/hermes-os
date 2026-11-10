@@ -1,0 +1,5 @@
+# TeKer IA
+
+> Cuándo leerlo: tool teker_ia y su chat en equipo.
+
+- **TeKer IA (consulta, 2026-10-25)**: tool `teker_ia` (`apps/agent/src/teker/ia.ts`) sobre el asistente de operación de TeKer Salud (Open WebUI, `POST <TEKER_IA_URL>/api/chat/completions`, stream, 180 s; guía en `/docs/api`). Modelo `asistente_operacion` por defecto; `teker_ia_dev` solo si el dueño lo pide y la respuesta lo marca (cifras NO reales). La llave `TEKER_IA_API_KEY` vive solo en la Mac (la guía prohíbe ponerla en una app): Hermes Phone llega por el chat, por `run_task` desde la voz (regla 15 del prompt del teléfono) y como integrante **TeKer IA** del Equipo (`teker/chat.ts`: id `teker-ia` metido en `/cloud/agents` y sus rutas de chat, así que el APK no cambia; hilo en `~/.hermes-os/teker/chat.json`, los 6 turnos buenos anteriores viajan como contexto porque la API no guarda historial; mandar no espera y el teléfono sondea `running`; desarrollo solo con "teker_ia_dev" o "dev:" al inicio). `patientDataIn` frena correo/celular/documento antes de salir; las cifras se citan tal cual con su "Fuente" y corte; si falla, se dice y se ofrece reintentar.

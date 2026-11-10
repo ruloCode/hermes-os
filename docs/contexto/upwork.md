@@ -1,0 +1,5 @@
+# Oportunidades de Upwork desde Gmail
+
+> Cuándo leerlo: gmail readonly, puntaje de ofertas, borradores.
+
+- **Oportunidades de Upwork desde Gmail (2026-11-02)**: el OAuth de Google ahora incluye `gmail.readonly` (`google-gmail.ts`, mismo token que YouTube/calendario). Job `upwork-gmail-sync` (10 min) lee los "New job alert" de Upwork (`upwork/parse.ts`, del text/plain; el aviso NO trae propuestas ni Connects), puntúa contra el nicho (`upwork/score.ts`, puro: precio, cliente, stack, descartes) y guarda en `~/.hermes-os/upwork/opportunities.jsonl` (append-only, gana la última línea por jobId). Las ≥`HERMES_UPWORK_NOTIFY_MIN` (70) recientes (≤6 h), máx. 3 al día, van a Hermes Phone + Mac con borrador de propuesta (`upwork/draft.ts`, Agent SDK + `record_proposal`, `HERMES_UPWORK_MODEL`). Perfil y guía de voz viven FUERA del repo (`~/.hermes-os/upwork/profile.md` y `guia.md`; sin perfil no hay borrador). **Nunca aplica ni envía nada en Upwork.** Rutas `/upwork/opportunities` · `POST /upwork/sync {dryRun}` · `…/:id/status` · `…/:id/draft`; `HERMES_UPWORK=off` apaga. Tests en `upwork/upwork.test.ts`.
