@@ -41,6 +41,9 @@ export const env = {
   // (console.higgsfield.ai → API keys); sin ellas cae a gpt-image con OPENAI.
   HIGGSFIELD_API_KEY_ID: process.env.HIGGSFIELD_API_KEY_ID || "",
   HIGGSFIELD_API_KEY_SECRET: process.env.HIGGSFIELD_API_KEY_SECRET || "",
+  // TeKer IA (teker/ia.ts): el asistente de operación de TeKer Salud, OpenAI
+  // compatible. Solo vive aquí: la guía de TeKer prohíbe la llave en una app.
+  TEKER_IA_API_KEY: process.env.TEKER_IA_API_KEY || "",
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || "",
   // Agente de voz de ElevenLabs. Comparte el valor con el dashboard web
   // (NEXT_PUBLIC_…) para que la app móvil obtenga el token del mismo agente.
@@ -82,6 +85,13 @@ export const env = {
   ARTICULATION: (process.env.HERMES_ARTICULATION || "").toLowerCase(),
   // Gimnasio de articulación (gym/analyze.ts): evalúa cada repetición.
   GYM_MODEL: process.env.HERMES_GYM_MODEL || "sonnet",
+  // Oportunidades de Upwork desde Gmail (upwork/): "off" apaga el job y las
+  // rutas. El borrador de propuesta usa UPWORK_MODEL; la guía de voz y el
+  // perfil viven FUERA del repo (~/.hermes-os/upwork/guia.md y profile.md).
+  UPWORK: (process.env.HERMES_UPWORK || "").toLowerCase(),
+  UPWORK_MODEL: process.env.HERMES_UPWORK_MODEL || "sonnet",
+  UPWORK_GUIDE: process.env.HERMES_UPWORK_GUIDE || "",
+  UPWORK_NOTIFY_MIN: Number(process.env.HERMES_UPWORK_NOTIFY_MIN || 70),
   // Tutor de proyecto (Entender): explica leyendo repos y actas y dibujando.
   TUTOR_MODEL: process.env.HERMES_TUTOR_MODEL || "sonnet",
   // Dojo de algoritmos (dojo/coach.ts): revisa si entendiste, cuestiona tu plan

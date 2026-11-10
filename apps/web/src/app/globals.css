@@ -51,6 +51,8 @@
   --color-panel-2: #1f2025;
   --color-line: rgb(255 255 255 / 0.07);
   --color-line-2: rgb(255 255 255 / 0.13);
+  /* Borde de campo: ≥3:1 contra su fondo (WCAG 1.4.11). */
+  --color-line-3: rgb(255 255 255 / 0.34);
   /* Capas de interacción: se SUPERPONEN al fondo que haya debajo (cromo,
      lienzo o tarjeta), por eso son translúcidas y valen en cualquier altura. */
   --color-hover: rgb(255 255 255 / 0.05);
@@ -141,6 +143,7 @@
   --color-panel-2: #f4f4f6;
   --color-line: rgb(17 19 24 / 0.09);
   --color-line-2: rgb(17 19 24 / 0.16);
+  --color-line-3: rgb(17 19 24 / 0.46);
   --color-hover: rgb(17 19 24 / 0.045);
   --color-selected: rgb(17 19 24 / 0.075);
 

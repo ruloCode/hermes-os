@@ -50,6 +50,7 @@ import { createSkill, getSkill, listSkills, patchSkill } from "../learning/skill
 import { createScheduledTask, listScheduledTasks, updateScheduledTask } from "../scheduled/store.js";
 import { describeCron } from "../scheduled/cron.js";
 import { cloudAsk, createCloudAgent, findCloudAgent, listCloudAgents } from "../cloud/managed.js";
+import { askTekerIa, TEKER_MODELS } from "../teker/ia.js";
 import { PHONE_TOOLS } from "../phone/tools.js";
 import { GROWTH_TOOLS } from "../growth/tools.js";
 import { buildDailyBrief } from "../brief.js";
@@ -1068,6 +1069,31 @@ const cloudAgentCreateTool = tool(
   },
 );
 
+// ── TeKer IA (consulta) ─────────────────────────────────────────────────
+// El asistente de operación de TeKer Salud, OpenAI-compatible. La llave vive
+// en esta Mac (teker/ia.ts); quien llega aquí ya pasó el auth del agente
+// (HERMES_API_KEY o un usuario de HERMES_ALLOWED_USERS).
+
+const tekerIaTool = tool(
+  "teker_ia",
+  `Pregunta a TeKer IA, el asistente de operación de TeKer Salud. Úsala para: cifras de citas de TeKer (agendadas, programadas, atendidas, canceladas, inasistencias por periodo, especialidad, aliado, profesional, canal o estado), preguntas sobre TeKer (servicios, políticas, plataforma), redactar correos o plantillas, y búsquedas en internet. Pasa la pregunta como la hizo ${OWNER}, en español, nombrando la métrica y el periodo ("¿cuántas citas se cancelaron esta semana en Emssanar?"); si es un seguimiento ("¿y la semana pasada?"), vuélvela autocontenida. NUNCA mandes datos de pacientes (nombres, cédulas, teléfonos, correos, historias clínicas): si te los piden, responde que TeKer IA no maneja datos de pacientes, sin llamarla. Las cifras vienen de consultas fijas a la base: cítalas TAL CUAL con su línea de "Fuente" y corte, sin recalcular ni completar. Puede tardar hasta 3 minutos (redacción ~1 min). Si falla, dilo y ofrece reintentar en un minuto; no inventes la respuesta.`,
+  {
+    question: z.string().describe("La pregunta, en español, con la métrica y el periodo"),
+    model: z
+      .enum(TEKER_MODELS)
+      .optional()
+      .describe(`"asistente_operacion" (producción, por defecto). "teker_ia_dev" SOLO si ${OWNER} pide explícitamente desarrollo: sus cifras no son reales`),
+  },
+  async ({ question, model }) => {
+    const r = await askTekerIa(question.slice(0, 4000), model ?? "asistente_operacion");
+    if (!r.ok) return text(`TeKer IA no respondió: ${r.error}. Díselo a ${OWNER} y ofrécele reintentar en un minuto; no inventes la respuesta.`);
+    const dev = r.model === "teker_ia_dev";
+    return text(
+      `${dev ? "Respuesta de teker_ia_dev (DESARROLLO: cifras NO reales; dilo siempre al responder).\n" : ""}TeKer IA respondió (cita las cifras tal cual, con su fuente y corte):\n${r.text}`,
+    );
+  },
+);
+
 /** Las tools del MCP de Hermes: UNA lista, de ahí salen el servidor, allowedTools y el inventario de la Oficina. */
 const HERMES_TOOLS = [
   searchKnowledgeTool,
@@ -1114,6 +1140,7 @@ const HERMES_TOOLS = [
   cloudAgentsTool,
   cloudAgentAskTool,
   cloudAgentCreateTool,
+  tekerIaTool,
   // Cuerpo en el teléfono (Hermes Phone): reenvían por /phone/ws; la
   // confirmación de lo que tiene efectos la hace el teléfono.
   ...PHONE_TOOLS,

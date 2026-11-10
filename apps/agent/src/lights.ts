@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, networkInterfaces } from "node:os";
+import { dirname, resolve } from "node:path";
 
 /**
  * Control de la tira de luces TP-Link Kasa KL400L5 ("luz led") en la LAN.
@@ -14,9 +14,15 @@ import { resolve } from "node:path";
  * cliente a la CLI.
  */
 
-// IP de la tira en la LAN. Vacío = luces no configuradas (la voz y el chat lo
-// dicen tal cual en vez de esperar 20 s a un host que no existe).
+// IP de la tira en la LAN. Vacío (y sin MAC) = luces no configuradas (la voz
+// y el chat lo dicen tal cual en vez de esperar 20 s a un host que no existe).
 const LIGHTS_HOST = process.env.HERMES_LIGHTS_HOST || "";
+// MAC de la tira (opcional). Con ella, si la IP deja de responder —el router
+// la reasigna por DHCP: .86 → .87 → .89 en dos meses—, se busca la tira por
+// broadcast en la LAN, se adopta su IP nueva y se recuerda en disco.
+const LIGHTS_MAC = normalizeMac(process.env.HERMES_LIGHTS_MAC || "");
+const LEARNED_FILE = resolve(homedir(), ".hermes-os/lights/host.json");
+const REDISCOVER_COOLDOWN_MS = 60_000;
 const KASA_TIMEOUT_MS = 20_000;
 
 // Binario por ruta absoluta, instalado con `uv tool install python-kasa`
@@ -37,27 +43,139 @@ const KASA_BIN = (() => {
 
 type Result = { ok: true; detail: string } | { ok: false; error: string };
 
-function runKasa(args: string[]): Promise<{ ok: true; out: string } | { ok: false; error: string }> {
+type KasaRun = { ok: true; out: string } | { ok: false; error: string };
+
+function execKasa(args: string[], timeoutMs = KASA_TIMEOUT_MS): Promise<KasaRun> {
   return new Promise((done) => {
-    execFile(
-      KASA_BIN,
-      ["--host", LIGHTS_HOST, "--type", "lightstrip", "--timeout", "5", ...args],
-      { timeout: KASA_TIMEOUT_MS },
-      (err, stdout, stderr) => {
-        if (err) {
-          // El warning del rango de color temp es cosmético — fuera del error.
-          const clean = (stderr || "")
-            .split("\n")
-            .filter((l) => l.trim() && !/Unknown color temperature range/i.test(l))
-            .join(" ")
-            .trim();
-          const e = err as NodeJS.ErrnoException & { signal?: string; code?: number | string };
-          const why = clean || stdout.trim().slice(-160) || (e.signal ? `señal ${e.signal}` : `exit ${e.code}`);
-          done({ ok: false, error: `la tira no respondió: ${why}`.slice(0, 220) });
-        } else done({ ok: true, out: stdout.trim() });
-      },
-    );
+    execFile(KASA_BIN, args, { timeout: timeoutMs }, (err, stdout, stderr) => {
+      if (err) {
+        // El warning del rango de color temp es cosmético — fuera del error.
+        const clean = (stderr || "")
+          .split("\n")
+          .filter((l) => l.trim() && !/Unknown color temperature range/i.test(l))
+          .join(" ")
+          .trim();
+        const e = err as NodeJS.ErrnoException & { signal?: string; code?: number | string };
+        const why = clean || stdout.trim().slice(-160) || (e.signal ? `señal ${e.signal}` : `exit ${e.code}`);
+        done({ ok: false, error: `la tira no respondió: ${why}`.slice(0, 220) });
+      } else done({ ok: true, out: stdout.trim() });
+    });
   });
+}
+
+// ── Host vigente + redescubrimiento por MAC ─────────────────────────────
+
+/** "20-23-51-5a-30-8e" / "2023515A308E" → "20:23:51:5A:30:8E"; inválida → "". */
+export function normalizeMac(raw: string): string {
+  const hex = raw.replace(/[^0-9a-f]/gi, "").toUpperCase();
+  return hex.length === 12 ? hex.match(/../g)!.join(":") : "";
+}
+
+/** Broadcast de una interfaz IPv4 (`192.168.0.171` + `255.255.255.0` → `192.168.0.255`). */
+export function broadcastFor(address: string, netmask: string): string | null {
+  const toInt = (ip: string) => {
+    const p = ip.split(".").map(Number);
+    if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0;
+  };
+  const ip = toInt(address);
+  const mask = toInt(netmask);
+  // /32 (Tailscale, utun) no tiene vecinos que descubrir.
+  if (ip == null || mask == null || mask === 0xffffffff) return null;
+  const b = ((ip & mask) | (~mask >>> 0)) >>> 0;
+  return [b >>> 24, (b >>> 16) & 255, (b >>> 8) & 255, b & 255].join(".");
+}
+
+/** En la salida `kasa --json discover` ({ip: respuesta}), la IP del equipo con esa MAC. */
+export function findHostByMac(discovered: unknown, mac: string): string | null {
+  const want = normalizeMac(mac);
+  if (!want || !discovered || typeof discovered !== "object") return null;
+  for (const [ip, dev] of Object.entries(discovered as Record<string, unknown>)) {
+    const info = (dev as { system?: { get_sysinfo?: Record<string, unknown> } })?.system?.get_sysinfo;
+    const devMac = info?.mic_mac ?? info?.mac;
+    if (typeof devMac === "string" && normalizeMac(devMac) === want) return ip;
+  }
+  return null;
+}
+
+function loadLearnedHost(): string | null {
+  if (!LIGHTS_MAC) return null;
+  try {
+    const saved = JSON.parse(readFileSync(LEARNED_FILE, "utf8")) as { mac?: string; host?: string };
+    return saved.mac === LIGHTS_MAC && saved.host ? saved.host : null;
+  } catch {
+    return null;
+  }
+}
+
+let currentHost = loadLearnedHost() ?? LIGHTS_HOST;
+let rediscovering: Promise<string | null> | null = null;
+let lastRediscoverAt = 0;
+
+const lightsConfigured = () => Boolean(currentHost || LIGHTS_MAC);
+
+/** Busca la tira por MAC en cada LAN de esta máquina; una búsqueda a la vez, máx. una por minuto. */
+function rediscover(): Promise<string | null> {
+  if (!LIGHTS_MAC) return Promise.resolve(null);
+  if (rediscovering) return rediscovering;
+  if (Date.now() - lastRediscoverAt < REDISCOVER_COOLDOWN_MS) return Promise.resolve(null);
+  lastRediscoverAt = Date.now();
+  rediscovering = (async () => {
+    const targets = new Set<string>();
+    for (const list of Object.values(networkInterfaces())) {
+      for (const nic of list ?? []) {
+        if (nic.family !== "IPv4" || nic.internal) continue;
+        const b = broadcastFor(nic.address, nic.netmask);
+        if (b) targets.add(b);
+      }
+    }
+    const found = await Promise.all(
+      [...targets].map(async (target) => {
+        const res = await execKasa(["--target", target, "--json", "--discovery-timeout", "3", "discover"], 15_000);
+        if (!res.ok) return null;
+        try {
+          return findHostByMac(JSON.parse(res.out), LIGHTS_MAC);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const host = found.find((h): h is string => !!h) ?? null;
+    if (!host) {
+      console.warn(`[lights] la tira ${LIGHTS_MAC} no apareció en ${[...targets].join(", ") || "ninguna LAN"}`);
+      return null;
+    }
+    if (host !== currentHost) {
+      console.log(`[lights] la tira cambió de IP: ${currentHost || "(sin IP)"} → ${host}`);
+      currentHost = host;
+      try {
+        mkdirSync(dirname(LEARNED_FILE), { recursive: true });
+        writeFileSync(LEARNED_FILE, JSON.stringify({ mac: LIGHTS_MAC, host, at: new Date().toISOString() }, null, 2));
+      } catch (err) {
+        console.warn(`[lights] no pude guardar la IP aprendida: ${(err as Error).message}`);
+      }
+    }
+    return host;
+  })().finally(() => {
+    rediscovering = null;
+  });
+  return rediscovering;
+}
+
+async function runKasa(args: string[]): Promise<KasaRun> {
+  if (!currentHost && !(await rediscover())) {
+    return { ok: false, error: `la tira no respondió: no la encontré en la LAN (MAC ${LIGHTS_MAC})` };
+  }
+  const run = (host: string) => execKasa(["--host", host, "--type", "lightstrip", "--timeout", "5", ...args]);
+  const tried = currentHost;
+  const res = await run(tried);
+  // Con --json kasa falla MUDO (exit 1, sin texto): no se puede distinguir
+  // "la IP no contesta" de otro error, así que ante cualquier fallo se busca
+  // la tira por MAC (máx. una vez por minuto). Si sigue en la misma IP, no se
+  // reintenta y queda el error original.
+  if (res.ok || !LIGHTS_MAC) return res;
+  const host = await rediscover();
+  return host && host !== tried ? run(host) : res;
 }
 
 const normalize = (s: string): string =>
@@ -226,7 +344,7 @@ async function setWhite(kelvin: number): Promise<Result> {
  */
 /** Estado de la tira como dato (para la UI): sin tira o sin respuesta → null, nunca un valor inventado. */
 export async function lightsInfo(): Promise<{ on: boolean; brightness: number | null; kelvin: number | null; color: string | null; effect: string | null } | null> {
-  if (!LIGHTS_HOST) return null;
+  if (!lightsConfigured()) return null;
   const info = await readLightInfo();
   if (!info) return null;
   const ls = info.light_state;
@@ -241,7 +359,9 @@ export async function lightsInfo(): Promise<{ on: boolean; brightness: number | 
 }
 
 export async function lightsCommand(action: LightAction, value?: string): Promise<Result> {
-  if (!LIGHTS_HOST) return { ok: false, error: "Luces no configuradas: define HERMES_LIGHTS_HOST (IP de la tira Kasa en la LAN)." };
+  if (!lightsConfigured()) {
+    return { ok: false, error: "Luces no configuradas: define HERMES_LIGHTS_HOST (IP de la tira Kasa en la LAN) o HERMES_LIGHTS_MAC." };
+  }
   const val = value?.trim() ?? "";
   if (["brightness", "color", "temperature", "effect"].includes(action)) await runKasa(["on"]);
 

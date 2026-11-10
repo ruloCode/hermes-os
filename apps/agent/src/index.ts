@@ -116,6 +116,7 @@ import { phoneLink } from "./phone/link.js";
 import { evolutionReport } from "./phone/evolution.js";
 import { phoneHome } from "./phone/home.js";
 import { cloudChat, cloudNewChat, cloudSend, createCloudAgent, invalidateCloudCache, listCloudAgents } from "./cloud/managed.js";
+import { TEKER_MEMBER_ID, tekerChat, tekerEnabled, tekerNewChat, tekerSend, tekerSummary } from "./teker/chat.js";
 import { companion, wireCompanion } from "./growth/index.js";
 import { parseGrowthSettings } from "@hermes/shared";
 import { readSignsConfig, writeSignsConfig, SignsValidationError } from "./input/signs-store.js";
@@ -142,7 +143,7 @@ import {
   type BrowserCommand,
 } from "./browser.js";
 import { lightsCommand, lightsInfo, LIGHT_ACTIONS, type LightAction } from "./lights.js";
-import { playYouTube, tvCommand, tvHome, tvNow, tvScene, tvScenes, tvSleepIn, TV_ACTIONS, type TvAction } from "./tv/index.js";
+import { playYouTube, tvCommand, tvHome, tvNow, tvScene, tvScenes, tvSleepIn, TV_ACTIONS, wakeAmbient, type TvAction } from "./tv/index.js";
 import { parseSleepMinutes, tvTokenAllows } from "./tv/plan.js";
 import { addDayTask, dayView, sampleDay, setDayTaskDone } from "./day/index.js";
 import { agendaDays } from "./agenda/index.js";
@@ -162,6 +163,7 @@ import { avatarProvider, terminatorAvatar } from "./avatar.js";
 import { officeState, officeViewerJoined, officeWatched, officeWorkerPrivate, startOffice, subscribeOffice } from "./office/state.js";
 import { approvalState, decideApproval, pendingApprovals, requestApproval, runForToken } from "./office/approvals.js";
 import { mountGymRoutes } from "./gym/routes.js";
+import { mountUpworkRoutes, runUpworkSync } from "./upwork/routes.js";
 import { mountEnglishPlanRoutes } from "./english/plan-routes.js";
 import { mountDojoRoutes } from "./dojo/routes.js";
 import { transcribe } from "./meetings/stt.js";
@@ -1261,8 +1263,15 @@ app.post("/phone/notify", async (c) => {
 // Anthropic vive solo en esta Mac (cloud/managed.ts). Errores en {error}.
 const cloudError = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
 
+// TeKer IA (teker/chat.ts) va en la misma lista y por las mismas rutas: el
+// teléfono lo ve en Equipo sin cambiar el APK. Si la nube falla, él sigue.
+const isTeker = (id: string) => id === TEKER_MEMBER_ID && tekerEnabled();
+
 app.get("/cloud/agents", async (c) => {
-  try { return c.json({ agents: await listCloudAgents() }); } catch (e) { return c.json(cloudError(e), 502); }
+  const teker = tekerEnabled() ? [await tekerSummary()] : [];
+  try { return c.json({ agents: [...(await listCloudAgents()), ...teker] }); } catch (e) {
+    return teker.length ? c.json({ agents: teker, ...cloudError(e) }) : c.json(cloudError(e), 502);
+  }
 });
 
 // Crear uno desde el teléfono: nombre, lo que hace y los sitios que puede revisar.
@@ -1278,6 +1287,7 @@ app.post("/cloud/agents", async (c) => {
 });
 
 app.get("/cloud/agents/:id/chat", async (c) => {
+  if (isTeker(c.req.param("id"))) return c.json(await tekerChat());
   try { return c.json(await cloudChat(c.req.param("id"))); } catch (e) { return c.json(cloudError(e), 502); }
 });
 
@@ -1286,14 +1296,14 @@ app.post("/cloud/agents/:id/chat", async (c) => {
   const text = typeof body.text === "string" ? body.text.trim() : "";
   if (!text) return c.json({ error: "Falta el mensaje." }, 400);
   try {
-    const r = await cloudSend(c.req.param("id"), text.slice(0, 8000));
+    const r = isTeker(c.req.param("id")) ? await tekerSend(text.slice(0, 4000)) : await cloudSend(c.req.param("id"), text.slice(0, 8000));
     invalidateCloudCache();
     return c.json({ ok: true, ...r });
   } catch (e) { return c.json(cloudError(e), 502); }
 });
 
 app.post("/cloud/agents/:id/chat/new", async (c) => {
-  try { await cloudNewChat(c.req.param("id")); invalidateCloudCache(); return c.json({ ok: true }); } catch (e) { return c.json(cloudError(e), 400); }
+  try { await (isTeker(c.req.param("id")) ? tekerNewChat() : cloudNewChat(c.req.param("id"))); invalidateCloudCache(); return c.json({ ok: true }); } catch (e) { return c.json(cloudError(e), 400); }
 });
 
 // Pantalla de inicio del teléfono en UN poll: evolución + próximo evento + lo de hoy.
@@ -1530,7 +1540,13 @@ app.post("/tv/greeting/preview", async (c) => {
 // ── Despertar con puntos (wake/) ─────────────────────────────────────────
 // La escena `despertar` abre la sesión; la TV (WakeActivity, con su token) la
 // lee y la confirma con OK; el chat confirma con la tool wake_up.
-app.get("/wake", async (c) => c.json(await wakeStatus()));
+// `ambient` = la TV pone el sonido de naturaleza en bucle mientras espera (paso wait-awake con ambient).
+app.get("/wake", async (c) => c.json({ ...(await wakeStatus()), ambient: wakeAmbient() }));
+app.get("/tv/ambient.mp3", async (c) => {
+  const buf = await readFile(joinPath(homedir(), ".hermes-os", "tv", "ambient.mp3")).catch(() => null);
+  if (!buf) return c.json({ error: "sin sonido de ambiente" }, 404);
+  return new Response(new Uint8Array(buf), { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "max-age=3600" } });
+});
 app.post("/wake/confirm", async (c) => {
   const body = await c.req.json<{ by?: string }>().catch(() => ({}) as { by?: string });
   const by = ["tv", "phone", "chat", "dashboard"].includes(body.by ?? "") ? body.by! : "dashboard";
@@ -2543,6 +2559,7 @@ app.delete("/content/refs/:id", async (c) => {
 // en packages/shared/src/composicion.ts); HERMES_COMPOSICION=off las apaga.
 mountComposicionRoutes(app);
 mountGymRoutes(app);
+mountUpworkRoutes(app);
 mountEnglishPlanRoutes(app);
 mountDojoRoutes(app);
 
@@ -4088,6 +4105,11 @@ registerJob("content-metrics-sync", 6 * 60 * 60_000, metricsSweep, (r) =>
 wireCompanion();
 registerJob("growth-checkins", 5 * 60_000, () => companion.sweep(), (r) =>
   r ? `${r.sent} check-in(s) enviado(s)${r.skipped ? ` · ${r.skipped} sin mandar` : ""}${r.dropped ? ` · ${r.dropped} sin presupuesto` : ""}` : null,
+);
+// Upwork: avisos "New job alert" de Gmail → puntaje → aviso al teléfono de las
+// mejores (máx. 3 al día) con borrador. Nunca aplica (upwork/sync.ts).
+registerJob("upwork-gmail-sync", 10 * 60_000, () => runUpworkSync(), (r) =>
+  r ? `${r.fetched} correo(s), ${r.saved} oferta(s) nueva(s), ${r.notified} aviso(s)${r.errors.length ? ` · ${r.errors[0]}` : ""}` : null,
 );
 registerJob("scheduled-tasks", 60_000, scheduledSweep, (r) =>
   r

@@ -106,7 +106,9 @@ export type SceneStep =
    * del día con datos reales, y `outro` al final ("ahora, la meditación").
    * Espera a que termine de hablar antes del siguiente paso.
    */
-  | { kind: "tv-greeting"; outro?: string }
+  | { kind: "tv-greeting"; outro?: string; name?: string }
+  /** Volumen de la TV fijo (0-100, stream de medios por adb): bajito para despertar, normal para hablar. */
+  | { kind: "tv-volume"; level: number }
   /** Aviso hablado de una sección del día ("comienza la rutina de calistenia"), con la voz de Hermes. */
   | { kind: "tv-say"; title: string; text: string }
   /**
@@ -122,7 +124,7 @@ export type SceneStep =
    * "¿Ya estás de pie?" e insiste cada tanto. Sin confirmación en `max_ms`, la
    * mañana queda en 0 y la escena se detiene (nada de música a la cama).
    */
-  | { kind: "wait-awake"; max_ms: number; next?: string };
+  | { kind: "wait-awake"; max_ms: number; next?: string; ambient?: boolean };
 
 export interface SceneDef {
   id: string;
@@ -229,7 +231,15 @@ function parseStep(raw: unknown, where: string): SceneStep | string {
     case "tv-greeting": {
       const outro = str("outro");
       if (outro.length > 200) return `${where}: tv-greeting.outro máximo 200 caracteres`;
-      return { kind: "tv-greeting", ...(outro ? { outro } : {}) };
+      // A quién saluda ("Dani y Rulo"); sin name, al dueño.
+      const name = str("name");
+      if (name.length > 60) return `${where}: tv-greeting.name máximo 60 caracteres`;
+      return { kind: "tv-greeting", ...(outro ? { outro } : {}), ...(name ? { name } : {}) };
+    }
+    case "tv-volume": {
+      const level = Number(o.level);
+      if (!Number.isFinite(level) || level < 0 || level > 100) return `${where}: tv-volume.level debe ser 0-100`;
+      return { kind: "tv-volume", level: Math.round(level) };
     }
     case "wait-video-end": {
       const ms = Number(o.max_ms);
@@ -243,7 +253,7 @@ function parseStep(raw: unknown, where: string): SceneStep | string {
       if (!Number.isFinite(ms) || ms < 60_000 || ms > WAKE_WAIT_MAX_MS) return `${where}: wait-awake.max_ms debe ser 60000-${WAKE_WAIT_MAX_MS}`;
       const next = str("next");
       if (next.length > 200) return `${where}: wait-awake.next máximo 200 caracteres`;
-      return { kind: "wait-awake", max_ms: Math.round(ms), ...(next ? { next } : {}) };
+      return { kind: "wait-awake", max_ms: Math.round(ms), ...(next ? { next } : {}), ...(o.ambient === true ? { ambient: true } : {}) };
     }
     case "tv-sleep": {
       const minutes = Number(o.minutes);
@@ -352,6 +362,8 @@ export function tvTokenAllows(method: string, path: string): boolean {
   if (method === "GET" && (path === "/tv/home" || path === "/tv/scenes" || path === "/day")) return true;
   // El saludo del despertar que la TV reproduce (texto + audio, solo lectura).
   if (method === "GET" && (path === "/tv/greeting" || path === "/tv/greeting.mp3")) return true;
+  // El sonido de naturaleza que suena mientras espera que te levantes.
+  if (method === "GET" && path === "/tv/ambient.mp3") return true;
   // "¿Ya estás de pie?": la pantalla de espera lee el estado y el OK confirma.
   if (method === "GET" && path === "/wake") return true;
   if (method === "POST" && path === "/wake/confirm") return true;

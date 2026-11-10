@@ -59,10 +59,10 @@ async function tts(text: string): Promise<Buffer> {
  * objetivo del despertar) cierra con el discurso y el llamado a ponerse de
  * pie. Nunca lanza: lo que falle queda en audio_error.
  */
-export async function prepareGreeting(outro?: string, wake?: { at: string; source: "compromiso" | "alarma" | "escena" } | null): Promise<StoredGreeting> {
+export async function prepareGreeting(outro?: string, wake?: { at: string; source: "compromiso" | "alarma" | "escena" } | null, name?: string): Promise<StoredGreeting> {
   const [day, w] = await Promise.all([dayView(), getWeather().catch(() => null)]);
   const g = buildGreeting({
-    owner: OWNER,
+    owner: name || OWNER,
     date: day.date,
     weather: w && !w.stale ? { place: w.place, temp_c: Math.round(w.now.tempC), words: weatherWords(w.now.weatherCode) } : null,
     events: day.events.map((e) => (e.all_day ? { title: e.title, h: null, m: null } : { title: e.title, ...hourMinute(e.start, env.SCHEDULED_TZ) })),

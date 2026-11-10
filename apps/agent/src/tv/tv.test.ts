@@ -454,3 +454,28 @@ test("los avisos de sección y la felicitación se validan", () => {
   ]);
   assert.equal(errors.length, 2);
 });
+
+
+test("despertar suave: volumen fijo, sonido de ambiente en la espera y saludo con nombre", () => {
+  const { scenes, errors } = parseScenes({
+    scenes: [{
+      id: "despertar", name: "Despertar", before_alarm_min: 0,
+      steps: [
+        { kind: "tv-volume", level: 8 },
+        { kind: "wait-awake", max_ms: 5_400_000, ambient: true },
+        { kind: "tv-volume", level: 20 },
+        { kind: "tv-greeting", name: "Dani y Rulo" },
+      ],
+    }],
+  });
+  assert.deepEqual(errors, []);
+  const s = scenes.find((x) => x.id === "despertar")!;
+  assert.deepEqual(s.steps[0], { kind: "tv-volume", level: 8 });
+  assert.equal((s.steps[1] as { ambient?: boolean }).ambient, true);
+  assert.equal((s.steps[3] as { name?: string }).name, "Dani y Rulo");
+  // Un volumen fuera de rango descarta la escena entera (como cualquier paso inválido).
+  assert.ok(parseScenes({ scenes: [{ id: "x", name: "X", steps: [{ kind: "tv-volume", level: 140 }] }] }).errors.length > 0);
+  // La TV (con su token) puede leer el sonido; nada más nuevo.
+  assert.ok(tvTokenAllows("GET", "/tv/ambient.mp3"));
+  assert.ok(!tvTokenAllows("POST", "/tv/ambient.mp3"));
+});

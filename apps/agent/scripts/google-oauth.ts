@@ -9,7 +9,7 @@
  * solo, sin volver a pedir consentimiento.
  *
  * Requisitos previos (Google Cloud Console):
- *  1. Proyecto + habilitar "Google Calendar API" y "YouTube Data API v3".
+ *  1. Proyecto + habilitar "Google Calendar API", "YouTube Data API v3" y "Gmail API".
  *  2. Pantalla de consentimiento OAuth (External) con publishing status
  *     "In production" — NO "Testing". Con user type External y estado Testing,
  *     Google emite refresh tokens que CADUCAN A LOS 7 DÍAS y la escritura se
@@ -40,6 +40,11 @@ const SCOPE = [
   // vía YouTube Analytics API. Sin este scope el sync degrada al acumulado de
   // la Data API y lo avisa en el job.
   "https://www.googleapis.com/auth/yt-analytics.readonly",
+  // Correo (2026-11-02): leer los avisos de Upwork (invitaciones, mensajes,
+  // propuestas vistas, ofertas) para el embudo. SOLO lectura a propósito: con
+  // este scope Hermes no puede enviar, borrar ni archivar nada. Exige habilitar
+  // "Gmail API" en el proyecto de Google Cloud.
+  "https://www.googleapis.com/auth/gmail.readonly",
 ].join(" ");
 const PORT = env.GOOGLE_OAUTH_PORT;
 const REDIRECT_URI = `http://localhost:${PORT}/oauth2callback`;
@@ -116,7 +121,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n🔑 Abriendo el navegador para autorizar Google Calendar…`);
+  console.log(`\n🔑 Abriendo el navegador para autorizar Google (Calendar, YouTube, Gmail)…`);
   console.log(`   Si no abre solo, entra manualmente a:\n\n   ${authUrl}\n`);
   // macOS: abre el navegador por defecto.
   spawn("open", [authUrl], { stdio: "ignore", detached: true }).on("error", () => {

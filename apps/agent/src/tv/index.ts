@@ -7,7 +7,7 @@ import { lightsCommand, type LightAction } from "../lights.js";
 import { pickNextEvent, pickToday, type PhoneHome } from "../phone/home.js";
 import { listTasks } from "../tasks/store.js";
 import { getWeather } from "../weather.js";
-import { tvAdbConfigured, tvAdbKey, tvAdbPower, tvForeground, tvOpenApp, tvOpenUrl, tvPowerState, tvSnapshot, tvStartActivity } from "./adb.js";
+import { tvAdbConfigured, tvAdbKey, tvAdbPower, tvForeground, tvOpenApp, tvOpenUrl, tvPowerState, tvSetVolume, tvSnapshot, tvStartActivity } from "./adb.js";
 import { hourMinute, prepareGreeting, prepareSpoken, type StoredGreeting } from "./greeting.js";
 import { missWake, noteNudge, openWake, wakeSession, wakeStatus, type WakeSession } from "../wake/index.js";
 import { dueNudge, nudgeSpeech, wakeResultSpeech, type WakeRecord, type WakeStats } from "../wake/plan.js";
@@ -106,9 +106,20 @@ export async function playYouTube(id: string, title: string, channel = "", durat
  * "Buenos días" de Hermes TV y espera a que termine de hablar (la pantalla se
  * cierra sola al acabar el audio).
  */
-async function tvGreeting(outro?: string, wake?: WakeSession | null): Promise<Result> {
+async function tvGreeting(outro?: string, wake?: WakeSession | null, name?: string): Promise<Result> {
   const target = wake ? { at: wake.target_at, source: wake.target_source } : null;
-  return tvSpeak(await prepareGreeting(outro, target), "saludo");
+  return tvSpeak(await prepareGreeting(outro, target, name), "saludo");
+}
+
+/**
+ * Sonido de naturaleza en la pantalla de espera ("¿Ya estás de pie?"): lo
+ * reproduce Hermes TV en bucle mientras dura un wait-awake con `ambient`.
+ * Vive en memoria: /wake lo anuncia y la TV lo lee en su sondeo.
+ */
+let ambientUntil = 0;
+export const AMBIENT_MP3_PATH = "/tv/ambient.mp3";
+export function wakeAmbient(): string | null {
+  return Date.now() < ambientUntil ? AMBIENT_MP3_PATH : null;
 }
 
 const WAKE_SCREEN = "os.hermes.tv/.WakeActivity";
@@ -133,7 +144,16 @@ async function announceWake(r: WakeRecord, stats: WakeStats, next: string | unde
   return { ok: true, detail: `de pie (${r.confirmed_by}) a ${r.delta_min} min de tu hora: ${r.points} puntos` };
 }
 
-async function waitAwake(maxMs: number, next: string | undefined, gen: number, sceneStart: number): Promise<StepResult> {
+async function waitAwake(maxMs: number, next: string | undefined, gen: number, sceneStart: number, ambient = false): Promise<StepResult> {
+  if (ambient) ambientUntil = Date.now() + maxMs;
+  try {
+    return await waitAwakeInner(maxMs, next, gen, sceneStart);
+  } finally {
+    ambientUntil = 0;
+  }
+}
+
+async function waitAwakeInner(maxMs: number, next: string | undefined, gen: number, sceneStart: number): Promise<StepResult> {
   if (!(await wakeSession())) {
     const st = await wakeStatus();
     const done = st.today;
@@ -317,9 +337,12 @@ async function runStep(s: SceneStep, gen = sceneGen, wake: WakeSession | null = 
       }
       return ramp(s.to, s.minutes, s.from, gen);
     case "tv-greeting":
-      return tvGreeting(s.outro, wake);
+      // Ya confirmado (saludo DESPUÉS de wait-awake): es el brief del día, sin el llamado a pararse.
+      return tvGreeting(s.outro, wake && (await wakeSession()) ? wake : null, s.name);
+    case "tv-volume":
+      return tvSetVolume(s.level);
     case "wait-awake":
-      return waitAwake(s.max_ms, s.next, gen, sceneStartedAt);
+      return waitAwake(s.max_ms, s.next, gen, sceneStartedAt, s.ambient === true);
     case "tv-say":
       return tvSpeak(await prepareSpoken({ title: s.title, subtitle: clock(), items: [], speech: s.text }), `aviso "${s.title}"`);
     case "habit-cheer":

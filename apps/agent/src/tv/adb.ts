@@ -135,6 +135,14 @@ export async function tvAdbPlay(): Promise<boolean> {
   return (await adb(["-s", TARGET, "shell", "input", "keyevent", "KEYCODE_MEDIA_PLAY"])).ok;
 }
 
+/** Volumen de medios de la TV a un nivel fijo (0-100), sin depender de dónde quedó anoche. */
+export async function tvSetVolume(level: number): Promise<{ ok: true; detail: string } | { ok: false; error: string }> {
+  if (!TARGET) return { ok: false, error: "Fijar el volumen necesita adb: define HERMES_TV_ADB." };
+  if (!(await ready())) return { ok: false, error: "La TV no responde por adb." };
+  const r = await adb(["-s", TARGET, "shell", "cmd", "media_session", "volume", "--stream", "3", "--set", String(Math.round(level))]);
+  return r.ok ? { ok: true, detail: `volumen de la TV en ${Math.round(level)}` } : { ok: false, error: `no pude fijar el volumen (${r.out.slice(0, 120)})` };
+}
+
 /** Abre una actividad exacta ("paquete/.Clase"). */
 export async function tvStartActivity(component: string): Promise<{ ok: true; detail: string } | { ok: false; error: string }> {
   if (!TARGET) return { ok: false, error: "Abrir una pantalla necesita adb: define HERMES_TV_ADB." };

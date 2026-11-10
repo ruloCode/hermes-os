@@ -63,6 +63,17 @@ for (const [name, p] of [["oscuro", BRAND_DARK], ["claro", BRAND_LIGHT]] as Arra
       }
     }
   });
+  // Lo que se escribe tiene que verse como campo: su borde, compuesto sobre su fondo, ≥3:1 (WCAG 1.4.11).
+  test(`el borde de campo (line-3) da 3:1 sobre lienzo, tarjeta y campo (${name})`, () => {
+    const border = parseBrandColor(p["line-3"]);
+    for (const surface of ["bg", "panel", "panel-2"] as const) {
+      const base = parseBrandColor(p[surface]);
+      const mix = (c: number, b: number) => c * border.a + b * (1 - border.a);
+      const solid = { r: mix(border.r, base.r), g: mix(border.g, base.g), b: mix(border.b, base.b), a: 1 };
+      const ratio = contrastRatio(solid, base);
+      assert.ok(ratio >= 3, `line-3 sobre ${surface}: ${ratio.toFixed(2)}:1`);
+    }
+  });
   test(`el texto del botón primario pasa AA sobre accent-solid (${name})`, () => {
     const ratio = contrastRatio(parseBrandColor(p["on-accent"]), parseBrandColor(p["accent-solid"]));
     assert.ok(ratio >= 4.5, `on-accent sobre accent-solid: ${ratio.toFixed(2)}:1`);

@@ -5,6 +5,9 @@
  * inglés" → la racha aparece en /vida sin duplicar sistemas.
  */
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { EnglishError, EnglishSession, VocabEntry } from "@hermes/shared";
 import { emit } from "../events.js";
 import { checkinHabit, createHabit, resolveHabit } from "../habits/store.js";
@@ -208,8 +211,31 @@ export async function recentEnglishErrors(limit = 8): Promise<string[]> {
     .map((e) => `"${e.quote}" → "${e.correction}"${e.note_es ? ` (${e.note_es})` : ""}`);
 }
 
+// ── Práctica dirigida (override con vencimiento) ───────────────────────
+// Para preparar algo puntual (una entrevista, una presentación) sin republicar
+// la tutora: ~/.hermes-os/english/practice-override.json = { context, until }.
+// Mientras `until` no pase, "Practicar ahora" abre con ESE contexto; vencido,
+// vuelve solo al progreso de siempre (nadie tiene que acordarse de borrarlo).
+export const PRACTICE_OVERRIDE_FILE = join(homedir(), ".hermes-os", "english", "practice-override.json");
+
+/** El contexto del override si es válido y no ha vencido; si no, null. */
+export function activeOverride(raw: string, now = Date.now()): string | null {
+  try {
+    const o = JSON.parse(raw) as { context?: unknown; until?: unknown };
+    if (typeof o.context !== "string" || !o.context.trim()) return null;
+    const until = typeof o.until === "string" ? Date.parse(o.until) : NaN;
+    return Number.isFinite(until) && until > now ? o.context.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resumen del progreso real para abrir la sesión con continuidad. */
 export async function buildPracticeContext(): Promise<string> {
+  const override = await readFile(PRACTICE_OVERRIDE_FILE, "utf8")
+    .then((raw) => activeOverride(raw))
+    .catch(() => null);
+  if (override) return override;
   const [sessions, due] = await Promise.all([listEnglishSessions(5), listVocab({ due: true, limit: 5 })]);
   if (!sessions.length && !due.length) return "First session — no history yet.";
   const parts: string[] = [];
