@@ -60,3 +60,8 @@ export * from "./dojo.js";
 export * from "./dojo-catalog.js";
 export * from "./vision.js";
 export * from "./usage-ledger.js";
+export * from "./memory-index.js";
+export * from "./meeting-prep.js";
+export * from "./english-review.js";
+export * from "./finance-today.js";
+export * from "./focus-weekly.js";

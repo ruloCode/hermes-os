@@ -166,6 +166,7 @@ import { mountGymRoutes } from "./gym/routes.js";
 import { mountUpworkRoutes, runUpworkSync } from "./upwork/routes.js";
 import { mountEnglishPlanRoutes } from "./english/plan-routes.js";
 import { mountDojoRoutes } from "./dojo/routes.js";
+import { mountV6Routes, registerV6Jobs } from "./v6.js";
 import { transcribe } from "./meetings/stt.js";
 import { listExecutions, getExecution } from "./tasks/executions.js";
 import { linearEnabled, getLinearIssue } from "./linear.js";
@@ -2562,6 +2563,8 @@ mountGymRoutes(app);
 mountUpworkRoutes(app);
 mountEnglishPlanRoutes(app);
 mountDojoRoutes(app);
+// v6 «Núcleo»: gasto, memoria v2, preparación de junta, repaso de inglés, finanzas de hoy, foco semanal.
+mountV6Routes(app);
 
 // ── Hábitos y metas (desarrollo personal) ──────────────────────────────
 
@@ -4057,6 +4060,7 @@ if (process.env.HERMES_JOBS !== "off") {
 }
 
 // Jobs periódicos con estado observable (GET /jobs → panel AUTOMATIZACIONES).
+registerV6Jobs();
 // Presencia: latido para que otras Macs sepan que estamos vivos.
 // Foto diaria del saldo (la gráfica de evolución se arma desde que esto corre).
 registerJob("finance-balance-snapshot", 6 * 60 * 60_000, async () => {
