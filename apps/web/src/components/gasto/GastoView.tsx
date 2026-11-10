@@ -24,7 +24,7 @@ import { ScrollArea } from "@/components/ui/ScrollArea";
 import { Segmented } from "@/components/ui/Segmented";
 import { PanelState } from "@/components/ui/PanelState";
 import { Button } from "@/components/ui/Button";
-import { Stat, StatStrip } from "@/components/vida/kit";
+import { Stat } from "@/components/vida/kit";
 import { CacheBar, CacheLegend, promptTokens } from "./CacheBar";
 import { CatalogView } from "./CatalogView";
 import { DaySeries } from "./DaySeries";
@@ -151,7 +151,9 @@ export function GastoView({ active }: { active: boolean }) {
     const topShare = top?.costUsd != null && total.costUsd ? percent(top.costUsd / total.costUsd) : null;
     body = (
       <>
-        <StatStrip>
+        {/* Fila de cifras: cuatro columnas solo cuando caben sin cortar su contexto (container query). */}
+        <div className="@container">
+          <div className="grid grid-cols-1 gap-x-8 gap-y-5 @md:grid-cols-2 @4xl:grid-cols-4">
           <Stat
             label={`Costo estimado ${days === 1 ? "de hoy" : `de ${days} días`}`}
             value={usd(total.costUsd)}
@@ -189,7 +191,8 @@ export function GastoView({ active }: { active: boolean }) {
               context={[p95 ? `p95 ${p95}` : null, ttft ? `primer texto en ${ttft}` : null].filter(Boolean).join(" · ") || undefined}
             />
           )}
-        </StatStrip>
+          </div>
+        </div>
 
         {/* La nota fija: qué ES este número, siempre a la vista. */}
         <p className="-mt-3 max-w-[92ch] text-xs text-text-faint" data-cost-note>
@@ -252,7 +255,8 @@ export function GastoView({ active }: { active: boolean }) {
           ) : undefined
         }
       />
-      <ScrollArea fade="y" className="min-h-0 flex-1">
+      {/* key: cambiar de sección vuelve arriba (el resumen bajado no deja el catálogo a media página). */}
+      <ScrollArea key={section} fade="y" className="min-h-0 flex-1">
         <div className="flex flex-col gap-8 pb-8">
           {section === "resumen" && stale}
           {body}

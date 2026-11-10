@@ -8,7 +8,7 @@
 //
 // Dos formas del MISMO dato según el ancho de la columna (container query, no
 // de la ventana): tabla con columnas alineadas cuando caben, y filas apiladas
-// cuando no — una tabla de ocho columnas con scroll lateral esconde justo lo
+// cuando no (bajo 64rem: las columnas mínimas suman ~62rem) — una tabla de ocho columnas con scroll lateral esconde justo lo
 // que más importa.
 //
 // Dato o nada: una latencia sin muestras deja la celda vacía y un costo que el
@@ -20,7 +20,7 @@ import { CacheBar, promptSummary, promptTokens } from "./CacheBar";
 import { duration, modelName, percent, usd } from "./format";
 
 const COLS =
-  "grid-cols-[minmax(11rem,1.5fr)_4.25rem_4.5rem_4.5rem_minmax(9rem,1fr)_8.5rem_5rem_6rem]";
+  "grid-cols-[minmax(11rem,1.5fr)_4.25rem_4.5rem_4.5rem_minmax(9rem,1fr)_10.5rem_5rem_6rem]";
 
 function calls(n: number): string {
   return n === 1 ? "1 llamada" : `${n} llamadas`;
@@ -64,7 +64,7 @@ export function FeatureTable({
   return (
     <div className="@container">
       {/* ── Ancho: columnas alineadas ─────────────────────────────── */}
-      <div role="table" aria-label="Gasto por función" className="hidden @4xl:block">
+      <div role="table" aria-label="Gasto por función" className="hidden @5xl:block">
         <div role="row" className={`grid ${COLS} items-end gap-x-4 border-b border-line px-2 pb-2 text-xs text-text-faint`}>
           <span role="columnheader">Función</span>
           <span role="columnheader" className="text-right">Llamadas</span>
@@ -114,7 +114,7 @@ export function FeatureTable({
                 <span className="text-xs text-text-faint">sin tokens de entrada</span>
               )}
             </div>
-            <span role="cell" className="text-right text-text-dim tabular-nums">
+            <span role="cell" className="text-right whitespace-nowrap text-text-dim tabular-nums">
               {latency ?? ""}
             </span>
             <span role="cell" className="text-right text-text-dim tabular-nums">
@@ -138,7 +138,7 @@ export function FeatureTable({
       </div>
 
       {/* ── Angosto: la misma fila, apilada ───────────────────────── */}
-      <ul className="flex flex-col @4xl:hidden" aria-label="Gasto por función">
+      <ul className="flex flex-col @5xl:hidden" aria-label="Gasto por función">
         {rows.map(({ f, label, modelNames, cache, p50, p95, ttft, share, prompt }) => (
           <li key={f.feature} data-feature={f.feature} className="flex flex-col gap-2 border-b border-line py-3">
             <div className="flex items-baseline justify-between gap-3">
