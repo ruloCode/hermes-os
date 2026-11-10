@@ -11,7 +11,8 @@ import { HERMES_HOME } from "../home.js";
  * - sesiones: para qué, minutos planeados/reales/contados, estado y las reglas
  *   que saltaron con lo que eligió el dueño (rule_id → P2: toda intervención
  *   dice qué regla la disparó).
- * - uso: minutos por app y por día. Nunca qué se miró (P3).
+ * - uso: minutos por app y por día y, desde v6, aperturas por app y los cortes
+ *   por regla (hojas, elección, intención, presupuesto usado). Nunca qué se miró (P3).
  *
  * El check-in del hábito atado lo hace el agente al recibir una sesión que lo
  * gana (`earns_habit`), con la FECHA DE LA SESIÓN (una del martes que sube el
@@ -58,12 +59,28 @@ export interface UsageApp {
   package: string;
   label: string | null;
   minutes: number;
+  /** v6: veces que se abrió ese día. Ausente si el teléfono no lo manda (versión vieja). */
+  opens?: number;
+}
+
+/** v6: lo que pasó con una regla ese día. Sin qué se miró: solo conteos. */
+export interface UsageRule {
+  rule_id: string;
+  rule_name: string | null;
+  /** Presupuesto (tope y lo usado ese día), si la regla es de presupuesto. */
+  budget_min?: number;
+  used_min?: number;
+  shown?: number;
+  choices?: Record<string, number>;
+  intents?: Record<string, number>;
 }
 
 export interface UsageDay {
   date: string;
   complete: boolean;
   apps: UsageApp[];
+  /** v6; ausente en teléfonos viejos. */
+  rules?: UsageRule[];
 }
 
 export interface FocusData {
@@ -129,6 +146,21 @@ export function validateSessions(raw: unknown): { items: Incoming[]; rejected: s
   return { items, rejected };
 }
 
+/** Conteos por clave corta (elecciones e intenciones de la hoja): solo claves conocidas en forma, enteros acotados. */
+function counts(v: unknown): Record<string, number> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(v as Record<string, unknown>).slice(0, 20)) {
+    const c = int(n, 0, 10_000);
+    if (/^[a-z_]{1,20}$/.test(k) && c != null) out[k] = c;
+  }
+  return out;
+}
+
+/**
+ * Compatible hacia atrás: un teléfono viejo manda solo `{complete, apps:[{package,label,minutes}]}`
+ * y se guarda igual que antes (sin `opens` ni `rules`). Lo nuevo se valida campo a campo.
+ */
 export function validateUsage(date: string, raw: unknown): UsageDay | null {
   if (!DATE_RE.test(date)) return null;
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -136,9 +168,30 @@ export function validateUsage(date: string, raw: unknown): UsageDay | null {
     const x = (a ?? {}) as Record<string, unknown>;
     const pkg = str(x.package, 200);
     const minutes = int(x.minutes, 0, 1440);
-    return pkg && minutes != null ? [{ package: pkg, label: str(x.label, 80), minutes }] : [];
+    if (!pkg || minutes == null) return [];
+    const opens = int(x.opens, 0, 5000);
+    return [{ package: pkg, label: str(x.label, 80), minutes, ...(opens != null ? { opens } : {}) }];
   });
-  return { date, complete: o.complete === true, apps };
+  const day: UsageDay = { date, complete: o.complete === true, apps };
+  if (Array.isArray(o.rules)) {
+    day.rules = o.rules.slice(0, 50).flatMap((r) => {
+      const x = (r ?? {}) as Record<string, unknown>;
+      const rule_id = str(x.rule_id, 60);
+      if (!rule_id) return [];
+      const out: UsageRule = { rule_id, rule_name: str(x.rule_name, 60) };
+      const budget = int(x.budget_min, 1, 1440);
+      const used = int(x.used_min, 0, 1440);
+      if (budget != null && used != null) Object.assign(out, { budget_min: budget, used_min: used });
+      const shown = int(x.shown, 0, 10_000);
+      if (shown != null) out.shown = shown;
+      const choices = counts(x.choices);
+      if (choices) out.choices = choices;
+      const intents = counts(x.intents);
+      if (intents) out.intents = intents;
+      return [out];
+    });
+  }
+  return day;
 }
 
 // ── Mezcla idempotente ───────────────────────────────────────────────────

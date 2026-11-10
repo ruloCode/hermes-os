@@ -98,3 +98,64 @@ semanal. Nunca qué se miró.
 #### Scenario: Resumen semanal
 - CUANDO se pide el resumen de foco de la semana
 - ENTONCES trae minutos y aperturas por app, días dentro y fuera de presupuesto y la comparación con la semana anterior
+
+## Notas de implementación
+
+Teléfono (`hermes-phone-v6`): lógica pura en `core/FocusRules.kt` (extendido), `core/FocusLedger.kt`,
+`core/FocusSurfaces.kt`, `core/FocusTemplates.kt`; tests en `core/…/FocusBudgetTest.kt` (un test por
+escenario + registro en vivo, resumen del día y compatibilidad). App: `focus/FocusController.kt`,
+`focus/SurfaceWatch.kt` (nuevo), `focus/FocusStore.kt`, `focus/FocusSync.kt`, `ui/FocusPause.kt`,
+`ui/Focus.kt`, `assets/focus-surfaces.json`, QA en `QaReceiver.kt` + `./phone`. Agente:
+`apps/agent/src/focus/store.ts` (`validateUsage` extendido), `focus/weekly-routes.ts`,
+`packages/shared/src/focus-weekly.ts`, tests en `apps/agent/src/focus/weekly.test.ts`.
+
+Decisiones:
+- **Compatibilidad de reglas**: campos nuevos con valor por defecto (`rising = false`,
+  `surfaces = []`) y alcances nuevos con su nombre serializado (`budget`, `always`). Una regla vieja
+  (p. ej. `lim-instagram`) se lee y se comporta igual: la fricción creciente es una OPCIÓN de la regla,
+  no un cambio del freno «espera» de siempre. Test de lectura de una regla guardada antes de v6.
+- **`Brake.INTENT` va entre `WAIT` y `BLOCK`** (para «manda el freno más fuerte»); se serializa por
+  nombre, así que el orden no rompe nada guardado. Con `rising`, la intención también espera.
+- **`RuleScope.Always`** (nuevo, «cada vez que la abres»): la intención antes de entrar necesitaba un
+  alcance de todo el día que frene al abrir; ninguno de los existentes lo era. `Budget` no pausa el reloj
+  de una sesión de foco (como `Limit`); `Always` sí cuenta como distracción.
+- **`surfaces` es una lista**, no un único `surface`: la plantilla «Sin Reels ni Shorts» cubre las dos.
+  También aplica a reglas de límite y presupuesto (el tiempo en la superficie suma a su presupuesto).
+- **Uso de hoy en vivo**: registro propio (`Ledger`) desde la app al frente de la accesibilidad +
+  superficie; se cierra con `SCREEN_OFF` y se reabre al desbloquear; por app gana el mayor entre el
+  registro y UsageTally de hoy. Aperturas = cambios de app (prender la pantalla sobre la misma app no
+  cuenta). Archivo aparte `files/focus/ledger.json` (15 días).
+- **Detección de superficie por sondeo** (~1,2 s) del árbol de la app vigilada, solo con una regla
+  prendida que la nombre y la pantalla prendida. No se tocó la configuración del servicio de
+  accesibilidad (del paquete «cuerpo»): escucha solo cambios de ventana y pasar a Reels no los produce.
+- **«Salir»** en una hoja de superficie lleva al inicio (no «atrás»): si «atrás» no saliera de Reels, la
+  hoja no volvería (el sondeo avisa solo cambios).
+- **Al agente sube agregado**: por día, minutos y aperturas por app; por regla, hojas mostradas,
+  elecciones, intenciones y (presupuesto) tope y minutos usados. Sin marcas de tiempo por hoja ni
+  pantallas. El presupuesto de días pasados se calcula con el tope que la regla tiene al subir.
+- **Resumen semanal**: la semana en curso se compara contra el MISMO tramo de la anterior (lunes→mismo
+  día); lo no medido es `null` (sin aperturas de un teléfono viejo, sin semana anterior). Ruta siempre
+  200 con `{ok}`.
+- La firma de lo ya subido pasó a ser el hash del cuerpo: tras actualizar, cada día guardado se reenvía
+  una vez (idempotente en el agente).
+
+Sin probar en el teléfono real (prohibido adb esta noche):
+- Los **ids de Reels y Shorts** (`assets/focus-surfaces.json`, todos `confirmed: false`): sacados de
+  bloqueadores públicos, no vistos en el S25.
+- El sondeo de superficie (latencia hasta la hoja, batería), la hoja nueva en el overlay de
+  accesibilidad (intención, «pedir más», cifras), TalkBack sobre la cuenta regresiva, el receptor de
+  pantalla y la subida real a un agente.
+
+Pasos para confirmar los ids mañana (con el teléfono por USB, build debug):
+1. `./phone install` (o `build` + instalar) y prender una plantilla o `./phone qa focus budget com.instagram.android 30`.
+2. Abrir Instagram en la pestaña Reels → `./phone qa focus surface`. Debe decir `detectada=reels`.
+   Anotar las líneas `surface ids=` y `seleccionados`.
+3. Abrir los mensajes de Instagram → `./phone qa focus surface` → debe decir `detectada=ninguna`.
+   Repetir con un reel abierto DESDE un mensaje (decidir con el dueño si eso cuenta como Reels).
+4. YouTube en Shorts → `detectada=shorts`; YouTube en Inicio → `ninguna`.
+5. Si algo no coincide: escribir el override con el id que aparece SOLO en esa superficie
+   (`{"surfaces":[{"id":"reels","label":"Reels","package":"com.instagram.android","viewIds":["<id>"],"confirmed":true}]}`),
+   `adb push` a `/sdcard/Android/data/os.hermes.phone/files/focus-surfaces.json`,
+   `./phone qa focus surface reload` y volver al paso 2. Cuando quede bien, pasar los ids a
+   `assets/focus-surfaces.json` con `confirmed: true`.
+6. `./phone qa focus ledger` para ver los minutos/aperturas de hoy por app y por superficie; `./phone qa focus clear` al terminar.
