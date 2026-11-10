@@ -239,7 +239,6 @@ export const modelDecider: Decider = async (groups) => {
           settingSources: [],
           abortController,
           mcpServers: { dream: server },
-          allowedTools: ["mcp__dream__record_memory_decisions"],
           permissionMode: "default",
           canUseTool: async (name, input) =>
             name === "mcp__dream__record_memory_decisions"

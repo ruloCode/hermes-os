@@ -14,6 +14,8 @@
     "vision:sim": "tsx scripts/vision-sim.ts",
     "seed:content": "tsx scripts/seed-content.ts",
     "seed:guiones": "tsx scripts/seed-guiones.ts",
+    "memoria:build": "tsx scripts/memoria-build.ts",
+    "memoria:eval": "tsx scripts/memoria-eval.ts",
     "test": "node --test --import tsx 'src/**/*.test.ts'"
   },
   "dependencies": {

@@ -13,6 +13,8 @@
     "migrate:clawd": "pnpm --filter @hermes/agent exec tsx scripts/migrate-clawd-memories.ts",
     "backfill:conversations": "pnpm --filter @hermes/agent exec tsx scripts/backfill-conversations.ts",
     "backfill:embeddings": "pnpm --filter @hermes/agent exec tsx scripts/backfill-embeddings.ts",
+    "memoria:build": "pnpm --filter @hermes/agent exec tsx scripts/memoria-build.ts",
+    "memoria:eval": "pnpm --filter @hermes/agent exec tsx scripts/memoria-eval.ts",
     "backfill:knowledge": "pnpm --filter @hermes/agent exec tsx scripts/backfill-knowledge.ts",
     "setup:elevenlabs": "pnpm --filter @hermes/agent exec tsx scripts/setup-elevenlabs-agent.ts",
     "sala:portraits": "pnpm --filter @hermes/agent exec tsx scripts/sala-portraits.ts",

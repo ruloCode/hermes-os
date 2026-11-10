@@ -127,12 +127,19 @@ test("diversidad: tope por fuente, un documento una vez, casi-duplicados una vez
     { source: "conversation", ref: "3", content: "texto c" },
     { source: "conversation", ref: "4", content: "texto d" },
     { source: "vault", ref: "x", content: "nota" },
+    { source: "meeting", ref: "m", content: "acta" },
   ];
   const out = diversify(hits, 4);
   assert.equal(out.filter((h) => h.source === "conversation").length, 2);
   assert.equal(out.filter((h) => h.ref === "1").length, 1);
   assert.ok(!out.some((h) => h.source === "memory"), "«Texto   B» es casi idéntico a «texto b»");
   assert.ok(out.some((h) => h.source === "vault"));
+  // Si las demás fuentes se acaban, la dominante se recorta para no pasar de la mitad de lo devuelto.
+  const short = diversify(hits.slice(0, 7), 6);
+  const conv = short.filter((h) => h.source === "conversation").length;
+  assert.ok(conv * 2 <= short.length, `${conv} de ${short.length}`);
+  // Quien pide una sola fuente no tiene tope.
+  assert.equal(diversify(hits.filter((h) => h.source === "conversation"), 6, { cap: false }).length, 4);
 });
 
 test("búsqueda: los hechos reemplazados no salen salvo que se pida el historial", () => {

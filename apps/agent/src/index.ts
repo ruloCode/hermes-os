@@ -418,6 +418,11 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// v6 «Núcleo» (gasto, memoria v2, preparación de junta, repaso de inglés, finanzas de hoy, foco,
+// pulso): se monta ANTES que el resto porque Hono atiende la primera ruta registrada y comodines
+// como `/meetings/:project` taparían `/meetings/prep`.
+mountV6Routes(app);
+
 app.get("/health", (c) =>
   c.json({
     ok: true,
@@ -2569,8 +2574,6 @@ mountGymRoutes(app);
 mountUpworkRoutes(app);
 mountEnglishPlanRoutes(app);
 mountDojoRoutes(app);
-// v6 «Núcleo»: gasto, memoria v2, preparación de junta, repaso de inglés, finanzas de hoy, foco semanal.
-mountV6Routes(app);
 
 // ── Hábitos y metas (desarrollo personal) ──────────────────────────────
 

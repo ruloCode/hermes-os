@@ -8,7 +8,7 @@ import { useTheme } from "@/state/ThemeProvider";
 // Segundo modo: GRAFO 3D del código (graphify) — se monta solo al activarlo.
 
 import { useEffect, useRef, useState } from "react";
-import type { KnowledgeHit, KnowledgeSource, KnowledgeStats, Memory } from "@hermes/shared";
+import { KNOWLEDGE_SOURCE_LABEL, type KnowledgeHit, type KnowledgeSource, type KnowledgeStats, type Memory } from "@hermes/shared";
 import { searchKnowledge, getKnowledgeStats } from "@/lib/hermes";
 import { useDocViewer } from "@/components/DocViewer";
 import { PanelState } from "@/components/ui/PanelState";
@@ -17,16 +17,11 @@ import { Segmented } from "@/components/ui/Segmented";
 import { Button } from "@/components/ui/Button";
 import { RecentInsights } from "@/components/RecentInsights";
 import { CodeGraph3D } from "@/components/CodeGraph3D";
+import { MemoryHealth } from "@/components/memoria/MemoryHealth";
 
 // La fuente es una CATEGORÍA (no un estado): etiqueta neutra. v4 le daba un
 // color a cada una y la lista se leía como arcoíris.
-const SOURCE_LABEL: Record<KnowledgeSource, string> = {
-  memory: "memoria",
-  meeting: "reunión",
-  execution: "ejecución",
-  conversation: "chat",
-  vault: "vault",
-};
+const SOURCE_LABEL: Record<KnowledgeSource, string> = KNOWLEDGE_SOURCE_LABEL;
 
 export function MemoryView({ memories, online }: { memories: Memory[]; online: boolean }) {
   const theme = useTheme();
@@ -152,6 +147,9 @@ export function MemoryView({ memories, online }: { memories: Memory[]; online: b
               {searching ? "Buscando…" : "Buscar"}
             </Button>
           </form>
+
+          {/* Salud de la memoria v2 (índice local) + propuestas del sueño. */}
+          {online && <MemoryHealth />}
 
           {/* Conteos reales por fuente: píldoras neutras, el número manda. */}
           {counts.length > 0 && (

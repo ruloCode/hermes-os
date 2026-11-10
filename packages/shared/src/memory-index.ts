@@ -78,29 +78,38 @@ const HAS_DIGIT = /\p{N}/u;
  */
 export function tokenize(text: string): string[] {
   const out: string[] = [];
-  for (const m of text.matchAll(WORD)) {
-    const raw = m[0];
-    const t = foldAccents(raw);
-    if (ONLY_DIGITS.test(t)) {
-      out.push(t);
-      continue;
+  // match() con /g devuelve las cadenas sin crear un objeto por coincidencia (matchAll sí).
+  for (const raw of text.match(WORD) ?? []) {
+    let terms = TERM_CACHE.get(raw);
+    if (!terms) {
+      terms = wordTerms(raw);
+      // Caché por palabra cruda: el vocabulario es pequeño (Zipf) y plegar tildes
+      // con normalize() por cada aparición era el 80 % de cargar el índice.
+      if (TERM_CACHE.size > 200_000) TERM_CACHE.clear();
+      TERM_CACHE.set(raw, terms);
     }
-    if (t.length < 2) continue;
-    if (HAS_DIGIT.test(t)) {
-      out.push(t);
-      continue;
-    }
-    const acronym = raw.length <= 6 && raw === raw.toUpperCase() && raw !== raw.toLowerCase();
-    if (acronym) {
-      out.push(t);
-      const folded = foldPlural(t);
-      if (folded !== t) out.push(folded);
-      continue;
-    }
-    if (STOPWORDS.has(t)) continue;
-    out.push(foldPlural(t));
+    for (const t of terms) out.push(t);
   }
   return out;
+}
+
+const TERM_CACHE = new Map<string, readonly string[]>();
+const NONE: readonly string[] = [];
+const ASCII = /^[\x00-\x7f]*$/;
+
+/** Los términos de UNA palabra cruda (cero, uno, o dos si es una sigla en plural). */
+function wordTerms(raw: string): readonly string[] {
+  const t = ASCII.test(raw) ? raw.toLowerCase() : foldAccents(raw);
+  if (ONLY_DIGITS.test(t)) return [t];
+  if (t.length < 2) return NONE;
+  if (HAS_DIGIT.test(t)) return [t];
+  const acronym = raw.length <= 6 && raw === raw.toUpperCase() && raw !== raw.toLowerCase();
+  if (acronym) {
+    const folded = foldPlural(t);
+    return folded !== t ? [t, folded] : [t];
+  }
+  if (STOPWORDS.has(t)) return NONE;
+  return [foldPlural(t)];
 }
 
 /**
@@ -470,6 +479,16 @@ export function diversify<T extends Diversifiable>(hits: readonly T[], limit: nu
     perSource.set(h.source, (perSource.get(h.source) ?? 0) + 1);
     out.push(h);
   }
+  if (opts.cap === false || perSource.size < 2) return out;
+  // Si las demás fuentes se acabaron antes de llenar el pedido, la dominante
+  // pasaría de la mitad de lo que SÍ se devuelve: se recortan sus últimos.
+  const [top, most] = [...perSource.entries()].sort((a, b) => b[1] - a[1])[0];
+  let n = most;
+  while (n * 2 > out.length) {
+    const last = out.map((h) => h.source).lastIndexOf(top);
+    out.splice(last, 1);
+    n--;
+  }
   return out;
 }
 
@@ -504,6 +523,19 @@ export function docKey(doc: { source: string; ref: string }): string {
 /** Los términos con que se indexa un fragmento: el título cuenta (una nota se busca por su nombre). */
 export function docTokens(doc: { title: string; text: string }): string[] {
   return tokenize(`${doc.title}\n${doc.text}`);
+}
+
+/** Deja en una lista ordenada solo el primer (mejor) fragmento de cada documento. */
+export function bestPerDoc(list: readonly Ranked[], docs: readonly { source: string; ref: string }[]): Ranked[] {
+  const seen = new Set<string>();
+  const out: Ranked[] = [];
+  for (const r of list) {
+    const k = docKey(docs[r.index]);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
 }
 
 export type SearchMode = "lexical" | "vector" | "hybrid";
@@ -578,7 +610,11 @@ export function searchIndex(input: SearchInput): SearchOutput {
       : vectorSearch(input.vectors!, input.queryVector!, { limit: pool, filter, minSimilarity: input.minSimilarity });
 
   const similarity = new Map(vec.map((v) => [v.index, v.score]));
-  const fused = rrfFuse([lex, vec]);
+  // La fusión es por DOCUMENTO: cada vía aporta solo el mejor fragmento de cada
+  // nota. Si no, una nota larga con diez fragmentos parecidos ocupa diez puestos
+  // de una lista y empuja hacia abajo a todo lo demás (el resultado final igual
+  // muestra un fragmento por documento, así que esos puestos se perdían).
+  const fused = rrfFuse([bestPerDoc(lex, input.docs), bestPerDoc(vec, input.docs)]);
   const boost = input.boost ?? DEFAULT_BOOST;
   const ranked: (SearchHit & Diversifiable)[] = fused.map((f) => {
     const doc = input.docs[f.index];
