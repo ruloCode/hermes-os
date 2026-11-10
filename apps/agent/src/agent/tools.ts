@@ -53,6 +53,7 @@ import { cloudAsk, createCloudAgent, findCloudAgent, listCloudAgents } from "../
 import { askTekerIa, TEKER_MODELS } from "../teker/ia.js";
 import { PHONE_TOOLS } from "../phone/tools.js";
 import { GROWTH_TOOLS } from "../growth/tools.js";
+import { FINANCE_TODAY_TOOLS } from "../finance/today-tools.js";
 import { buildDailyBrief } from "../brief.js";
 
 const execFileAsync = promisify(execFile);
@@ -1129,6 +1130,7 @@ const HERMES_TOOLS = [
   getBalanceTool,
   setWalletBalanceTool,
   setBudgetTool,
+  ...FINANCE_TODAY_TOOLS,
   logHabitTool,
   getHabitsTodayTool,
   manageHabitTool,

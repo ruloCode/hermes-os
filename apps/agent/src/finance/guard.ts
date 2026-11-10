@@ -16,6 +16,8 @@ export const FINANCE_TOOLS = [
   "get_balance",
   "set_wallet_balance",
   "set_budget",
+  // v6: disponible de hoy, cargos repetidos, hormiga y desvíos (finance/today-tools.ts).
+  "get_finance_today",
 ].map((t) => `mcp__hermes__${t}`);
 
 export interface FinanceGate {
