@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { TEAM_COACH_MODE } from "@hermes/shared";
 import type { CallAudioSource } from "@/hooks/useLiveMeetingAudio";
 import { MicPreferencePicker } from "./MicControls";
+import { MeetingPrepSection } from "./MeetingPrepSection";
 import { Segmented } from "@/components/ui/Segmented";
 import { Button } from "@/components/ui/Button";
 
@@ -79,11 +80,14 @@ function readPrefs(): Prefs {
 }
 
 export function LiveSetupCard({
+  project,
   projectLabel,
   disabled,
   disabledTitle,
   onStart,
 }: {
+  /** Slug del proyecto elegido: con él se muestra su hoja de preparación de hoy. */
+  project?: string | null;
   projectLabel: string;
   disabled: boolean;
   disabledTitle?: string;
@@ -109,6 +113,8 @@ export function LiveSetupCard({
 
   return (
     <div className="space-y-3">
+      {/* Lo primero que se lee antes de entrar: la hoja de preparación. */}
+      {project && <MeetingPrepSection project={project} />}
       {/* Tres decisiones, tres segmentados (antes: píldoras verdes en mayúsculas,
           cada una con su propio borde). Lo elegido se recuerda. */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">

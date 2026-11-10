@@ -332,6 +332,7 @@ export function MeetingsPanel({
             {/* Junta EN VIVO: copiloto en tiempo real (takeover al iniciar).
                 Modo de audio e idiomas se eligen aquí. */}
             <LiveSetupCard
+              project={project}
               projectLabel={label}
               disabled={busy || rec.recording}
               disabledTitle={

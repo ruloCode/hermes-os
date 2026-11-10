@@ -213,6 +213,36 @@ function escapeRe(s: string): string {
 
 const CLOSED = new Set(["done", "dismissed"]);
 
+// Palabras que no distinguen una tarea de otra.
+const STOP = new Set(
+  "para con del las los una uno unos unas que por como sobre entre desde hasta este esta estos estas ese esa the and for with from into that this".split(" "),
+);
+// «1 min» y «1 minuto», «60 s»: abreviaturas que las actas usan indistintamente.
+const SYNONYM: Record<string, string> = { min: "minuto", minutos: "minuto", seg: "segundo", segundos: "segundo" };
+
+function taskTokens(text: string): Set<string> {
+  return new Set(
+    fold(text.replace(/\[\[[^\]]*\]\]|\([^)]*\)/g, " ")) // fuera wikilinks y paréntesis: son referencias, no la tarea
+      .split(" ")
+      .map((t) => SYNONYM[t] ?? t)
+      .filter((t) => t.length >= 3 && !STOP.has(t)),
+  );
+}
+
+/**
+ * ¿Dos títulos son la misma tarea? Por solapamiento de términos (no por
+ * prefijo: las actas reescriben «Grabar el video de 1 min…» con otras
+ * palabras en cada junta). Mismo criterio que la dedup del perfil (USER.md).
+ */
+export function sameTask(a: string, b: string): boolean {
+  const ta = taskTokens(a);
+  const tb = taskTokens(b);
+  if (!ta.size || !tb.size) return fold(a) === fold(b);
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared += 1;
+  return shared >= 2 && shared / Math.min(ta.size, tb.size) >= 0.75;
+}
+
 function isOpen(status: string | null | undefined): boolean {
   return !CLOSED.has(String(status ?? "").toLowerCase());
 }
@@ -231,12 +261,12 @@ const NOTE_SOURCE: PrepSource = { kind: "note", ref: PREP_NOTE_REF, label: "Nota
  */
 export function openPending(input: Pick<PrepInputs, "meetings" | "tasks" | "noteTasks">, max = PREP_MAX_PENDING): PrepPoint[] {
   const out: PrepPoint[] = [];
-  const seenTitles = new Set<string>();
+  const seenTitles: string[] = [];
   const seenActionables = new Set<string>();
+  const known = (title: string): boolean => seenTitles.some((t) => sameTask(t, title));
   const push = (point: PrepPoint): void => {
-    const key = fold(point.text);
-    if (!key || seenTitles.has(key)) return;
-    seenTitles.add(key);
+    if (!fold(point.text) || known(point.text)) return; // la más reciente gana: se recorre de nueva a vieja
+    seenTitles.push(point.text);
     out.push(point);
   };
 
@@ -245,7 +275,7 @@ export function openPending(input: Pick<PrepInputs, "meetings" | "tasks" | "note
       seenActionables.add(`${m.id}#${a.idx}`);
       if (!a.title.trim() || !isOpen(a.status)) {
         // Cerrado: su título tampoco debe volver a entrar por la tabla de tareas.
-        if (a.title.trim()) seenTitles.add(fold(a.title));
+        if (a.title.trim()) seenTitles.push(a.title);
         continue;
       }
       push({
@@ -419,13 +449,19 @@ const DECISION = word(
   "se decidi[oó]|se acord[oó]|acordaron|decidieron|se defini[oó]|se aprob[oó]|qued[oó] (?:definido|acordado|decidido|aprobado)|decisi[oó]n(?:es)?|acuerdos?|decided|agreed",
 );
 
+/** «No hubo decisiones», «sin acuerdos»: mencionan la palabra para decir que NO hubo. */
+const NO_DECISION = word(
+  "no hubo (?:\\p{L}+ )?(?:decisiones|acuerdos)|ni (?:decisiones|acuerdos)|sin (?:decisiones|acuerdos)|no se (?:decidi[oó]|acord[oó]|tom[oó] ninguna)|ninguna decisi[oó]n|no decisions|nothing was (?:decided|agreed)",
+);
+
 /** Frases de los resúmenes que registran una decisión. */
 export function recentDecisions(input: Pick<PrepInputs, "meetings">, max = PREP_MAX_DECISIONS): PrepPoint[] {
   const out: PrepPoint[] = [];
   const seen = new Set<string>();
   for (const m of input.meetings) {
     for (const s of prepSentences(m.summary)) {
-      if (!DECISION.test(lowerClean(s))) continue;
+      const t = lowerClean(s);
+      if (!DECISION.test(t) || NO_DECISION.test(t)) continue;
       const key = fold(s).slice(0, 80);
       if (seen.has(key)) continue;
       seen.add(key);

@@ -17,6 +17,9 @@
 import matter from "gray-matter";
 import { getMeeting, listMeetings } from "./store.js";
 import { getProjectBriefing, getProjectNote, readProjects } from "../vault/projects.js";
+import { prepContextBlock } from "@hermes/shared";
+import { OWNER } from "../owner.js";
+import { readPrep } from "./prep-store.js";
 
 const NOTE_MAX_CHARS = 1_800;
 const RECENT_MEETINGS = 4;
@@ -32,6 +35,11 @@ export interface MeetingContext {
   tareas: string[];
   /** Últimas actas: fecha · título · resumen · accionables. */
   recentMeetings: string;
+  /**
+   * Hoja de preparación de HOY (objetivo, preguntas, promesas, riesgos), ya
+   * como bloque de prompt. Vacío sin preparación: el contexto queda como antes.
+   */
+  prep?: string;
 }
 
 /** Cuerpo de la nota hasta "Estado Actual" (o el tope), sin frontmatter ni callouts. */
@@ -70,13 +78,16 @@ function withTimeout<T>(p: Promise<T>, fallback: T): Promise<T> {
 
 /** Contexto local del proyecto; cada pieza degrada sola (nunca lanza). */
 export async function loadMeetingContext(slug: string): Promise<MeetingContext> {
-  const [projects, briefing, note, recentMeetings] = await Promise.all([
+  const [projects, briefing, note, recentMeetings, prep] = await Promise.all([
     withTimeout(readProjects(), []),
     withTimeout(getProjectBriefing(slug), ""),
     withTimeout(getProjectNote(slug), null),
     withTimeout(recentMeetingsBlock(slug), ""),
+    withTimeout(readPrep(slug), null),
   ]);
   const project = projects.find((p) => p.slug.toLowerCase() === slug.toLowerCase());
+  // La hoja se guarda con el slug real (carpeta del vault); el de la junta puede venir en otra caja.
+  const prepSheet = prep ?? (project && project.slug !== slug ? await withTimeout(readPrep(project.slug), null) : null);
   return {
     name: project?.name,
     briefing,
@@ -84,6 +95,7 @@ export async function loadMeetingContext(slug: string): Promise<MeetingContext> 
     estadoActual: project?.estado_actual,
     tareas: project?.tareas_pendientes ?? [],
     recentMeetings,
+    prep: prepContextBlock(prepSheet, OWNER),
   };
 }
 
@@ -102,6 +114,8 @@ export function cleanEstado(estado: string | undefined, max = 700): string {
 /** Bloques de prompt del contexto (los vacíos se omiten). */
 export function meetingContextBlocks(c: MeetingContext, knowledge?: string): string[] {
   return [
+    // La preparación va primero: es lo que el dueño decidió que quiere sacar de ESTA reunión.
+    c.prep?.trim() ?? "",
     c.projectNote ? `## El proyecto\n${c.projectNote}` : "",
     c.briefing.trim() ? `## Briefing del proyecto\n${c.briefing.trim()}` : "",
     cleanEstado(c.estadoActual) ? `## Estado actual\n${cleanEstado(c.estadoActual)}` : "",
