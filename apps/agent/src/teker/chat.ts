@@ -53,7 +53,7 @@ async function save(): Promise<void> {
   await writeFile(FILE, JSON.stringify((lines ?? []).slice(-200), null, 1));
 }
 
-export const tekerEnabled = () => Boolean(env.TEKER_IA_API_KEY.trim());
+export const tekerEnabled = () => Boolean(env.TEKER_IA_API_KEY.trim() && env.TEKER_IA_URL.trim());
 
 /** Desarrollo solo si se pide con todas las letras. */
 export function wantsDev(text: string): boolean {

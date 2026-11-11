@@ -3,7 +3,8 @@ import { env } from "../env.js";
 /**
  * TeKer IA (el asistente de operación de TeKer Salud) como herramienta de
  * consulta. Habla el formato de OpenAI (Open WebUI): POST /chat/completions con
- * streaming SSE. Guía: <TEKER_IA_URL>/docs/api
+ * streaming SSE. Guía: <TEKER_IA_URL>/docs/api. La URL del servidor va en el .env
+ * (TEKER_IA_URL) y no aquí: es infraestructura de un cliente y el repo es público.
  *
  * La llave (TEKER_IA_API_KEY) vive SOLO en esta Mac: la guía de TeKer prohíbe
  * usarla desde una app, así que Hermes Phone llega por la tool del agente.
@@ -13,7 +14,6 @@ import { env } from "../env.js";
  * con su línea de "Fuente" y corte, nunca se recalculan.
  */
 
-const BASE = "<TEKER_IA_URL>/api";
 /** Medido por TeKer: redacción 50-75 s, la primera tras un reinicio ~80 s. */
 const TIMEOUT_MS = 180_000;
 
@@ -68,12 +68,14 @@ export async function askTekerIa(
 ): Promise<TekerAnswer> {
   const key = env.TEKER_IA_API_KEY.trim();
   if (!key) return { ok: false, error: "falta TEKER_IA_API_KEY en el .env de esta Mac" };
+  const base = env.TEKER_IA_URL.trim().replace(/\/+$/, "");
+  if (!base) return { ok: false, error: "falta TEKER_IA_URL en el .env de esta Mac (la URL del servidor de TeKer IA, sin /api)" };
   const pii = patientDataIn(question);
   if (pii) return { ok: false, error: `la pregunta trae ${pii}; TeKer IA no maneja datos de pacientes` };
 
   let res: Response;
   try {
-    res = await fetch(`${BASE}/chat/completions`, {
+    res = await fetch(`${base}/api/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, stream: true, messages: [...history, { role: "user", content: question }] }),

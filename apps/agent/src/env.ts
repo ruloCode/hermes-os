@@ -44,6 +44,8 @@ export const env = {
   // TeKer IA (teker/ia.ts): el asistente de operación de TeKer Salud, OpenAI
   // compatible. Solo vive aquí: la guía de TeKer prohíbe la llave en una app.
   TEKER_IA_API_KEY: process.env.TEKER_IA_API_KEY || "",
+  // URL del servidor de TeKer IA (Open WebUI), sin /api. Fuera del código: el repo es público.
+  TEKER_IA_URL: process.env.TEKER_IA_URL || "",
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || "",
   // Agente de voz de ElevenLabs. Comparte el valor con el dashboard web
   // (NEXT_PUBLIC_…) para que la app móvil obtenga el token del mismo agente.
